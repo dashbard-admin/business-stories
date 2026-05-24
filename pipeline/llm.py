@@ -80,7 +80,14 @@ class LLM:
         retries: int = 2,
     ) -> Any:
         """Parse the output as JSON, retrying on parse failure with an
-        explicit reminder appended to the prompt."""
+        explicit reminder appended to the prompt.
+
+        After each retry's normal parse fails, we attempt a last-ditch
+        REPAIR pass (`_repair_json`) that fixes the most common LLM
+        breakages: missing commas between adjacent objects, prose
+        appended after the JSON, accidental smart-quote injection.
+        Only if repair also fails do we count the attempt as lost.
+        """
         last_err: Exception | None = None
         for attempt in range(retries + 1):
             res = self.complete(prompt, temperature=temperature, max_tokens=max_tokens)
@@ -88,6 +95,18 @@ class LLM:
             try:
                 return json.loads(text)
             except json.JSONDecodeError as e:
+                # Try the repair pass before giving up on this attempt.
+                repaired = _repair_json(text)
+                if repaired is not None and repaired != text:
+                    try:
+                        result = json.loads(repaired)
+                        logger.info(
+                            "JSON parse succeeded after repair (attempt %d)",
+                            attempt,
+                        )
+                        return result
+                    except json.JSONDecodeError:
+                        pass
                 last_err = e
                 logger.warning("JSON parse failed (attempt %d): %s", attempt, e)
                 prompt = (
@@ -305,3 +324,96 @@ def _strip_code_fences(s: str) -> str:
         if s.endswith("```"):
             s = s[:-3]
     return s.strip()
+
+
+def _repair_json(text: str) -> str | None:
+    r"""Best-effort JSON repair for common LLM breakages.
+
+    Targets the failure modes we have observed in production:
+
+    1. Trailing prose after the JSON: the LLM closes the array/object
+       cleanly, then keeps writing English ("And those are the merged
+       claims!") — json.loads rejects the whole thing. We trim back
+       to the last balanced `}` or `]`.
+
+    2. Missing comma between adjacent objects in an array
+       (``{...}\n  {...}`` instead of ``{...},\n  {...}``) — the
+       "Expecting ',' delimiter" error we have hit at S4. We
+       substitute ``}\s*{`` with ``},{`` and ``]\s*\[`` with ``],[``.
+
+    3. Smart-quote injection (curly quotes) where the model should
+       have emitted ASCII quotes. We normalize.
+
+    4. Trailing comma before ``]`` or ``}`` — Python's parser is
+       strict; we strip these.
+
+    Returns the repaired string (which may or may not parse — caller
+    re-tries json.loads on it). Returns None only if there is no
+    plausible JSON structure to repair (no opening brace/bracket).
+    """
+    s = _strip_code_fences(text or "")
+    if not s:
+        return None
+
+    # Find first opening brace / bracket and trim leading prose.
+    first_obj = s.find("{")
+    first_arr = s.find("[")
+    candidates = [x for x in (first_obj, first_arr) if x >= 0]
+    if not candidates:
+        return None
+    start = min(candidates)
+    s = s[start:]
+
+    # Trim trailing prose: find the last balanced closing brace/
+    # bracket by walking the string and tracking depth. Anything
+    # after the depth returns to zero is discarded.
+    opens = "{["
+    closes_for = {"}": "{", "]": "["}
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    last_balanced = -1
+    for i, ch in enumerate(s):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"' and not escape:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in opens:
+            stack.append(ch)
+        elif ch in closes_for:
+            if stack and stack[-1] == closes_for[ch]:
+                stack.pop()
+                if not stack:
+                    last_balanced = i
+    if last_balanced >= 0:
+        s = s[: last_balanced + 1]
+
+    # Smart-quote normalization (string contents may legitimately
+    # contain unicode quotes, but they break parsing only when they
+    # stand in for the JSON delimiters themselves — that's almost
+    # always at boundaries where ASCII " is required).
+    s = (
+        s.replace("“", '"').replace("”", '"')
+         .replace("‘", "'").replace("’", "'")
+    )
+
+    # Missing-comma between adjacent objects / arrays.
+    s = re.sub(r"\}\s*\{", "},{", s)
+    s = re.sub(r"\]\s*\[", "],[", s)
+
+    # Trailing commas before closers.
+    s = re.sub(r",\s*([\]\}])", r"\1", s)
+
+    return s
+
+
+# Module-level imports for the repair helper (re isn't otherwise used
+# in this module, so the import sits below the code that needs it).
+import re  # noqa: E402

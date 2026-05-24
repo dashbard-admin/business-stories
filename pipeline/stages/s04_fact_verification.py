@@ -59,20 +59,25 @@ def run(episode: dict, queue: dict) -> str | None:
 
     incident_name = episode["incident"]["company_name"]
 
-    # ---------- 1. merge ----------
+    # ---------- 1. merge (chunked) ----------
+    # Run the merge prompt in batches of MERGE_CHUNK facts. Smaller
+    # output per call dramatically reduces the rate of JSON-output
+    # breakage we hit in production on Gemma-4 with 300+ facts (the
+    # parser failed deep into a 12 KB response, around line 303).
+    # Per-chunk failure is non-fatal: chunks that succeed contribute,
+    # chunks that fail are logged and skipped.
     merge_template = (cfg.prompts_dir / "fact_merge.txt").read_text()
+    MERGE_CHUNK = 80
     facts_for_merge = raw_facts[:300]
-    merge_prompt = merge_template.format(
+    merged = _merge_in_chunks(
+        critic=critic,
+        merge_template=merge_template,
         incident_name=incident_name,
-        raw_facts_json=json.dumps(facts_for_merge, indent=2),
+        chunk=facts_for_merge,
+        chunk_size=MERGE_CHUNK,
     )
-    try:
-        merged = critic.complete_json(merge_prompt, temperature=0.3, max_tokens=6000)
-    except Exception as e:
-        return f"fact merge failed: {e}"
-
-    if not isinstance(merged, list):
-        return "merge output was not a list"
+    if not merged:
+        return "merge produced zero usable claims (all chunks failed?)"
 
     # ---------- 2. adversarial verify ----------
     verify_template = (cfg.prompts_dir / "fact_verify.txt").read_text()
@@ -175,3 +180,79 @@ def run(episode: dict, queue: dict) -> str | None:
 def _looks_like_authoritative(url: str) -> bool:
     u = (url or "").lower()
     return any(n in u for n in _AUTHORITATIVE_NEEDLES)
+
+
+def _merge_in_chunks(
+    *,
+    critic,
+    merge_template: str,
+    incident_name: str,
+    chunk: list[dict],
+    chunk_size: int = 80,
+) -> list[dict]:
+    """Run the critic's merge prompt against `chunk` in slices of
+    `chunk_size`, concatenating the resulting claim lists.
+
+    Per-chunk transformations:
+      - `supporting_facts` and `contradicting_facts` indices emitted
+        by the LLM are local to the chunk it saw (0..chunk_size-1).
+        We translate them back to absolute indices into the full
+        raw_facts list by adding the chunk's start offset.
+      - `claim_id` values are renumbered C001, C002, ... globally so
+        downstream code can rely on sequential IDs without colliding
+        across chunks.
+
+    A chunk whose JSON output cannot be parsed (even after the repair
+    pass in `complete_json`) is logged and skipped — the remaining
+    chunks still contribute claims.
+    """
+    out: list[dict] = []
+    next_claim_id = 1
+    total_chunks = (len(chunk) + chunk_size - 1) // chunk_size
+    for batch_idx, start in enumerate(range(0, len(chunk), chunk_size)):
+        batch = chunk[start:start + chunk_size]
+        prompt = merge_template.format(
+            incident_name=incident_name,
+            raw_facts_json=json.dumps(batch, indent=2),
+        )
+        logger.info(
+            "S04 merge: batch %d/%d (facts %d..%d)",
+            batch_idx + 1, total_chunks, start, start + len(batch) - 1,
+        )
+        try:
+            batch_claims = critic.complete_json(
+                prompt, temperature=0.3, max_tokens=4000,
+            )
+        except Exception as e:
+            logger.warning("S04 merge batch %d failed: %s", batch_idx + 1, e)
+            continue
+        if not isinstance(batch_claims, list):
+            logger.warning(
+                "S04 merge batch %d returned non-list (%s); skipping",
+                batch_idx + 1, type(batch_claims).__name__,
+            )
+            continue
+        for claim in batch_claims:
+            if not isinstance(claim, dict):
+                continue
+            # Re-base supporting / contradicting indices to absolute.
+            supp = claim.get("supporting_facts") or []
+            claim["supporting_facts"] = [
+                idx + start
+                for idx in supp
+                if isinstance(idx, int) and 0 <= idx < len(batch)
+            ]
+            contra = claim.get("contradicting_facts") or []
+            claim["contradicting_facts"] = [
+                idx + start
+                for idx in contra
+                if isinstance(idx, int) and 0 <= idx < len(batch)
+            ]
+            # Renumber claim_id globally so downstream consumers see
+            # a stable C001..CNNN sequence with no gaps.
+            claim["claim_id"] = f"C{next_claim_id:03d}"
+            next_claim_id += 1
+            out.append(claim)
+    logger.info("S04 merge: %d total claims from %d batches",
+                len(out), total_chunks)
+    return out
