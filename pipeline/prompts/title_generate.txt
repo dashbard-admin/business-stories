@@ -1,0 +1,37 @@
+You are writing a YouTube TITLE and a TITLE-CARD COMPOSITION HINT for
+the next episode.
+
+EPISODE:
+- Company: {incident_name}
+- Hero: {hero}
+- Conflict: {conflict}
+- Story kind: {story_kind}
+- One-line pitch from S1: {one_line_pitch}
+
+Two outputs:
+
+1. `youtube_title`: 55-75 characters. Format: "<Hook>: <Company &
+   year/context>". Examples:
+     - "The Pivot That Saved Apple: 1997's Ninety-Day Deadline"
+     - "Why Sears Died: A Hundred-Year Slow Collapse"
+     - "The Quiet Boardroom Where Blockbuster Said No to Netflix"
+   Do NOT use ALL-CAPS, do NOT start with "How" unless it's followed by
+   a concrete specific (not "How X Became a Billion-Dollar Company"),
+   and do NOT use the words "shocking", "unbelievable",
+   "rocked", "game-changer".
+
+2. `title_card_visual`: 40-70 word description of a comic-book panel
+   that will appear behind the title text. NO TEXT in the panel
+   itself — the title overlay is composited separately. Specify
+   composition, lighting, era markers, mood. The visual should
+   evoke the hero+conflict; example: "Wide cinematic comic panel:
+   a single founder silhouette standing in front of a darkened
+   corporate atrium at night, the iconic logo shape backlit on the
+   facade. Foreground in deep ink-wash shadow, background a warm
+   amber accent. Bold linework, painterly textures."
+
+OUTPUT FORMAT — JSON object only, no prose, no code fences:
+{{
+  "youtube_title": "string",
+  "title_card_visual": "string"
+}}

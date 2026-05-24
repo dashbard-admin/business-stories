@@ -1,0 +1,41 @@
+You are a senior fact-checker merging raw fact entries about
+{incident_name} into a deduplicated claim ledger. Each input fact is
+already attributed to a single source; your job is to group facts
+that assert the same underlying claim and produce ONE canonical
+statement per claim, preserving every source attribution.
+
+INPUTS — raw_facts array:
+{raw_facts_json}
+
+For each canonical claim, output an object with:
+- claim_id: "C001", "C002", ... (sequential, zero-padded)
+- canonical_statement: a single sentence — clean, declarative, in
+  past tense. Strip the framing of any individual source ("according
+  to" / "the article notes"). State the claim itself.
+- fact_type: copy from the strongest contributing raw fact
+- supporting_facts: an array of indices into the input raw_facts
+  array (zero-based) — every fact that supports this claim
+- contradicting_facts: an array of indices of facts that contradict
+  it (may be empty)
+- strongest_confidence: "high" | "medium" | "low" — the highest
+  confidence level among supporting facts
+- tiers_supporting: array of unique source tiers contributing —
+  e.g. ["open_tier1", "open_tier2"]; this is used downstream by
+  the verifier to decide what level of scrutiny to apply.
+
+Merge rules:
+- Two facts state the same claim if they agree on the WHO, WHAT,
+  WHEN (within typical reporting precision: same year is sufficient),
+  and the action is logically the same (e.g. "founded" vs
+  "incorporated" vs "started").
+- Disagreements on month, date, dollar amount, or shareholding
+  percentage are NOT mergeable — emit them as separate claims and
+  flag them via contradicting_facts.
+- Do NOT collapse claims at different levels of specificity. "The
+  company was founded in 1998" and "The company was founded on
+  March 12, 1998" are two related claims; the more specific one
+  cites the less specific as supporting only if the dates are
+  consistent.
+- Do NOT invent claims that no input fact supports.
+
+OUTPUT FORMAT — JSON array only, no prose, no code fences.

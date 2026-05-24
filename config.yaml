@@ -1,0 +1,230 @@
+# Business & Brand Origin Stories Pipeline — Operator Configuration
+# Edit this file. All modules read from it via pipeline/config.py.
+
+channel:
+  name: "Origin & Outcome"
+  brand_color: "#1a2b3c"
+  channel_id: ""                   # fill after YouTube channel creation
+  contact_email: "you@example.com"
+
+paths:
+  # Absolute paths recommended. Use ${root} as a substitution token.
+  root: "/Users/cantemir/Projects/business_success_stories"
+  state: "${root}/state"
+  episodes: "${root}/episodes"
+  assets: "${root}/assets"
+  logs: "${root}/logs"
+  prompts: "${root}/pipeline/prompts"
+  style_profiles: "${root}/pipeline/style_profiles"
+
+models:
+  # Each name is a logical key passed to the LLM gateway at
+  # http://10.0.4.250:9000/v1 (Bearer token "pass123"). The gateway
+  # selects the loaded MLX model that matches.
+  llm_writer: "Qwen3.6-35B-A3B-UD-MLX-4bit"
+  llm_critic: "gemma-4-26B-A4B-it-MLX-8bit"
+  llm_extractor: "Qwen3.6-35B-A3B-UD-MLX-4bit"
+  tts: "mlx-community/Kokoro-82M-bf16"
+  vlm: "Qwen3-VL-4B-Instruct-MLX-8bit"
+
+  # When true, all model calls return deterministic synthetic output
+  # so the pipeline can be exercised end-to-end without GPU time.
+  mock_mode: false
+
+production:
+  target_episodes_per_week: 2
+  target_duration_seconds: 750      # 12.5 min midpoint (10-15 min target)
+  duration_tolerance_seconds: 150
+  target_words: 2000
+  word_count_tolerance: 200
+  wpm_effective: 125                # Kokoro slow-documentary cadence
+
+quality_gates:
+  min_verified_facts: 5
+  min_pd_assets: 3
+  min_total_beats: 50
+  max_total_beats: 65
+  min_sources: 8
+  max_sources: 100                  # hard cap for S2 inventory size
+  min_tier1_sources: 1              # ≥1 primary-source filing / Wikipedia anchor
+  min_script_words: 1700            # 2000 ± ~15%
+  max_script_words: 2400
+  audio_lufs_target: -14
+  audio_lufs_min: -15
+  audio_lufs_max: -13
+  audio_peak_max_dbtp: -1.0
+
+constraints:
+  # Cooldowns on assignment dimensions across recent episodes.
+  rolling_window_archetype: 3
+  rolling_window_narrator: 3
+  rolling_window_visual_style: 2
+
+orchestrator:
+  stale_lock_hours: 6
+  max_topic_discovery_retries: 5
+  per_invocation_max_runtime_seconds: 5400   # 90 min cap per cron run
+
+upload:
+  mode: "manual"                    # "manual" only — no automatic upload in this pipeline
+  schedule_offset_hours: 36
+
+search:
+  backend: "searxng"
+  searxng_url: "http://10.0.4.252:8080"
+  engines: ""                       # comma-separated; blank = SearXNG default set
+  safesearch: 0
+  results_per_query: 30
+  user_agent: "BusinessStoriesPipeline/0.1 (+research)"
+  request_timeout_seconds: 30
+
+music_library:
+  # S11 audio post uses a curated local library — no MusicGen,
+  # no Stable Audio Open, no synthesized music or SFX.
+  #
+  # Layout:
+  #   ${root}/assets/music_library/
+  #     ├── manifest.json           # per-track metadata
+  #     └── *.wav / *.mp3 / *.flac
+  #
+  # Each manifest entry shape:
+  #   {"file": "ambient_rise_01.wav",
+  #    "mood": ["hopeful","rising","determined"],
+  #    "tempo": "slow|mid|fast",
+  #    "instruments": ["piano","strings","synth_pad"],
+  #    "tags": ["origin","founder","underdog"],
+  #    "duration_seconds": 312,
+  #    "suits_narrators": ["N1","N3"]   # optional pin
+  #   }
+  enabled: true
+  path: "${root}/assets/music_library"
+  manifest: "${root}/assets/music_library/manifest.json"
+  crossfade_seconds: 4
+  music_gain_db: -28.0              # bed level under voice
+  music_start_offset_seconds: 20.0  # narrator carries the cold open before the bed enters
+  # Voice level normalization (ported from maritime, voice-only)
+  voice_dynaudnorm_enabled: true
+  voice_dynaudnorm_framelen_ms: 200
+  voice_dynaudnorm_gauss: 11
+  voice_dynaudnorm_max_gain: 15.0
+
+flux_cli:
+  # The flux CLI is invoked exactly as:
+  #   flux "<prompt>" --height 1080 --width 1920 --steps 24 \
+  #                   --seed <N> --output <abs_path.png>
+  binary: "flux"
+  width: 1920
+  height: 1080
+  steps: 24
+  timeout_seconds: 600
+  # If true, the adapter folds negative-prompt text into the positive
+  # prompt as "... -- avoid: <neg>" since the CLI has no separate flag.
+  fold_negative_into_prompt: true
+
+generic_stash:
+  enabled: true
+  threshold: 0.18
+  max_reuses_per_asset: 5
+
+stock_sources:
+  # S5 Phase 1b — institutional / community PD archives. API keys
+  # come from environment variables (never this file).
+  enabled: true
+  results_per_query: 25
+  smithsonian:
+    enabled: true                   # CC0 — strong on industrial history
+  europeana:
+    enabled: true                   # CC0/CC-BY/PD — strong on European corporate history
+  pixabay:
+    enabled: true                   # Pixabay License — atmospheric / office stock
+
+pd_upscale:
+  # On-demand image upscaler — Real-ESRGAN x4 + GFPGAN face restore.
+  # S5 spawns this as a subprocess at the end of its asset hunt.
+  enabled: true
+  python: "~/.maritime-services/upscale-venv/bin/python"
+  script: "~/.maritime-services/upscale_cli.py"
+  target_min_dimension: 800
+  min_input_dimension: 200
+  restore_faces: true
+  timeout_seconds: 1200
+  postprocess:
+    enabled: true
+    clahe_cliplimit: 1.5
+    usm_radius: 1.2
+    usm_percent: 50
+    grain_sigma: 2.5
+
+image_qa:
+  # VLM judge for S9 FLUX renders. Comic-book artifacts list includes
+  # wrong-era logos, garbled signage text, distorted faces.
+  enabled: true
+  max_attempts_per_beat: 2
+  timeout_seconds: 30
+  caption_pd_assets: true
+  strict_borderline: true
+
+  pd_direct_use_threshold: 0.20
+  pd_reference_threshold: 0.20
+  pd_max_reuses_per_asset: 30
+  pd_reference_strength: 0.1
+  # FLUX CLI has no img2img, so PD references are always text-only
+  # (the PD caption is folded into the FLUX prompt as grounding).
+  pd_image_reference_enabled: false
+
+  flux_force_no_text: true
+
+# -------------------- assignment dimensions --------------------
+# Per the single-category decision, no `suits_domains` or `suits_eras`
+# fields. Every narrator/style is eligible for every topic;
+# constraints.pick_assignment() relies only on rolling-window cooldown.
+
+archetypes:
+  - id: A1
+    name: "Chronological Origin"
+  - id: A2
+    name: "Rise-and-Fall Arc"
+  - id: A3
+    name: "Disruption Story"
+  - id: A4
+    name: "Pivotal Decision"
+  - id: A5
+    name: "Underdog Comeback"
+  - id: A6
+    name: "Founder Drama"
+
+narrators:
+  - id: N1
+    name: "Marcus Reed - Business Editor"
+    voice: "am_michael"
+    speed: 0.95
+    pitch_shift: 0.0
+    breath_pause_ms: 300
+    tone: "measured, authoritative, dry"
+  - id: N2
+    name: "Daniel Hayes - Investigative Skeptic"
+    voice: "bm_lewis"
+    speed: 0.92
+    pitch_shift: -1.0
+    breath_pause_ms: 350
+    tone: "skeptical, probing, restrained"
+  - id: N3
+    name: "Emma Gray - Documentary Storyteller"
+    voice: "bf_emma"
+    speed: 0.96
+    pitch_shift: 0.0
+    breath_pause_ms: 300
+    tone: "warm, novelistic, humane"
+  - id: N4
+    name: "Nicole Jensen - Modern Tech Voice"
+    voice: "af_bella"
+    speed: 1.00
+    pitch_shift: 0.0
+    breath_pause_ms: 220
+    tone: "energetic, contemporary, sharp"
+
+visual_styles:
+  - id: V1
+    name: "Classic Comic"
+  - id: V2
+    name: "Noir Comic"

@@ -1,0 +1,115 @@
+Below is a business-story script with ## BEAT N ## markers. For each
+beat, produce a visual plan entry for a comic-book-styled
+documentary frame.
+
+Each entry has:
+
+- beat_id: BEAT_NN (zero-padded to 2 digits, e.g. "BEAT_01")
+- estimated_seconds: word_count / 2.08  (i.e. ~125 wpm slow doc)
+- visual_intent: one of [
+    founder_portrait,
+    office_environment,
+    product_reveal,
+    boardroom_meeting,
+    street_scene,
+    crowd_or_market,
+    factory_or_workshop,
+    document_or_headline,
+    chart_abstraction,
+    courtroom_scene,
+    montage_panel
+  ]
+- specific_visual_description: 30-60 words describing what should be
+  on screen, in comic-book panel terms — composition, pose, lighting,
+  era markers, mood. NOT a photographic description.
+- ken_burns_motion: one of [slow_zoom_in, slow_zoom_out,
+  slow_pan_left, slow_pan_right, hold_still]
+- public_domain_search_terms: 2-4 specific search queries that might
+  find a real public-domain asset for this beat (Wikipedia, SEC
+  filing screenshots, archive.org). Prefer searches that would
+  actually return ATMOSPHERIC reference for the comic style — a
+  storefront photo, a press-conference photo, a courtroom sketch —
+  rather than the exact moment described.
+- flux_fallback_prompt: if no public-domain asset is found, the
+  FLUX prompt to generate the image. The caller will PREPEND the
+  locked visual-style prefix and APPEND the negative prompt, so
+  your prompt should be ONLY the scene description (no style
+  language, no "no text", etc.).
+- sfx_cue: optional, one of [typewriter, keyboard, phone_ring,
+  applause, door_slam, traffic_hum, market_bell, newsprint_rustle,
+  clock_tick, silence] or null. (Documentation only — NOT
+  synthesised by this pipeline; the music bed runs uninterrupted.)
+
+DO NOT echo the beat's prose back. The script text is already on
+disk; the caller will join it back into each entry by beat_id. Keep
+your output focused on the VISUAL plan and asset hints.
+
+CRITICAL — FLUX CANNOT RENDER LEGIBLE TEXT.
+The image generator (FLUX via CLI) reliably produces glyph-scribble
+when asked for words, sentences, headlines, signage, brand logos
+spelled out, page text, or any readable writing. Treat this as a
+hard constraint.
+
+Do NOT write prompts like:
+- "a newspaper headline reading 'COMPANY COLLAPSES'"
+- "a sign labeled 'Acme Headquarters'"
+- "a storefront with the word NIKE on the awning"
+- "a contract with the words 'TERMINATION CLAUSE' visible"
+
+Instead, when the beat references a document, sign, headline, or
+brand logo, frame it visually WITHOUT legible content:
+
+- document_or_headline → "extreme close-up of a folded newspaper,
+  print grain visible, headline letters deliberately out of focus,
+  hands holding it at the edge of frame"
+- a sign / storefront → "a brand storefront at oblique angle, awning
+  shape and signature color (red, white) prominent, signage letters
+  blurred or partial"
+- a logo on a building → "a corporate facade with the iconic logo
+  shape silhouetted against evening sky, no legible wordmark"
+- a contract / filing → "close-up of a stack of legal papers, paper
+  grain, a pen lying across them, text not in focus"
+- a chart / graph → "an abstracted line graph rising or falling on a
+  whiteboard or projector screen, the curve is the subject, axis
+  labels are not in focus"
+
+For BRAND identification, lean on:
+- the colour palette of the brand (Nike's red+white, Apple's
+  brushed silver, Theranos's black+gold)
+- the shape of the logo (the Nike swoosh, the Apple silhouette, the
+  Coca-Cola contour bottle)
+- the architecture of the headquarters
+- the type of product (vintage CRT monitor for 1990s Apple, a
+  blood-draw machine for Theranos, a yellow-and-blue cardboard box
+  for Blockbuster)
+
+CRITICAL — DO NOT REQUEST RECOGNISABLE LIVING-CELEBRITY FACES.
+For visual_intent=founder_portrait, prefer profile or
+back-of-the-head shots, silhouettes, hand-on-document shots, or
+oblique-angle compositions that imply identity through context.
+FLUX renders specific living-celebrity faces poorly and the comic
+style benefits from the visual restraint anyway.
+
+LOCKED VISUAL STYLE: {visual_style_name}
+{visual_style_guidance}
+
+NARRATOR: {narrator_name}
+
+SCRIPT:
+---
+{script_with_beats}
+---
+
+OUTPUT FORMAT — JSON array only, no prose, no code fences:
+[
+  {{
+    "beat_id": "BEAT_01",
+    "estimated_seconds": 18.4,
+    "visual_intent": "founder_portrait",
+    "specific_visual_description": "...",
+    "ken_burns_motion": "slow_zoom_in",
+    "public_domain_search_terms": ["...","..."],
+    "flux_fallback_prompt": "...",
+    "sfx_cue": null
+  }}
+]

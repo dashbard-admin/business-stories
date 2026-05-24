@@ -1,0 +1,97 @@
+# Archetype guidance — fed to the script generator at S6.
+# Each opening_device assumes the script has just delivered the
+# mandatory cold open (the first 60-100 words of dramatic-moment hook).
+# The opening_device shapes the paragraphs that follow.
+
+A1:
+  name: "Chronological Origin"
+  opening_device: "After the cold open, pivot into chronological mode by
+    naming the first quiet moment in the founder's story — the day
+    before the idea, the long commute, the conversation in the kitchen.
+    From there each beat advances time toward the founding event.
+    The cold-open moment is what the chronology is moving TOWARD."
+  middle_structure: "Time-anchored chapters: 'Before the company',
+    'The idea', 'The first prototype', 'Year one', 'The pivot',
+    'The breakout'. Each chapter advances the clock toward the moment
+    named in the cold open."
+  closing_device: "Land on the most concrete legacy of the company
+    today — a product still on shelves, a category that didn't exist
+    before, a school of founders trained inside the company. Tie it
+    back to the founder's first quiet moment in the second paragraph."
+
+A2:
+  name: "Rise-and-Fall Arc"
+  opening_device: "The cold open names the absolute peak — 'In March
+    2014 the company was valued at nine billion dollars and the founder
+    was on the cover of Time.' Then the second beat names the bottom —
+    'Eighteen months later, the company was worthless.' The rest of
+    the script unpacks how one became the other."
+  middle_structure: "Three acts: the climb, the warning signs the
+    insiders saw and the outsiders missed, the collapse. End each act
+    on a forward tease — the next decision that would prove fatal,
+    named but not yet explained."
+  closing_device: "Where the principals are now, in one or two
+    sentences each. Resist any sympathetic absolution; the company's
+    own paper trail is the verdict."
+
+A3:
+  name: "Disruption Story"
+  opening_device: "The cold open names the incumbent and the upstart in
+    a single line — 'Blockbuster had 9,000 stores and a market cap of
+    five billion dollars. Netflix had a team of thirty-five and a
+    business model that didn't yet work.' The contrast is the hook."
+  middle_structure: "Alternating beats between the incumbent's
+    confidence and the upstart's experiments. Track the moment the
+    incumbent's advantages became liabilities. End each act on the
+    specific decision the incumbent could have made differently."
+  closing_device: "The boardroom moment when the incumbent definitively
+    lost — typically a meeting that DID happen, often in a hotel
+    conference room, where the offer to acquire the upstart was
+    declined. Name the room, the year, the decision."
+
+A4:
+  name: "Pivotal Decision"
+  opening_device: "The cold open names the fork in the road outright —
+    'On the night of January 23, 2003, the founder had to choose
+    between launching the product as planned and shutting the company
+    down.' The rest of the script earns the weight of that choice."
+  middle_structure: "Two branches explored: what the company became
+    because of the decision, and a brief glimpse of what it would have
+    become had the other branch been chosen (only where sources
+    explicitly contemplated this). The decision itself sits in the
+    middle of the script, not at the start."
+  closing_device: "Pay the decision off — what the industry changed, or
+    didn't, because of it. Land on the smallest concrete trace: a
+    single line in a financial filing, a single sentence in a memo, a
+    single product on a shelf."
+
+A5:
+  name: "Underdog Comeback"
+  opening_device: "The cold open names the moment the company was
+    written off — 'When Steve Jobs returned to Apple in 1997, the
+    company had ninety days of cash left and analysts were openly
+    asking which competitor would buy the corpse.' The hero arrives
+    with the odds already stacked."
+  middle_structure: "Track the unglamorous, unsexy decisions that bent
+    the curve — the product killed, the deal accepted that the founder
+    didn't want, the partnership with the company everyone said was
+    the enemy. Each beat is a small bet that paid off only because
+    other small bets did too."
+  closing_device: "The first quarter the comeback was undeniably real,
+    even to the skeptics — usually a specific earnings call or a
+    product reveal. Quote the analyst who flipped, if any did publicly."
+
+A6:
+  name: "Founder Drama"
+  opening_device: "The cold open names the founder as a contradiction —
+    'Travis Kalanick built the most valuable startup of his generation
+    and was fired from it by his own investors.' The script then earns
+    both halves of that sentence."
+  middle_structure: "Track the personal moments that drove the business
+    moments — the rivalry, the obsession, the chip on the shoulder.
+    Always tie the personal back to a concrete decision the company
+    made. Avoid amateur psychology; lean on what the founder said in
+    quoted record."
+  closing_device: "Where the founder is now. Avoid both vilification
+    and rehabilitation; let the documented behaviour speak. Land on a
+    direct quote from the founder if one captures it."

@@ -1,0 +1,55 @@
+# One forbidden phrase per line. Comparison is case-insensitive
+# substring match — keep entries unambiguous. Blank lines and lines
+# starting with '#' are ignored.
+
+# --- Clickbait ---
+shocking
+shockwaves
+unbelievable
+horrifying
+you won't believe
+wait until you hear
+what happens next will
+the truth about
+the real reason
+nobody knew
+the dark secret
+
+# --- Business clichés that read as filler ---
+game-changer
+game changer
+disrupt the industry
+disrupting the industry
+rocked the world
+rocked the industry
+perfect storm
+took the world by storm
+skyrocketed
+rocketed to success
+overnight success
+quintessential
+synergies
+value proposition
+stakeholder alignment
+revolutionary product
+groundbreaking innovation
+trailblazing
+
+# --- AI tells / meta ---
+as an AI
+as a language model
+I cannot
+I'm sorry, but
+
+# --- Lazy summary openers ---
+In conclusion
+And so we have seen
+At the end of the day
+The moral of the story
+The takeaway here
+
+# --- Tabloid superlatives without backing ---
+the greatest
+the most successful
+the biggest mistake ever
+the worst business decision in history

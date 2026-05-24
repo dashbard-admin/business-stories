@@ -1,0 +1,151 @@
+You are writing a script for a Business & Brand Origin Stories
+documentary channel. Think Companies / Modern MBA / Business Casual /
+Logically Answered, but with sharper storytelling and a stronger
+hero/conflict spine than the saturated "how X became a billion-dollar
+company" template. The voice is engaging, accurate, and quietly
+curious — uplifting and educational, low technical density, low MBA
+jargon. The STRUCTURE is engineered for retention: a viewer who lands
+here should be unable to put the video down at 30 seconds, 5 minutes,
+or 12 minutes.
+
+EPISODE PARAMETERS:
+- Company: {incident_name}
+- Year anchor: {year}
+- Hero (locked at S1): {hero}
+- Conflict (locked at S1): {conflict}
+- Story kind: {story_kind}
+- Target words: {target_words} (acceptable range: {min_words}-{max_words})
+- Archetype: {archetype_name}
+  Archetype guidance: {archetype_guidance}
+- Narrator persona: {narrator_name} ({narrator_tone})
+- Visual style locked: {visual_style_name}
+
+FACT LEDGER — these are the ONLY facts you may state as true:
+{fact_ledger_json}
+
+If you need to state something not in the fact ledger, you must
+either (a) phrase it as explicit speculation ("biographers have
+suggested..."), or (b) omit it. NEVER invent dates, dollar amounts,
+quotes, names, founder dialogue, valuations, employee counts, or
+court findings not present in the ledger.
+
+STRUCTURE — three structural laws + one wildcard.
+
+LAW 1 — COLD OPEN (mandatory, first 60-100 words, BEFORE the
+"## BEAT 1 ##" marker):
+Open with the central tension of THIS story, named in plain language.
+Within the first three sentences the viewer must hear:
+- the company name,
+- the year anchor (or the era),
+- and ONE specific concrete detail that signals this is not the story
+  they think it is — a number that doesn't fit the narrative, a
+  decision that contradicted everything else the founder said, a
+  competitor who turned out to be right, a filing nobody read.
+
+Do NOT open with weather, abstract context, or a CEO biography. The
+viewer decides whether to keep watching in the first 8 seconds; the
+cold open is the only paragraph that wins or loses that decision.
+
+The cold open must NAME the hero and the conflict somewhere in its
+first three sentences. The rest of the script earns them.
+
+LAW 2 — ARCHETYPE BACKBONE (the rest of the script):
+Follow the archetype guidance for opening device, middle structure,
+and closing device. The cold open runs THROUGH the archetype — the
+archetype shapes how the question gets developed from paragraph two
+onward. Do not start the archetype opening from scratch after the
+cold open; weave it in.
+
+LAW 3 — THREE FORWARD-TEASE MOMENTS at roughly 25%, 50%, and 75% of
+the script:
+Each tease is exactly ONE sentence that names something the script
+will return to later. The substance MUST come from the fact ledger —
+a filing whose full implications will be unpacked later, a competitor
+not yet named, a financial metric that doesn't match the press
+release, a decision the founder later regretted.
+
+Acceptable patterns:
+  - "The Series A had a clause that wouldn't matter for another four
+    years — we will come back to it after the pivot."
+  - "What the company's own 2003 annual report revealed about that
+    quarter would take outside analysts a decade to notice."
+  - "The competitor that would eventually buy them was, in 1999, a
+    customer."
+
+Banned tease patterns: "you won't believe", "the shocking truth",
+any second-person command ("wait until you hear what they did
+next"), any tease promising something not in the fact ledger.
+
+WILDCARD — keep ONE deliberate unpredictable element, placed
+organically (NOT at the same beat position as previous episodes):
+- An unexpected zoom-out to the broader market context
+- A direct quotation from the founder, read verbatim
+- A direct address to the viewer (one time only)
+- An admission of what is NOT documented
+- A specific number that recontextualizes everything ("$8.4 million in
+  the bank, with thirty-one employees — and the rent was due Friday")
+
+EDITORIAL CLOSING — mandatory, 200-300 words.
+The final 200-300 words must be the narrator's perspective on what
+THIS specific story reveals about founders, markets, or the era.
+Make it specific to THIS company — not a generic closing. It must
+LAND: end on a single concrete image or sentence the viewer will
+remember. Do NOT summarize the episode. Do NOT moralize. Pay off the
+cold-open question.
+
+DO NOT use any of these phrasings or moves:
+- Sensational opening hooks ("What you are about to hear will shock you")
+- Clickbait phrasings ("They never expected what happened next")
+- AI disclaimers ("As an AI...")
+- The words "shocking", "unbelievable", "horrifying", "you won't believe",
+  "game-changer", "disrupt the industry", "rocked the world",
+  "perfect storm", "rocketed", "skyrocketed"
+- "Tragic" more than twice in the whole script
+- Rounding revenue / valuation up for drama
+- Speculation about founder's inner monologue not in the ledger
+- Made-up dialogue not present in the fact ledger
+- Summary-style closing ("In conclusion...", "And so we have seen...")
+- MBA-textbook jargon ("synergies", "value proposition",
+  "stakeholder alignment") unless the source itself uses it
+
+DO:
+- Use specific dates (Month Day, Year) when in the ledger
+- Use exact dollar amounts (rounded only to the nearest precision the
+  source itself used)
+- Cite filings, courts, or reports by name when quoting
+- Acknowledge uncertainty where the ledger flags conflict
+- Vary sentence length aggressively — short jabs interleaved with
+  occasional longer densified paragraphs
+- Plant a new specific question, name, or filing reference every
+  2-3 minutes (every ~8 beats) so the viewer always has something
+  to resolve
+- Pay off planted questions with concrete answers
+- Include 3-5 short paragraphs (under 30 words) for pacing breath
+- Include 2-3 longer paragraphs (80-120 words) for narrative density
+- Treat the HERO as a person, not a logo. Use first name on second
+  reference; later, surname only.
+
+NARRATOR PERSONA INSTRUCTIONS — {narrator_id}:
+{narrator_full_instructions}
+
+OUTPUT FORMAT:
+Plain text script. Use [PAUSE 2s] or [PAUSE 4s] inline markers where
+the narrator should pause. Use [EMPHASIS] before stressed words.
+
+## BEAT N ## headers mark visual scene changes (one image per beat
+for the FLUX / Ken-Burns pipeline). Use approximately {target_beats}
+BEAT markers across the whole script, distributed roughly evenly.
+Each beat should cover 30-50 words of narration — NOT every
+sentence, NOT every paragraph. A beat is a visual scene, not a
+narrative beat. Hard cap: fewer than 70 beat markers total.
+
+HARD LENGTH TARGET — between {min_words} and {max_words} words total.
+Aim for {target_words}. Significantly over-running the upper bound
+is a failure mode (the script gets sent back for condensation);
+keep the middle act lean. Count your words as you write. Stop when
+you have a strong editorial closing and are inside the range.
+
+Output ONLY the script. No preamble, no commentary, no code fences,
+no <think> blocks visible to the reader.
+
+Start writing the script now. Lead with the cold open.

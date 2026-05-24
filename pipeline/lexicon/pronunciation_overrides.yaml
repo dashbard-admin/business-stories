@@ -1,0 +1,51 @@
+# Pronunciation overrides for Kokoro TTS — keyed by surface form,
+# value is the text Kokoro should actually speak. Used by S10 as a
+# simple word-level substitution pass before chunking.
+#
+# Keep entries minimal — only add when Kokoro pronounces a name
+# noticeably wrong on the default voices. Most common names render
+# fine without an override.
+
+# Founders / executives commonly mispronounced
+Bezos: "BAY-zos"
+Theranos: "THAIR-uh-nos"
+Zuckerberg: "ZUCK-er-burg"
+Andreessen: "AN-dree-sen"
+Buffett: "BUFF-it"
+Khosla: "KOH-slah"
+Brin: "BRIN"
+Schmidt: "SHMIT"
+Wozniak: "WOZ-nee-ak"
+Jobs: "Jobs"
+Knight: "Nite"
+Bowerman: "BOW-er-man"
+
+# Companies with non-obvious pronunciation
+Wozniak: "WOZ-nee-ak"
+Adobe: "uh-DOH-bee"
+Hyundai: "HUN-day"
+Volkswagen: "VOLKS-vah-gen"
+Yahoo: "YA-hoo"
+Asana: "uh-SAH-nuh"
+Nestle: "NESS-lay"
+Nestlé: "NESS-lay"
+Pfizer: "FY-zer"
+Wirecard: "WIRE-card"
+
+# Cities / geographies
+Cupertino: "Coo-per-TEE-no"
+Bentonville: "BEN-ton-vil"
+Bengaluru: "BEN-gah-loo-roo"
+
+# Financial terms
+EBITDA: "EE-bit-dah"
+IPO: "I-P-O"
+SEC: "S-E-C"
+NYSE: "N-Y-S-E"
+NASDAQ: "NAZ-dak"
+LBO: "L-B-O"
+M&A: "M-and-A"
+ESG: "E-S-G"
+ARR: "A-R-R"
+SaaS: "sass"
+EBIT: "EE-bit"

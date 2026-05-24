@@ -1,0 +1,257 @@
+"""State management — queue, locks, rolling-window dedup, per-episode workspaces.
+
+Queue lives in `state/episode_queue.json`. Reads/writes are serialized
+with a file-based advisory lock so concurrent cron invocations cannot
+clobber each other. `used_topics.json` holds the dedup set across all
+historical episodes.
+"""
+
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterator
+
+from .config import load_config
+
+
+SCHEMA_VERSION = 1
+
+
+# -------------------------- locking --------------------------
+
+@contextmanager
+def file_lock(path: Path, stale_seconds: int = 6 * 3600) -> Iterator[None]:
+    """Cross-process advisory lock with stale-lock reclamation."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    f = open(path, "a+")
+    try:
+        f.seek(0)
+        existing = f.read().strip()
+        if existing:
+            try:
+                ts = float(existing)
+                if (time.time() - ts) > stale_seconds:
+                    pass  # stale; we'll overwrite below
+            except ValueError:
+                pass
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError(f"another process holds {path}")
+        f.seek(0)
+        f.truncate()
+        f.write(str(time.time()))
+        f.flush()
+        yield
+    finally:
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        finally:
+            f.close()
+
+
+# -------------------------- queue --------------------------
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _queue_path() -> Path:
+    return load_config().state_dir / "episode_queue.json"
+
+
+def _used_topics_path() -> Path:
+    return load_config().state_dir / "used_topics.json"
+
+
+STAGE_ORDER = [f"S{i}" for i in range(1, 13)]   # S1 .. S12
+
+
+def _init_queue() -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "episodes": [],
+        "rolling_window": {
+            "archetypes": [],
+            "narrators": [],
+            "visual_styles": [],
+        },
+    }
+
+
+def load_queue() -> dict[str, Any]:
+    path = _queue_path()
+    if not path.exists():
+        return _init_queue()
+    with path.open() as f:
+        return json.load(f)
+
+
+def save_queue(queue: dict[str, Any]) -> None:
+    path = _queue_path()
+    tmp = path.with_suffix(".json.tmp")
+    with tmp.open("w") as f:
+        json.dump(queue, f, indent=2, sort_keys=False)
+    os.replace(tmp, path)
+
+
+def load_used_topics() -> set[str]:
+    path = _used_topics_path()
+    if not path.exists():
+        return set()
+    with path.open() as f:
+        return set(json.load(f))
+
+
+def save_used_topics(items: set[str]) -> None:
+    path = _used_topics_path()
+    tmp = path.with_suffix(".json.tmp")
+    with tmp.open("w") as f:
+        json.dump(sorted(items), f, indent=2)
+    os.replace(tmp, path)
+
+
+def add_used_topic(name: str) -> None:
+    s = load_used_topics()
+    s.add(name.strip().lower())
+    save_used_topics(s)
+
+
+def topic_already_used(name: str) -> bool:
+    return name.strip().lower() in load_used_topics()
+
+
+# -------------------------- episode helpers --------------------------
+
+def new_episode_record(episode_id: str) -> dict[str, Any]:
+    return {
+        "id": episode_id,
+        "slug": None,
+        "incident": None,
+        "archetype": None,
+        "narrator": None,
+        "visual_style": None,
+        "current_stage": "S1",
+        "stages": {s: {"status": "pending", "ts": None} for s in STAGE_ORDER},
+        "blockers": [],
+        "created_at": _now(),
+    }
+
+
+def enqueue_episodes(n: int) -> list[str]:
+    """Add `n` empty episode records to the queue. Returns new IDs."""
+    queue = load_queue()
+    existing = {e["id"] for e in queue["episodes"]}
+    next_idx = 1
+    while f"EP_{next_idx:03d}" in existing:
+        next_idx += 1
+    new_ids = []
+    for i in range(n):
+        eid = f"EP_{next_idx + i:03d}"
+        queue["episodes"].append(new_episode_record(eid))
+        new_ids.append(eid)
+    save_queue(queue)
+    return new_ids
+
+
+def next_pending_episode(queue: dict[str, Any]) -> tuple[dict[str, Any], str] | None:
+    """Find next episode with a runnable stage. Returns (episode, stage_id) or None."""
+    for ep in queue["episodes"]:
+        if ep.get("blockers"):
+            continue
+        for stage_id in STAGE_ORDER:
+            stage = ep["stages"][stage_id]
+            if stage["status"] == "pending":
+                return ep, stage_id
+            if stage["status"] == "needs_human":
+                break
+    return None
+
+
+def mark_stage_done(queue: dict[str, Any], episode_id: str, stage_id: str) -> None:
+    for ep in queue["episodes"]:
+        if ep["id"] == episode_id:
+            ep["stages"][stage_id] = {"status": "done", "ts": _now()}
+            idx = STAGE_ORDER.index(stage_id)
+            if idx + 1 < len(STAGE_ORDER):
+                ep["current_stage"] = STAGE_ORDER[idx + 1]
+            else:
+                ep["current_stage"] = "DONE"
+            return
+
+
+def mark_stage_failed(
+    queue: dict[str, Any], episode_id: str, stage_id: str, reason: str
+) -> None:
+    for ep in queue["episodes"]:
+        if ep["id"] == episode_id:
+            ep["stages"][stage_id] = {
+                "status": "needs_human",
+                "ts": _now(),
+                "reason": reason,
+            }
+            ep["blockers"].append({"stage": stage_id, "reason": reason, "ts": _now()})
+            return
+
+
+def update_episode(queue: dict[str, Any], episode_id: str, **fields: Any) -> None:
+    for ep in queue["episodes"]:
+        if ep["id"] == episode_id:
+            ep.update(fields)
+            return
+
+
+def episode_workspace(episode_id: str, slug: str | None = None) -> Path:
+    """Return the per-episode workspace path, creating sub-folders."""
+    cfg = load_config()
+    name = f"{episode_id}_{slug}" if slug else episode_id
+    ws = cfg.episodes_dir / name
+    for sub in [
+        "00_research/raw",
+        "00_research/extracted",
+        "01_factcheck",
+        "02_script",
+        "03_assets/pd",
+        "03_assets/flux",
+        "03_assets/quarantine",
+        "04_audio/chunks",
+        "04_audio/music",
+        "05_video/clips",
+        "06_metadata",
+    ]:
+        (ws / sub).mkdir(parents=True, exist_ok=True)
+    return ws
+
+
+def find_episode_workspace(episode_id: str) -> Path | None:
+    """Locate workspace by episode_id, with or without slug."""
+    cfg = load_config()
+    for entry in cfg.episodes_dir.glob(f"{episode_id}*"):
+        if entry.is_dir():
+            return entry
+    return None
+
+
+# -------------------------- rolling window --------------------------
+
+def push_rolling_window(
+    queue: dict[str, Any],
+    archetype: str,
+    narrator: str,
+    visual_style: str,
+    keep: int = 6,
+) -> None:
+    rw = queue["rolling_window"]
+    for key, val in [
+        ("archetypes", archetype),
+        ("narrators", narrator),
+        ("visual_styles", visual_style),
+    ]:
+        rw.setdefault(key, []).append(val)
+        rw[key] = rw[key][-keep:]

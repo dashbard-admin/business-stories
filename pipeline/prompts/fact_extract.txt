@@ -1,0 +1,66 @@
+You are extracting verifiable facts about {incident_name} from a single
+source. Output ONLY facts that the source explicitly states. Do NOT
+infer, embellish, or summarize beyond what is written.
+
+For each fact, output an object with these fields:
+
+- fact_text: a single declarative sentence
+- fact_type: one of [
+    founding_date,
+    location_founded,
+    founder,
+    early_employee,
+    product_launch,
+    business_model,
+    market_context,
+    competitor,
+    crisis_trigger,
+    pivotal_decision,
+    financial_metric,
+    funding_round,
+    acquisition,
+    ipo_event,
+    regulatory_event,
+    lawsuit_or_settlement,
+    leadership_change,
+    quote
+  ]
+- exact_quote: the source's exact wording (max 25 words). Required for
+  the `quote` type; encouraged otherwise.
+- source_paragraph_hint: brief positional reference (e.g. "page 3,
+  second paragraph", "section titled 'Founding'", "paragraph
+  beginning 'In 2003...'")
+- confidence: "high" if directly stated, "medium" if implied from
+  surrounding context, "low" if requires interpretation
+- hq_location (OPTIONAL — only include if the source EXPLICITLY
+  states the company's headquarters city/state/country, e.g.
+  "headquartered in Palo Alto, California" or "based in London").
+  Format as an object: {{"city": "...", "state_or_region": "...",
+  "country": "..."}}. Omit any field not stated. OMIT the entire
+  object if no HQ is mentioned. Do NOT estimate from
+  surrounding context — leave that to downstream consolidation.
+
+SOURCE METADATA:
+- publisher: {publisher}
+- tier: {tier}   (one of: open_tier1, open_tier2, paywall_wayback,
+                  paywall_title_only)
+- date: {source_date}
+
+IMPORTANT — paywall sources are weaker evidence:
+If `tier` is `paywall_title_only`, you are reading only the title and
+meta-description, not the article body. From these, extract at most
+ONE headline-level fact and set its confidence to "low". Do NOT
+invent quotes or details that would have to come from the body.
+
+OUTPUT FORMAT — JSON array only, no prose, no code fences:
+[
+  {{
+    "fact_text": "...",
+    "fact_type": "...",
+    "exact_quote": "...",
+    "source_paragraph_hint": "...",
+    "confidence": "high"
+  }}
+]
+
+If the chunk contains no verifiable facts, return [].

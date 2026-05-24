@@ -1,0 +1,4 @@
+{
+  "_comment": "Manifest of curated documentary music. Operator populates this by hand (or via `python -m pipeline.tools.scan_music_library` for a skeleton). Each track must exist as a file in this directory.",
+  "tracks": []
+}

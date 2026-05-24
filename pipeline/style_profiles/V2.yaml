@@ -1,0 +1,34 @@
+id: V2
+name: "Noir Comic"
+prefix: |
+  graphic-novel noir panel art, heavy chiaroscuro, ink-wash shadows,
+  restrained desaturated palette with single accent color (deep red or
+  amber), dramatic backlighting, oppressive low-key mood,
+suffix: |
+  cinematic noir framing, hard-edged ink shadows, painterly highlights,
+  no bright cheerful colors, no comedy tone, no photo-realism
+negative_prompt: |
+  bright cheerful colors, oversaturated neon, comedy tone, cartoonish
+  rounded shapes, photorealistic, photograph, 3D render,
+  garbled text, watermark, signature in corner, anatomical errors,
+  melted faces, extra fingers, distorted hands, illegible signage,
+  glyph soup, legible logo text on signage, brand wordmarks as letters
+guidance_for_llm: |
+  Use this style for scandal / failure / postmortem / decline beats —
+  Theranos collapse, Enron implosion, WeWork meltdown, Pets.com bust.
+
+  When writing visual descriptions for FLUX:
+  - Lean hard into shadow and tension. Avoid cheerful smiling
+    expressions, group celebrations, bright daylight exteriors.
+  - Prefer: empty boardrooms after-hours, rain on glass office walls,
+    harsh overhead fluorescent light casting eye-socket shadows, a
+    single desk lamp in a darkened office, news vans parked outside a
+    closed headquarters at dusk, a courthouse exterior in the rain, a
+    cleaning crew packing up a once-thronged office.
+  - Specify the single accent colour explicitly so FLUX commits to it
+    (e.g. "amber desk-lamp light against navy shadows").
+  - Same anti-text rules as V1 — describe logo SHAPES and storefront
+    COLOURS, not letters.
+  - Specify pose and gaze direction for any visible person, with
+    body language carrying the tension (head down, hand to face,
+    looking away from the camera).

@@ -1,0 +1,42 @@
+# SFX cue catalog — DOCUMENTATION ONLY.
+#
+# The business_success_stories pipeline does NOT synthesise SFX.
+# These entries are kept so the beat sheet (S8) can record an
+# intended SFX cue per beat, which a future SFX pass could pick up.
+# At the present time S11 (audio post) ignores `sfx_cue` entirely
+# and runs the music bed as a continuous bed under voice.
+#
+# Each cue lists a few short prompt fragments that could be used by
+# a Stable-Audio-Open style synthesiser. The vocabulary is tuned
+# for office / boardroom / market scenes, NOT maritime.
+
+typewriter:
+  - "single typewriter key strike, sharp metallic, dry room"
+  - "manual typewriter keys, several quick strikes, paper roll movement"
+keyboard:
+  - "soft mechanical keyboard taps, quick rhythm, office room ambience"
+  - "single key click on a 1990s plastic keyboard, dry"
+phone_ring:
+  - "office desk phone ringing, 1980s mechanical bell, two rings"
+  - "modern cell phone vibration on a wooden desk, three pulses"
+applause:
+  - "small auditorium applause, 50-100 people, warm but contained"
+  - "polite boardroom applause, brief, six to eight people"
+door_slam:
+  - "heavy wooden office door closing with a thud, no echo"
+  - "glass conference-room door snapping shut, brief reverb"
+traffic_hum:
+  - "distant city traffic at night, low rumble with occasional siren"
+  - "midtown ambient bed, no distinct vehicles, just hum"
+market_bell:
+  - "single NYSE-style bell strike, dry, no reverb"
+  - "trading-floor bell, single strike then crowd murmur fades up"
+newsprint_rustle:
+  - "newspaper being folded once, paper rustle, then placed on a desk"
+  - "newsprint page being turned, dry, no other ambience"
+clock_tick:
+  - "single old wall-clock tick, slow, with subtle mechanism"
+  - "boardroom wall clock ticking, four slow seconds"
+silence:
+  - "pure room tone, large empty office, distant HVAC"
+  - "deep silence with very low frequency air-handler rumble"

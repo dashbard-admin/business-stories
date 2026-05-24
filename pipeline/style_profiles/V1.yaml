@@ -1,0 +1,37 @@
+id: V1
+name: "Classic Comic"
+prefix: |
+  comic book panel art, bold black ink linework, vibrant flat colors with
+  cel-shading, dramatic chiaroscuro lighting, painterly textures, cinematic
+  composition, halftone shading in shadows,
+suffix: |
+  modern graphic-novel illustration style, confident inking, no photo-realism,
+  no 3D render, no rough sketch lines, no muddy palette
+negative_prompt: |
+  photorealistic, photo, photograph, 3D render, blurry, low-contrast,
+  oversaturated neon, garbled text, lowres, watermark, signature,
+  signature in corner, anatomical errors, melted faces, extra fingers,
+  extra limbs, distorted hands, illegible signage, glyph soup,
+  legible logo text on signage, brand wordmarks rendered as letters,
+  random alphanumeric clutter
+guidance_for_llm: |
+  Use this style for upbeat / origin / rise / disruption beats — the
+  default for the channel.
+
+  When writing visual descriptions for FLUX (in beat-sheet "specific_visual_description"):
+  - Specify panel composition (close-up vs. medium vs. wide shot).
+  - Specify pose, expression, and direction of gaze for any visible
+    person.
+  - Specify era-appropriate clothing, technology, vehicles, and
+    architecture (e.g. "1970s lab coat", "1990s beige desktop tower",
+    "early-2000s flip phone").
+  - Specify time of day and primary light source ("low golden-hour
+    light through a glass office wall", "overhead fluorescent strip
+    casting hard shadows").
+  - DO NOT ask for legible text in signage, headlines, screens, or
+    logos. Diffusion models render text as glyph-scribble and break
+    immersion. If a brand presence is needed, describe the SHAPE of
+    the logo or the colour of the storefront, not the letters.
+  - Prefer architectural or human silhouettes when a celebrity face
+    would otherwise be needed — the comic-book style lets us imply
+    identity through pose, lighting, and context.
