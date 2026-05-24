@@ -60,14 +60,18 @@ def run(episode: dict, queue: dict) -> str | None:
     incident_name = episode["incident"]["company_name"]
 
     # ---------- 1. merge (chunked) ----------
-    # Run the merge prompt in batches of MERGE_CHUNK facts. Smaller
-    # output per call dramatically reduces the rate of JSON-output
-    # breakage we hit in production on Gemma-4 with 300+ facts (the
-    # parser failed deep into a 12 KB response, around line 303).
+    # Run the merge prompt in batches of MERGE_CHUNK facts. The
+    # real bottleneck observed in production is OUTPUT TRUNCATION,
+    # not JSON malformation — Gemma-4 was hitting max_tokens at
+    # ~12 KB / ~3000 output tokens and getting cut off mid-array.
+    # With 80-fact chunks the output still overran the cap. Dropping
+    # to 25 facts keeps each call's claim list comfortably inside
+    # the 6000-token output budget.
     # Per-chunk failure is non-fatal: chunks that succeed contribute,
-    # chunks that fail are logged and skipped.
+    # chunks that fail (or get partially salvaged by complete_json's
+    # repair pass) are logged and skipped.
     merge_template = (cfg.prompts_dir / "fact_merge.txt").read_text()
-    MERGE_CHUNK = 80
+    MERGE_CHUNK = 25
     facts_for_merge = raw_facts[:300]
     merged = _merge_in_chunks(
         critic=critic,
@@ -221,7 +225,7 @@ def _merge_in_chunks(
         )
         try:
             batch_claims = critic.complete_json(
-                prompt, temperature=0.3, max_tokens=4000,
+                prompt, temperature=0.3, max_tokens=6000,
             )
         except Exception as e:
             logger.warning("S04 merge batch %d failed: %s", batch_idx + 1, e)

@@ -82,32 +82,53 @@ class LLM:
         """Parse the output as JSON, retrying on parse failure with an
         explicit reminder appended to the prompt.
 
-        After each retry's normal parse fails, we attempt a last-ditch
-        REPAIR pass (`_repair_json`) that fixes the most common LLM
-        breakages: missing commas between adjacent objects, prose
-        appended after the JSON, accidental smart-quote injection.
-        Only if repair also fails do we count the attempt as lost.
+        Three layered recoveries:
+          1. Strict json.loads.
+          2. Repair pass (`_repair_json`) for common LLM breakages —
+             trailing prose, missing commas between objects, smart
+             quotes, trailing commas, AND truncated arrays/objects
+             (whichever complete top-level elements were emitted
+             before the model ran out of token budget).
+          3. Retry with an explicit reminder ONLY when the failure
+             was NOT a truncation. If the model hit max_tokens
+             (`finish_reason=='length'`) it will hit the same wall
+             on the retry, so we skip straight to repair-or-give-up.
         """
         last_err: Exception | None = None
         for attempt in range(retries + 1):
             res = self.complete(prompt, temperature=temperature, max_tokens=max_tokens)
             text = _strip_code_fences(res.text)
+            truncated = (res.finish_reason or "").lower() == "length"
+
             try:
                 return json.loads(text)
             except json.JSONDecodeError as e:
-                # Try the repair pass before giving up on this attempt.
+                # Repair pass — handles truncated output too.
                 repaired = _repair_json(text)
                 if repaired is not None and repaired != text:
                     try:
                         result = json.loads(repaired)
                         logger.info(
-                            "JSON parse succeeded after repair (attempt %d)",
-                            attempt,
+                            "JSON parse succeeded after repair (attempt %d%s)",
+                            attempt, ", truncated" if truncated else "",
                         )
                         return result
                     except json.JSONDecodeError:
                         pass
+
                 last_err = e
+                if truncated:
+                    # Don't burn a retry — the model will hit the
+                    # token cap again with the same prompt. Bail
+                    # immediately so the caller can downsize input.
+                    logger.warning(
+                        "LLM output truncated at max_tokens=%d "
+                        "(finish_reason=length, %d chars emitted, "
+                        "parse failed: %s) — skipping retries",
+                        max_tokens, len(text), e,
+                    )
+                    break
+
                 logger.warning("JSON parse failed (attempt %d): %s", attempt, e)
                 prompt = (
                     prompt
@@ -363,16 +384,24 @@ def _repair_json(text: str) -> str | None:
         return None
     start = min(candidates)
     s = s[start:]
+    outer_open = s[0]   # '{' or '['
+    outer_close = "]" if outer_open == "[" else "}"
 
-    # Trim trailing prose: find the last balanced closing brace/
-    # bracket by walking the string and tracking depth. Anything
-    # after the depth returns to zero is discarded.
+    # Walk the string tracking bracket depth. Record TWO things:
+    #   - last_balanced: where the outer container fully closes
+    #     (depth returns to zero). Used to trim trailing prose.
+    #   - last_inner_close: the latest position where we closed a
+    #     direct child of the outer container (depth went from
+    #     2 to 1). Used to salvage TRUNCATED output — if the outer
+    #     container never closes, we keep everything up to and
+    #     including this position and append the missing closer.
     opens = "{["
     closes_for = {"}": "{", "]": "["}
     stack: list[str] = []
     in_string = False
     escape = False
     last_balanced = -1
+    last_inner_close = -1
     for i, ch in enumerate(s):
         if escape:
             escape = False
@@ -390,10 +419,27 @@ def _repair_json(text: str) -> str | None:
         elif ch in closes_for:
             if stack and stack[-1] == closes_for[ch]:
                 stack.pop()
-                if not stack:
+                if len(stack) == 1:
+                    # Just closed a top-level child of the outer
+                    # container. Safe truncation point.
+                    last_inner_close = i
+                elif not stack:
                     last_balanced = i
+
     if last_balanced >= 0:
+        # Outer container closed cleanly somewhere; trim trailing prose.
         s = s[: last_balanced + 1]
+    elif last_inner_close >= 0:
+        # Outer container NEVER closed — output was truncated mid-array
+        # (the actual production failure on Gemma-4 + S04 merge).
+        # Salvage the complete top-level elements emitted before the
+        # truncation point and close the outer container ourselves.
+        # Drop everything after the last completed inner element
+        # (which is usually a partial child that will not parse).
+        salvaged = s[: last_inner_close + 1].rstrip().rstrip(",")
+        s = salvaged + outer_close
+    # else: no balanced inner element either — fall through to
+    # comma/quote repairs, which probably won't save it.
 
     # Smart-quote normalization (string contents may legitimately
     # contain unicode quotes, but they break parsing only when they
