@@ -65,41 +65,55 @@ def run(episode: dict, queue: dict) -> str | None:
     clips_dir = ws / "05_video" / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
 
-    # ----- title card (8 s) -----
-    title_clip = clips_dir / "00_title.mp4"
-    if not _clip_is_valid(title_clip):
-        if title_clip.exists():
-            try:
-                title_clip.unlink()
-            except Exception:
-                pass
-        title_card_png = ws / "05_video" / "title_card.png"
-        narrator_id = episode.get("narrator")
-        narrator_name = None
-        if narrator_id:
-            try:
-                narr = cfg.narrator_by_id(narrator_id)
-                narrator_name = (narr or {}).get("name")
-            except Exception:
-                pass
+    # The new 6-act writer prompt is explicit: NO INTRO, NO LOGO,
+    # NO "WELCOME BACK". The first frame should be Act 0's cold open.
+    # `production.opening_title_card_seconds` defaults to 0 (disabled).
+    # Set to 2-8 in config.yaml to re-enable a brand stamp at the cost
+    # of the cold-open 15s retention window.
+    title_card_seconds = float(cfg.production.get("opening_title_card_seconds", 0))
+    closing_card_seconds = float(cfg.production.get("closing_card_seconds", 5))
 
-        # Prefer FLUX-rendered backdrop from S09.
-        flux_title_png = ws / "03_assets" / "flux" / "title.png"
-        _render_title_card(
-            out_path=title_card_png,
-            backdrop=flux_title_png if flux_title_png.exists() else None,
-            channel=cfg.channel["name"],
-            episode_title=episode["incident"]["company_name"],
-            year=episode["incident"].get("year_anchor"),
-            brand_color=cfg.channel.get("brand_color", "#1a2b3c"),
-            narrator_name=narrator_name,
-        )
-        try:
-            ken_burns_clip(title_card_png, 8.0, "slow_zoom_in", title_clip)
-        except Exception as e:
-            return f"title card render failed: {e}"
+    clip_paths: list[Path] = []
 
-    clip_paths: list[Path] = [title_clip]
+    # ----- optional opening title card -----
+    if title_card_seconds > 0:
+        title_clip = clips_dir / "00_title.mp4"
+        if not _clip_is_valid(title_clip):
+            if title_clip.exists():
+                try:
+                    title_clip.unlink()
+                except Exception:
+                    pass
+            title_card_png = ws / "05_video" / "title_card.png"
+            narrator_id = episode.get("narrator")
+            narrator_name = None
+            if narrator_id:
+                try:
+                    narr = cfg.narrator_by_id(narrator_id)
+                    narrator_name = (narr or {}).get("name")
+                except Exception:
+                    pass
+
+            flux_title_png = ws / "03_assets" / "flux" / "title.png"
+            _render_title_card(
+                out_path=title_card_png,
+                backdrop=flux_title_png if flux_title_png.exists() else None,
+                channel=cfg.channel["name"],
+                episode_title=episode["incident"]["company_name"],
+                year=episode["incident"].get("year_anchor"),
+                brand_color=cfg.channel.get("brand_color", "#1a2b3c"),
+                narrator_name=narrator_name,
+            )
+            try:
+                ken_burns_clip(title_card_png, title_card_seconds,
+                               "slow_zoom_in", title_clip)
+            except Exception as e:
+                return f"title card render failed: {e}"
+        clip_paths.append(title_clip)
+        logger.info("S12 opening title card: %.1fs", title_card_seconds)
+    else:
+        logger.info("S12 opening title card: disabled "
+                    "(production.opening_title_card_seconds=0)")
 
     # ----- per-beat clips -----
     for b in beats:
@@ -146,27 +160,30 @@ def run(episode: dict, queue: dict) -> str | None:
             return f"ken burns render failed for {beat_id}: {e}"
         clip_paths.append(clip_path)
 
-    # ----- closing source-attribution card (5 s) -----
-    closing_clip = clips_dir / "zz_closing.mp4"
-    if not _clip_is_valid(closing_clip):
-        if closing_clip.exists():
+    # ----- optional closing source-attribution card -----
+    if closing_card_seconds > 0:
+        closing_clip = clips_dir / "zz_closing.mp4"
+        if not _clip_is_valid(closing_clip):
+            if closing_clip.exists():
+                try:
+                    closing_clip.unlink()
+                except Exception:
+                    pass
+            closing_png = ws / "05_video" / "closing_card.png"
+            flux_credits_png = ws / "03_assets" / "flux" / "credits.png"
+            _render_closing_card(
+                out_path=closing_png,
+                backdrop=flux_credits_png if flux_credits_png.exists() else None,
+                workspace=ws,
+                brand_color=cfg.channel.get("brand_color", "#1a2b3c"),
+            )
             try:
-                closing_clip.unlink()
-            except Exception:
-                pass
-        closing_png = ws / "05_video" / "closing_card.png"
-        flux_credits_png = ws / "03_assets" / "flux" / "credits.png"
-        _render_closing_card(
-            out_path=closing_png,
-            backdrop=flux_credits_png if flux_credits_png.exists() else None,
-            workspace=ws,
-            brand_color=cfg.channel.get("brand_color", "#1a2b3c"),
-        )
-        try:
-            ken_burns_clip(closing_png, 5.0, "hold_still", closing_clip)
-        except Exception as e:
-            return f"closing card render failed: {e}"
-    clip_paths.append(closing_clip)
+                ken_burns_clip(closing_png, closing_card_seconds,
+                               "hold_still", closing_clip)
+            except Exception as e:
+                return f"closing card render failed: {e}"
+        clip_paths.append(closing_clip)
+        logger.info("S12 closing card: %.1fs", closing_card_seconds)
 
     # ----- concat -----
     final_mp4 = ws / "05_video" / "final.mp4"
@@ -176,8 +193,12 @@ def run(episode: dict, queue: dict) -> str | None:
         return f"final concat failed: {e}"
 
     # ----- captions -----
+    # Caption timestamps are offset by however many seconds of
+    # non-beat content (title card) play before the first beat.
+    # When the title card is disabled (default per new prompt), the
+    # offset is 0 and the first caption fires at t=0.
     try:
-        srt, vtt = _build_captions(beats, timing)
+        srt, vtt = _build_captions(beats, timing, caption_offset=title_card_seconds)
         (ws / "05_video" / "captions.srt").write_text(srt)
         (ws / "05_video" / "captions.vtt").write_text(vtt)
     except Exception as e:
@@ -321,9 +342,18 @@ def _render_closing_card(*, out_path: Path, backdrop: Path | None,
     img.save(out_path, "PNG")
 
 
-def _build_captions(beats: list[dict], timing: dict) -> tuple[str, str]:
+def _build_captions(
+    beats: list[dict], timing: dict, *, caption_offset: float = 0.0,
+) -> tuple[str, str]:
+    """Build SRT + VTT captions.
+
+    `caption_offset` is the number of seconds of non-beat content
+    (title card) that play BEFORE the first beat in the assembled
+    video. Captions are shifted by this amount so they line up with
+    the voice track in the muxed final.mp4.
+    """
     timing_by_beat = {b["beat_id"]: b for b in timing["beats"]}
-    offset = 8.0  # title clip duration
+    offset = float(caption_offset)
 
     srt_lines: list[str] = []
     vtt_lines: list[str] = ["WEBVTT", ""]

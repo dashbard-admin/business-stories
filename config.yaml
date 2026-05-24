@@ -50,6 +50,19 @@ production:
                                     # invalidates the hook timing the
                                     # writer prompt is calibrated for.
 
+  # Opening title card (prepended before Act 0). The script_generate
+  # prompt is explicit: NO INTRO, NO LOGO, NO "WELCOME BACK". Default
+  # is 0 (disabled) so the first frame is Act 0's cold open. Set to
+  # 2-8 if you want a brand stamp at the cost of the cold-open 15s
+  # retention window.
+  opening_title_card_seconds: 0
+
+  # Closing source-attribution card (appended after Act 5). Default 5
+  # seconds — enough for the operator's source citations to read,
+  # short enough not to compete with Act 5's editorial closing.
+  # Set to 0 to disable entirely.
+  closing_card_seconds: 5
+
 quality_gates:
   min_verified_facts: 5
   min_pd_assets: 3
@@ -112,7 +125,12 @@ music_library:
   manifest: "${root}/assets/music_library/manifest.json"
   crossfade_seconds: 4
   music_gain_db: -28.0              # bed level under voice
-  music_start_offset_seconds: 20.0  # narrator carries the cold open before the bed enters
+  music_start_offset_seconds: 30.0  # Anchored to the new 6-act template:
+                                    # Act 0 (the hook) runs 0:00-0:30 dry,
+                                    # then the music bed swells in with
+                                    # Act 1 ("set the era..."). Pushing
+                                    # this earlier puts music UNDER the
+                                    # hook delivery — bad for retention.
   # Voice level normalization (ported from maritime, voice-only)
   voice_dynaudnorm_enabled: true
   voice_dynaudnorm_framelen_ms: 200
