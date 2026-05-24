@@ -40,6 +40,7 @@ from ..config import load_config
 from ..generic_stash import ensure_stash_manifest
 from ..state import find_episode_workspace
 from ..vlm import VLM
+from .. import wikimedia
 
 logger = logging.getLogger("hermes.stage.s05")
 
@@ -51,32 +52,6 @@ ACCEPTABLE_LICENSES = {
     "no known copyright restrictions",
 }
 REJECTED_LICENSES = {"cc-by-nc", "cc-by-sa", "cc-by-nd", "all rights reserved"}
-
-
-# Business-domain search plan for SearXNG `site:` queries. Each entry
-# is (site, [query_templates_with_{company}_{founder}_{product}]).
-SEARCH_PLAN_BUSINESS: list[tuple[str, list[str]]] = [
-    # Wiki family
-    ("commons.wikimedia.org", ['"{company}"', '"{founder}"', '"{company}" logo']),
-    ("en.wikipedia.org", ['"{company}"', '"{founder}"']),
-    # US public archives
-    ("loc.gov/photos", ['"{company}"', '"{founder}"']),
-    ("catalog.archives.gov", ['"{company}"']),
-    ("si.edu", ['"{company}"', '"{founder}"']),       # Smithsonian top-level
-    ("sec.gov", ['"{company}"']),                     # logos / proxy art
-    # International archives
-    ("europeana.eu", ['"{company}"', '"{founder}"']),
-    # Free press (often has historical company photos)
-    ("apnews.com", ['"{company}" archives']),
-    ("bbc.com", ['"{company}"']),
-    ("npr.org", ['"{company}"']),
-    ("propublica.org", ['"{company}"']),
-    # Tech press for tech-origin stories
-    ("techcrunch.com", ['"{company}" founder']),
-    ("wired.com", ['"{company}"']),
-    # Internet archive
-    ("archive.org", ['"{company}" photographs', '"{founder}" portrait']),
-]
 
 
 @dataclass
@@ -155,56 +130,63 @@ def run(episode: dict, queue: dict) -> str | None:
         })
     logger.info("S05 Phase 0: %d existing assets cataloged", len(manifest))
 
-    # ---- Phase 1: Wikimedia Commons + Wikipedia direct queries ----
+    # ---- Phase 1: Wikimedia Commons via direct API ----
+    # The earlier SearXNG-with-site:commons approach returned HTML page
+    # URLs that we could not download as images. The Commons MediaWiki
+    # API gives us direct file URLs + structured license metadata in
+    # one call. This is the highest-yield source for known companies.
     phase1_terms = [t for t in [company, founder, *extra_terms] if t]
     for term in phase1_terms:
-        results = _safe_search(
-            browser, f'"{term}" site:commons.wikimedia.org', n=20,
-        )
-        for r in results:
+        if idx >= 50:
+            break
+        try:
+            hits = wikimedia.search(term, limit=20)
+        except Exception as e:
+            logger.warning("wikimedia search failed for %r: %s", term, e)
+            continue
+        logger.info("S05 Phase 1: wikimedia returned %d hits for %r", len(hits), term)
+        for h in hits:
             if idx >= 50:
                 break
-            ok, entry = _try_ingest(
-                r=r, browser=browser, pd_dir=pd_dir, ws=ws,
+            if not wikimedia.is_license_acceptable(h.license_short):
+                logger.debug("S05 Phase 1: license rejected %s: %s",
+                             h.title, h.license_short)
+                continue
+            ok = _ingest_wikimedia(
+                hit=h, browser=browser, pd_dir=pd_dir, ws=ws,
                 manifest=manifest, seen=seen_hashes, idx=idx + 1,
-                source_tag="phase1_wikimedia", caption=_caption, fallback=term,
+                caption=_caption, fallback=term,
             )
             if ok:
                 idx += 1
-        if idx >= 50:
-            break
-
     logger.info("S05 after Phase 1: %d assets", len(manifest))
 
-    # ---- Phase 2: SearXNG `site:` plan ----
-    template_ctx = {
-        "company": company,
-        "founder": founder or company,
-        "product": extra_terms[0] if extra_terms else company,
-    }
-    for site, query_templates in SEARCH_PLAN_BUSINESS:
+    # ---- Phase 2: SearXNG image-search mode (categories=images) ----
+    # Image-category SearXNG results carry the direct image URL in
+    # `img_src`, which browser.search() promotes to `url` for us. No
+    # `.png/.jpg` extension filter required.
+    image_search_terms = [t for t in [company, founder, *extra_terms[:3]] if t]
+    for term in image_search_terms:
         if idx >= 80:
             break
-        for qt in query_templates:
-            try:
-                inner = qt.format(**template_ctx)
-            except KeyError:
-                continue
-            query = f"{inner} site:{site}"
-            results = _safe_search(browser, query, n=15)
-            for r in results:
-                if idx >= 80:
-                    break
-                ok, _ = _try_ingest(
-                    r=r, browser=browser, pd_dir=pd_dir, ws=ws,
-                    manifest=manifest, seen=seen_hashes, idx=idx + 1,
-                    source_tag=f"phase2_{site}", caption=_caption, fallback=inner,
-                )
-                if ok:
-                    idx += 1
+        try:
+            results = browser.search(term, n_results=20, categories="images")
+        except Exception as e:
+            logger.warning("S05 Phase 2: image search failed for %r: %s", term, e)
+            continue
+        logger.info("S05 Phase 2: image search returned %d hits for %r",
+                    len(results), term)
+        for r in results:
             if idx >= 80:
                 break
-
+            ok, _ = _try_ingest(
+                r=r, browser=browser, pd_dir=pd_dir, ws=ws,
+                manifest=manifest, seen=seen_hashes, idx=idx + 1,
+                source_tag="phase2_image_search",
+                caption=_caption, fallback=term,
+            )
+            if ok:
+                idx += 1
     logger.info("S05 after Phase 2: %d assets", len(manifest))
 
     # ---- Phase 5: generic stash ----
@@ -272,30 +254,25 @@ def _extra_search_terms(ws: Path) -> list[str]:
     return out[:8]
 
 
-def _safe_search(browser: Browser, query: str, n: int = 15) -> list:
-    try:
-        return browser.search(query, n_results=n)
-    except Exception as e:
-        logger.warning("search failed for %r: %s", query, e)
-        return []
-
-
 def _try_ingest(*, r, browser, pd_dir: Path, ws: Path,
                 manifest: list[dict], seen: set[str], idx: int,
                 source_tag: str, caption, fallback: str) -> tuple[bool, dict | None]:
-    """Best-effort download → license/size gate → dedup → caption →
-    manifest append. Returns (ok, entry-or-None)."""
+    """Best-effort download → size gate → dedup → caption → manifest
+    append. Returns (ok, entry-or-None).
+
+    Used by Phase 2 image-search results. We trust SearXNG's
+    `img_src` to point at a real image; the size gate after download
+    rejects anything that turns out not to be an image (HTML error
+    pages, missing extensions, 0-byte responses).
+    """
     url = r.url
     if not url:
         return False, None
-    # Only fetch direct image URLs; for HTML pages we'd need scrape
-    # logic per-host. For our SearXNG-based pipeline that's an
-    # acceptable simplification — image search engines mostly return
-    # image URLs directly.
-    if not _looks_like_image_url(url):
-        return False, None
 
-    dest = pd_dir / safe_filename(f"{source_tag}_{idx:04d}.png", max_len=80)
+    # Preserve the source extension for the saved file when possible,
+    # so PIL doesn't have to guess at the format.
+    ext = _ext_from_url(url) or "jpg"
+    dest = pd_dir / safe_filename(f"{source_tag}_{idx:04d}.{ext}", max_len=80)
     ok = browser.download(url, dest, timeout=45)
     if not ok or not dest.exists() or dest.stat().st_size < 5000:
         try:
@@ -345,11 +322,117 @@ def _try_ingest(*, r, browser, pd_dir: Path, ws: Path,
     return True, entry
 
 
-_IMG_RE = re.compile(r"\.(?:png|jpe?g|webp|tiff?|svg)(?:$|[?#])", re.IGNORECASE)
+def _ingest_wikimedia(*, hit, browser, pd_dir: Path, ws: Path,
+                      manifest: list[dict], seen: set[str], idx: int,
+                      caption, fallback: str) -> bool:
+    """Download a Wikimedia Commons hit (CommonsImage), apply the
+    size + dedup gates, and add it to the manifest with the rich
+    license attribution already extracted from the Commons API."""
+    url = hit.url
+    if not url:
+        return False
+
+    # Pre-filter on the API-reported dimensions so we don't download
+    # tiny thumbnails.
+    if hit.width and hit.height and min(hit.width, hit.height) < 300:
+        logger.debug("S05 Phase 1: skipping %s (too small: %dx%d)",
+                     hit.title, hit.width, hit.height)
+        return False
+    # Skip SVG / non-raster files — Ken Burns + ffmpeg expect PNG/JPEG.
+    if hit.mime and "svg" in hit.mime.lower():
+        return False
+
+    ext = _ext_from_url(url) or _ext_from_mime(hit.mime) or "jpg"
+    safe_title = safe_filename(hit.title.replace("File:", ""), max_len=60)
+    dest = pd_dir / safe_filename(
+        f"phase1_wikimedia_{idx:04d}_{safe_title}.{ext}", max_len=120,
+    )
+    ok = browser.download(url, dest, timeout=60)
+    if not ok or not dest.exists() or dest.stat().st_size < 5000:
+        try:
+            dest.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+
+    meta = _probe_image(dest)
+    if meta is None or min(meta) < 200:
+        try:
+            dest.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+
+    phash = _phash_or_md5(dest)
+    if phash in seen:
+        try:
+            dest.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+    seen.add(phash)
+
+    title = hit.title.replace("File:", "").rsplit(".", 1)[0].replace("_", " ")
+    description, vlm_caption = caption(dest, fallback=title)
+
+    attribution_text = None
+    if hit.attribution_required:
+        # Operator must credit. Build a readable attribution line.
+        bits = [hit.artist or "Unknown author",
+                f"({hit.license_short})" if hit.license_short else "",
+                f"via Wikimedia Commons"]
+        attribution_text = " ".join(b for b in bits if b)
+
+    entry = {
+        "id": f"pd_{idx:04d}",
+        "local_path": str(dest.relative_to(ws)),
+        "original_url": url,
+        "source_page": hit.description_url,
+        "license": hit.license_short or "unknown",
+        "license_url": hit.license_url or None,
+        "attribution_required": hit.attribution_required,
+        "attribution_text": attribution_text,
+        "width": meta[0],
+        "height": meta[1],
+        "direct_use_eligible": min(meta) >= 800,
+        "title": title,
+        "description": description,
+        "caption": vlm_caption,
+        "source": "phase1_wikimedia",
+    }
+    manifest.append(entry)
+    logger.info("ingested %s (%dx%d, %s) <- wikimedia",
+                entry["id"], meta[0], meta[1], hit.license_short or "?")
+    return True
 
 
-def _looks_like_image_url(url: str) -> bool:
-    return bool(_IMG_RE.search(url or ""))
+_EXT_RE = re.compile(r"\.([A-Za-z0-9]{2,5})(?:$|[?#])")
+
+
+def _ext_from_url(url: str) -> str | None:
+    """Pull the file extension off a URL path, if present and sane."""
+    m = _EXT_RE.search(url or "")
+    if not m:
+        return None
+    ext = m.group(1).lower()
+    if ext in {"png", "jpg", "jpeg", "webp", "tif", "tiff"}:
+        return ext
+    return None
+
+
+def _ext_from_mime(mime: str) -> str | None:
+    if not mime:
+        return None
+    mime = mime.lower()
+    if "jpeg" in mime or "jpg" in mime:
+        return "jpg"
+    if "png" in mime:
+        return "png"
+    if "webp" in mime:
+        return "webp"
+    if "tiff" in mime:
+        return "tif"
+    return None
 
 
 def _probe_image(path: Path) -> tuple[int, int] | None:

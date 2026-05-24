@@ -63,10 +63,19 @@ class Browser:
 
     # ------------------ public API ------------------
 
-    def search(self, query: str, n_results: int = 10) -> list[SearchResult]:
+    def search(self, query: str, n_results: int = 10,
+               *, categories: str = "") -> list[SearchResult]:
+        """Generic SearXNG search.
+
+        Set `categories="images"` to route the query through SearXNG's
+        image-search engines (Google Images, Bing Images, etc.) instead
+        of the default general-web engines. Image results carry the
+        DIRECT image URL in the `url` field rather than the HTML page
+        URL — S05 Phase 2 relies on this to actually download images.
+        """
         if self.mock_mode:
             return self._mock_search(query, n_results)
-        return self._invoke_search(query, n_results)
+        return self._invoke_search(query, n_results, categories=categories)
 
     def fetch(self, url: str, timeout: int = 30) -> FetchResult:
         if self.mock_mode:
@@ -85,7 +94,9 @@ class Browser:
 
     # ------------------ implementation hooks ------------------
 
-    def _invoke_search(self, query: str, n: int) -> list[SearchResult]:
+    def _invoke_search(
+        self, query: str, n: int, *, categories: str = "",
+    ) -> list[SearchResult]:
         s = self._search_cfg
         if s.get("backend") != "searxng":
             raise NotImplementedError(
@@ -98,8 +109,13 @@ class Browser:
             "safesearch": s.get("safesearch", 0),
         }
         engines = (s.get("engines") or "").strip()
-        if engines:
+        if engines and not categories:
+            # Don't pin engines when the caller requested a category
+            # (categories trumps engines in SearXNG anyway, and engine
+            # names from the default set may not be in the image set).
             params["engines"] = engines
+        if categories:
+            params["categories"] = categories
 
         r = self._session.get(
             url, params=params,
@@ -109,7 +125,14 @@ class Browser:
         data = r.json()
         out: list[SearchResult] = []
         for item in (data.get("results") or [])[:n]:
-            link = item.get("url") or ""
+            # Image-search results put the canonical image URL in
+            # `img_src` and the source HTML page in `url`. We want
+            # the image URL when categories=images, the page URL
+            # otherwise.
+            if categories == "images":
+                link = item.get("img_src") or item.get("url") or ""
+            else:
+                link = item.get("url") or ""
             if not link:
                 continue
             out.append(SearchResult(
