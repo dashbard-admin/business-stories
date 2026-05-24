@@ -8,8 +8,15 @@ channel:
   contact_email: "you@example.com"
 
 paths:
-  # Absolute paths recommended. Use ${root} as a substitution token.
-  root: "/Users/cantemir/Projects/business_success_stories"
+  # `paths.root` is OPTIONAL. By default the project root is derived
+  # from the directory containing config.yaml on disk, so this file
+  # is portable across machines and checkout locations. Set
+  # `root: "/absolute/path"` only if you want the workspace (state,
+  # episodes, assets) hosted on a different drive than the code; if
+  # the path you set doesn't exist, the loader silently falls back
+  # to the config-file's directory.
+  #
+  # root: "/Users/example/business_success_stories"
   state: "${root}/state"
   episodes: "${root}/episodes"
   assets: "${root}/assets"

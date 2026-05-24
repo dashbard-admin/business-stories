@@ -204,10 +204,21 @@ class Config:
 
 @lru_cache(maxsize=1)
 def load_config() -> Config:
-    """Load and cache the global config object."""
+    """Load and cache the global config object.
+
+    The project root is derived from the location of config.yaml on
+    disk — config.yaml is always at the project root, so this works
+    regardless of where the repository is cloned. The `paths.root`
+    field in the YAML is treated as an optional override: if it's
+    present and resolves to an existing directory, we use it
+    (so operators can host the workspace on a different drive); if
+    it's stale or missing, we silently fall back to the file-derived
+    root.
+    """
+    import logging
     config_path = os.environ.get("PIPELINE_CONFIG")
     if config_path:
-        path = Path(config_path)
+        path = Path(config_path).expanduser().resolve()
     else:
         path = Path(__file__).resolve().parent.parent / "config.yaml"
 
@@ -217,7 +228,34 @@ def load_config() -> Config:
     with path.open() as f:
         raw = yaml.safe_load(f)
 
-    root = Path(raw["paths"]["root"]).expanduser().resolve()
+    # Canonical root: the directory containing config.yaml.
+    file_root = path.parent.resolve()
+
+    # Configured override (optional).
+    configured = (raw.get("paths") or {}).get("root")
+    if configured:
+        configured_root = Path(configured).expanduser().resolve()
+    else:
+        configured_root = file_root
+
+    # Prefer the file-derived root when the configured one is stale
+    # (e.g. a different developer's checkout path baked into the YAML).
+    if configured_root != file_root and not configured_root.exists():
+        logging.getLogger("hermes.config").info(
+            "paths.root in %s (%s) does not exist; using config-file location %s instead",
+            path, configured_root, file_root,
+        )
+        root = file_root
+    else:
+        # Either the YAML's root exists (operator deliberately pointed
+        # elsewhere) or it matches the file-derived root. Use it.
+        root = configured_root
+
+    # Reflect the resolved root back into the raw dict so the
+    # ${root} token in nested path entries (state, episodes, assets…)
+    # resolves correctly without needing operator edits.
+    raw.setdefault("paths", {})["root"] = str(root)
+
     cfg = Config(raw=raw, root=root)
 
     for d in (cfg.state_dir, cfg.episodes_dir, cfg.assets_dir, cfg.logs_dir):

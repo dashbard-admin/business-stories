@@ -5,7 +5,10 @@
 
 set -euo pipefail
 
-ROOT="/Users/cantemir/Projects/business_success_stories"
+# Derive the project root from the location of THIS script — portable
+# across machines and checkout locations. Resolve symlinks so `cron`
+# can invoke this via any path.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "${ROOT}"
 
 # Activate venv if present. Fall back to system python3.
