@@ -30,7 +30,7 @@ from ..state import find_episode_workspace
 
 logger = logging.getLogger("hermes.stage.s08")
 
-WPM = 125  # business pipeline runs Kokoro slow-documentary cadence
+WPM = 120  # anchored to script_generate.txt's hook-cadence math
 
 BEAT_RE = re.compile(r"##\s*BEAT\s+(\d+)\s*##", re.IGNORECASE)
 

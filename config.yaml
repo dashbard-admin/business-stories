@@ -44,7 +44,11 @@ production:
   duration_tolerance_seconds: 150
   target_words: 2000
   word_count_tolerance: 200
-  wpm_effective: 125                # Kokoro slow-documentary cadence
+  wpm_effective: 120                # Anchored to script_generate.txt
+                                    # which schedules Act 0-5 hook
+                                    # cadence at 120 wpm. Changing this
+                                    # invalidates the hook timing the
+                                    # writer prompt is calibrated for.
 
 quality_gates:
   min_verified_facts: 5

@@ -1,12 +1,9 @@
 You are writing a script for a Business & Brand Origin Stories
-documentary channel. Think Companies / Modern MBA / Business Casual /
-Logically Answered, but with sharper storytelling and a stronger
-hero/conflict spine than the saturated "how X became a billion-dollar
-company" template. The voice is engaging, accurate, and quietly
+documentary channel. The voice is engaging, accurate, and quietly
 curious — uplifting and educational, low technical density, low MBA
-jargon. The STRUCTURE is engineered for retention: a viewer who lands
-here should be unable to put the video down at 30 seconds, 5 minutes,
-or 12 minutes.
+jargon. The STRUCTURE is engineered for retention: a viewer who
+lands here should be unable to put the video down at 15 seconds, at
+5 minutes, or at 15 minutes.
 
 EPISODE PARAMETERS:
 - Company: {incident_name}
@@ -15,6 +12,8 @@ EPISODE PARAMETERS:
 - Conflict (locked at S1): {conflict}
 - Story kind: {story_kind}
 - Target words: {target_words} (acceptable range: {min_words}-{max_words})
+- Reading cadence assumed: 120 wpm — every timing below is computed
+  at that rate. 2000 words at 120 wpm ≈ 16.7 minutes.
 - Archetype: {archetype_name}
   Archetype guidance: {archetype_guidance}
 - Narrator persona: {narrator_name} ({narrator_tone})
@@ -29,123 +28,302 @@ suggested..."), or (b) omit it. NEVER invent dates, dollar amounts,
 quotes, names, founder dialogue, valuations, employee counts, or
 court findings not present in the ledger.
 
-STRUCTURE — three structural laws + one wildcard.
+================================================================
+STRUCTURE — THE 6-ACT TEMPLATE  (mandatory; every act required)
+================================================================
+The script follows a tightly engineered six-act arc. Word counts
+below are at 120 wpm and total ~1950 words; you have up to
+{max_words} to use if needed. Insert ## BEAT N ## markers at the
+visual transitions noted; the beat-count target is {target_beats}.
 
-LAW 1 — COLD OPEN (mandatory, first 60-100 words, BEFORE the
-"## BEAT 1 ##" marker):
-Open with the central tension of THIS story, named in plain language.
-Within the first three sentences the viewer must hear:
-- the company name,
-- the year anchor (or the era),
-- and ONE specific concrete detail that signals this is not the story
-  they think it is — a number that doesn't fit the narrative, a
-  decision that contradicted everything else the founder said, a
-  competitor who turned out to be right, a filing nobody read.
+─────────────────────────────────────────────────────────────────
+ACT 0 — THE HOOK            0:00 – 0:30      (~75 words)
+─────────────────────────────────────────────────────────────────
+0:00-0:08  The CONTRAST SHOT: a massive present-day fact OR the
+           most arresting single moment from the story. Open on
+           a SPECIFIC number or image. Examples of openings:
+             - "Today {incident_name} is worth $X billion."
+             - "On a specific dated morning, {hero} had Y dollars
+                in the bank and Z days of runway."
+           Whatever you open with MUST come from the fact ledger
+           and must contain at least one concrete number, date,
+           or named place in the first sentence.
+0:08-0:20  THE "BUT" — what makes the origin unbelievable.
+           Name the contradiction between where the company
+           ended up and where it started.
+0:20-0:30  THE PROMISE — what the viewer will understand by the
+           end. One sentence. Pattern:
+             "This is the story of how [specific small event in
+              year Y] built [specific big outcome] — and almost
+              destroyed it [N] times."
 
-Do NOT open with weather, abstract context, or a CEO biography. The
-viewer decides whether to keep watching in the first 8 seconds; the
-cold open is the only paragraph that wins or loses that decision.
+ABSOLUTE BANS on Act 0:
+- No "Welcome back."
+- No channel intro.
+- No "Subscribe."
+- No "Today we're going to talk about..."
+- No generic openings ("In a world where...", "Once upon a
+  time...", "Have you ever wondered...").
 
-The cold open must NAME the hero and the conflict somewhere in its
-first three sentences. The rest of the script earns them.
+Insert ## BEAT 1 ## at the very start of the script (Act 0
+opens on it).
 
-LAW 2 — ARCHETYPE BACKBONE (the rest of the script):
-Follow the archetype guidance for opening device, middle structure,
-and closing device. The cold open runs THROUGH the archetype — the
-archetype shapes how the question gets developed from paragraph two
-onward. Do not start the archetype opening from scratch after the
-cold open; weave it in.
+─────────────────────────────────────────────────────────────────
+ACT 1 — THE BEFORE          0:30 – 3:00      (~375 words)
+─────────────────────────────────────────────────────────────────
+0:30-1:00  Set the era. What year, what world, what was
+           "normal" then. Time-stamp everything — month and
+           year, not "back in the day". One sentence on
+           market conditions, one on the technology of the
+           era, one on the cultural context.
+1:00-2:00  Introduce the founder(s) — who they were BEFORE
+           they were famous. Their unremarkable previous life.
+           Specific job titles, specific cities, specific
+           failed earlier attempts if the ledger contains them.
+2:00-3:00  THE CATALYST: the moment / problem / observation
+           that triggered everything. Often: a personal
+           frustration, a chance encounter, an industry gap.
+           This is the moment the founder DECIDED — not yet the
+           moment they acted.
 
-LAW 3 — THREE FORWARD-TEASE MOMENTS at roughly 25%, 50%, and 75% of
-the script:
-Each tease is exactly ONE sentence that names something the script
-will return to later. The substance MUST come from the fact ledger —
-a filing whose full implications will be unpacked later, a competitor
-not yet named, a financial metric that doesn't match the press
-release, a decision the founder later regretted.
+>>> RE-HOOK at ~1:30 (~180 words in): land ONE sentence that
+    forecloses the easy assumption. Examples:
+      - "Nobody at the table that night could have predicted
+         what was about to happen."
+      - "And then she noticed something that nobody else had
+         seen."
+>>> RE-HOOK at ~2:30 (~300 words in): close the act on tension.
+    Examples:
+      - "It was a terrible idea. And he was about to bet
+         everything on it."
+      - "By every measure that mattered, this was the wrong
+         time, the wrong industry, the wrong founder."
 
-Acceptable patterns:
-  - "The Series A had a clause that wouldn't matter for another four
-    years — we will come back to it after the pivot."
-  - "What the company's own 2003 annual report revealed about that
-    quarter would take outside analysts a decade to notice."
-  - "The competitor that would eventually buy them was, in 1999, a
-    customer."
+─────────────────────────────────────────────────────────────────
+ACT 2 — THE BET             3:00 – 5:30      (~375 words)
+─────────────────────────────────────────────────────────────────
+3:00-4:00  The FOUNDING DECISION and what it cost. Make the
+           sacrifice concrete: savings drawn, job left, house
+           mortgaged, partner objections, dollar amount on the
+           first cheque. Risk made tangible.
+4:00-5:00  FIRST PRODUCT or first attempt. Often laughably
+           small or amateurish in retrospect — name the
+           specifics: the workshop / garage / kitchen table,
+           the first customer, the first failure.
+5:00-5:30  EARLY SIGNAL that something was working — and the
+           first sign of the problem coming. Two sentences,
+           hinged with "but" or "and yet".
 
-Banned tease patterns: "you won't believe", "the shocking truth",
-any second-person command ("wait until you hear what they did
-next"), any tease promising something not in the fact ledger.
+>>> RE-HOOK at ~4:00 (~480 words in): one sentence dropping
+    a forward tease that pays off in Act 3.
+>>> RE-HOOK at ~5:00 (~600 words in): another. Different
+    angle — one should be a number/date hook, the other a
+    character/decision hook.
 
-WILDCARD — keep ONE deliberate unpredictable element, placed
-organically (NOT at the same beat position as previous episodes):
-- An unexpected zoom-out to the broader market context
-- A direct quotation from the founder, read verbatim
-- A direct address to the viewer (one time only)
-- An admission of what is NOT documented
-- A specific number that recontextualizes everything ("$8.4 million in
-  the bank, with thirty-one employees — and the rent was due Friday")
+─────────────────────────────────────────────────────────────────
+*** MID-ROLL TENSION LANDING #1 — 5:30 (~660 words in) ***
+─────────────────────────────────────────────────────────────────
+Land Act 2 on tension. The company is growing — but a problem
+the founder didn't anticipate is about to surface. Last words
+of Act 2 should be a one-sentence cliff:
+  "And by the spring of [year], the company was about to face a
+   problem nobody at the table had ever seen before."
+(This isn't a literal ad break in our pipeline — but treat the
+moment as if the viewer might leave here. Make them stay.)
 
-EDITORIAL CLOSING — mandatory, 200-300 words.
-The final 200-300 words must be the narrator's perspective on what
-THIS specific story reveals about founders, markets, or the era.
-Make it specific to THIS company — not a generic closing. It must
-LAND: end on a single concrete image or sentence the viewer will
-remember. Do NOT summarize the episode. Do NOT moralize. Pay off the
-cold-open question.
+─────────────────────────────────────────────────────────────────
+ACT 3 — THE CRISIS          5:30 – 9:30      (~600 words)
+─────────────────────────────────────────────────────────────────
+5:30-5:45  POST-LANDING RE-ENTRY: brief restatement of where the
+           company stood right before the crisis hit. One short
+           paragraph re-orienting the viewer.
+5:45-7:00  THE CRISIS: lawsuit, competitor, market crash,
+           internal mutiny, product failure, founder ousted —
+           whichever the ledger supports. Name the date, the
+           dollar amount, the specific filing or moment.
+7:00-8:30  WRONG TURNS: the bad decisions made under pressure.
+           The desperation phase. The pivot that didn't work.
+           The hire that backfired. The competitor's move that
+           the team underestimated.
+8:30-9:30  THE NEAR-DEATH MOMENT. The company is days or weeks
+           from collapse. Specific numbers required: "$X in the
+           bank, Y days of runway, Z employees laid off."
 
-DO NOT use any of these phrasings or moves:
-- Sensational opening hooks ("What you are about to hear will shock you")
+>>> RE-HOOK at ~6:30 (~780 words in):
+      "What happened over the next six months would have killed
+       most companies."
+>>> RE-HOOK at ~7:30 (~900 words in):
+      "And that's when [the next thing went wrong]."
+>>> RE-HOOK at ~8:30 (~1020 words in):
+      "By [specific date], they had [specific bad number]. And
+       it was about to get worse."
+
+─────────────────────────────────────────────────────────────────
+*** MID-ROLL TENSION LANDING #2 — 9:30 (~1140 words in) ***
+─────────────────────────────────────────────────────────────────
+The darkest moment. The company is functionally dead. Land on a
+single brutal sentence:
+  "On [specific date], they had [specific number]. For all intents
+   and purposes, [Company] was already gone."
+
+─────────────────────────────────────────────────────────────────
+ACT 4 — THE PIVOT           9:30 – 12:00     (~375 words)
+─────────────────────────────────────────────────────────────────
+9:30-9:45   POST-LANDING RE-ENTRY: restate the brink, then
+            deliver the pivot in the very next sentence.
+9:45-11:00  THE DECISION that changed everything. The unlikely
+            move, the bet on a new direction, the meeting that
+            mattered, the product that worked. Quote from the
+            ledger if it has one.
+11:00-12:00 THE TAKEOFF — survival to dominance. Visualize the
+            inflection: market share doubling, users hockey-
+            sticking, revenue exploding. Use specific numbers
+            from the ledger; if the ledger says it generally,
+            phrase it generally.
+
+>>> RE-HOOK at ~10:30 (~1260 words in): name a single moment
+    that proves the pivot worked.
+>>> RE-HOOK at ~11:30 (~1380 words in): widen the lens —
+    industry consequence or competitor reaction.
+
+─────────────────────────────────────────────────────────────────
+ACT 5 — THE LESSON          12:00 – 13:00    (~150 words)
+─────────────────────────────────────────────────────────────────
+12:00-12:20 WHERE THE COMPANY IS TODAY — a present-day fact
+            that mirrors and pays off the opening hook. If
+            you opened with "$X billion", close by referencing
+            a different specific from that same number.
+12:20-12:45 THE TAKEAWAY: what THIS story teaches us. ONE clear
+            insight, not a list. Pattern:
+              "What [Company] understood that nobody else did
+               was…"
+12:45-12:55 THE LEGACY: what changed because of this story.
+            One specific consequence outside the company itself
+            (an industry standard, a regulation, a new role).
+12:55-13:00 ONE CLEAN OUTRO LINE. NO "subscribe" patter, NO
+            "next time on the channel", NO "share if you
+            liked it". A final concrete image instead — the
+            kind of line a viewer screenshots.
+
+================================================================
+HOOK CADENCE — STRICT RULES
+================================================================
+- A STRONG hook fires in the first 15 seconds (Act 0, lines 1-3).
+- For the first 5 minutes, a re-hook fires every 60-90 seconds.
+  At 120 wpm that means a re-hook roughly every 120-180 words.
+- From 5 minutes to the end, a re-hook fires every 2-3 minutes,
+  i.e. every 240-360 words.
+- Each re-hook is exactly ONE sentence — short, declarative,
+  forward-looking. It plants something the next 90-180 seconds
+  will pay off.
+- The substance of each hook MUST come from the fact ledger. No
+  vague suspense, no "you won't believe what happens next", no
+  second-person commands.
+
+ACCEPTABLE HOOK PATTERNS (vary them — never repeat one):
+  - Forward tease: "[Thing] was about to [happen] — and the
+    person at the centre of it didn't yet know it."
+  - Time-anchored:  "By [specific date], [specific number]
+    had changed."
+  - Character beat: "[Founder]'s next decision would cost
+    [specific consequence]."
+  - Industry zoom: "What was happening at [Company] would, in
+    [N] years, be happening everywhere."
+  - Documented quote: "[Person] later wrote: '[quote from ledger].'"
+
+BANNED HOOK PATTERNS:
+  - "You won't believe what happens next."
+  - "Wait until you hear..."
+  - "The shocking truth was..."
+  - Any second-person command.
+  - Any tease promising something not in the fact ledger.
+
+================================================================
+VISUAL PACING — AVOID MONOTONY
+================================================================
+Vary sentence length aggressively. Specifically:
+- After every 3-4 sentences of 18+ words, drop a sentence of 6
+  words or fewer. Use the short sentence to PUNCTUATE, not to
+  pad.
+- Each act should contain at least one mini-pattern break:
+  - A one-sentence paragraph standing alone.
+  - A direct quote from the ledger read verbatim.
+  - A list of two or three concrete items (an enumeration,
+    not a bullet list).
+  - A rhetorical question THE NARRATOR THEN ANSWERS in the
+    next sentence (use sparingly — once per script max).
+- Beat markers (## BEAT N ##) align with visual scene changes,
+  NOT with paragraph breaks. A beat is a new image. Group 2-3
+  sentences of related content under one beat; switch beats
+  when the scene logically changes (different person, different
+  place, different timestamp, different object in focus).
+
+================================================================
+ABSOLUTE BANS (any of these → script gets rejected at S07)
+================================================================
+- Sensational openings ("What you are about to hear will shock you")
 - Clickbait phrasings ("They never expected what happened next")
 - AI disclaimers ("As an AI...")
-- The words "shocking", "unbelievable", "horrifying", "you won't believe",
+- "Shocking", "unbelievable", "horrifying", "you won't believe",
   "game-changer", "disrupt the industry", "rocked the world",
   "perfect storm", "rocketed", "skyrocketed"
 - "Tragic" more than twice in the whole script
 - Rounding revenue / valuation up for drama
 - Speculation about founder's inner monologue not in the ledger
 - Made-up dialogue not present in the fact ledger
-- Summary-style closing ("In conclusion...", "And so we have seen...")
+- Summary-style closings ("In conclusion...", "And so we have seen...")
 - MBA-textbook jargon ("synergies", "value proposition",
   "stakeholder alignment") unless the source itself uses it
+- Generic closers ("And the rest, as they say, is history.")
 
-DO:
+================================================================
+DO
+================================================================
 - Use specific dates (Month Day, Year) when in the ledger
-- Use exact dollar amounts (rounded only to the nearest precision the
-  source itself used)
-- Cite filings, courts, or reports by name when quoting
+- Use exact dollar amounts (rounded only to the source's
+  precision)
+- Cite filings, court records, or news outlets by name when
+  quoting
 - Acknowledge uncertainty where the ledger flags conflict
-- Vary sentence length aggressively — short jabs interleaved with
-  occasional longer densified paragraphs
-- Plant a new specific question, name, or filing reference every
-  2-3 minutes (every ~8 beats) so the viewer always has something
-  to resolve
-- Pay off planted questions with concrete answers
-- Include 3-5 short paragraphs (under 30 words) for pacing breath
-- Include 2-3 longer paragraphs (80-120 words) for narrative density
-- Treat the HERO as a person, not a logo. Use first name on second
-  reference; later, surname only.
+  ("the official record is silent on what was said next")
+- Treat the HERO as a person, not a logo — first name on
+  second reference, surname only thereafter
+- Plant a specific question, name, or filing reference every
+  90-180 seconds; pay it off later
+- Pay off every forward tease — no dangling questions at script
+  end
 
 NARRATOR PERSONA INSTRUCTIONS — {narrator_id}:
 {narrator_full_instructions}
 
-OUTPUT FORMAT:
-Plain text script. Use [PAUSE 2s] or [PAUSE 4s] inline markers where
-the narrator should pause. Use [EMPHASIS] before stressed words.
+================================================================
+OUTPUT FORMAT
+================================================================
+Plain text script. Use [PAUSE 2s] or [PAUSE 4s] inline markers
+where the narrator should pause. Use [EMPHASIS] before stressed
+words.
 
-## BEAT N ## headers mark visual scene changes (one image per beat
-for the FLUX / Ken-Burns pipeline). Use approximately {target_beats}
-BEAT markers across the whole script, distributed roughly evenly.
-Each beat should cover 30-50 words of narration — NOT every
-sentence, NOT every paragraph. A beat is a visual scene, not a
-narrative beat. Hard cap: fewer than 70 beat markers total.
+## BEAT N ## headers mark visual scene changes (one image per
+beat for the FLUX / Ken-Burns pipeline). Use approximately
+{target_beats} BEAT markers across the whole script,
+distributed in alignment with the act/timing structure above:
+  - Act 0:  1-2 beats
+  - Act 1:  ~10 beats
+  - Act 2:  ~10 beats
+  - Act 3:  ~16 beats
+  - Act 4:  ~10 beats
+  - Act 5:  ~4-5 beats
+Each beat should cover 30-50 words of narration — not every
+sentence, not every paragraph.
 
-HARD LENGTH TARGET — between {min_words} and {max_words} words total.
-Aim for {target_words}. Significantly over-running the upper bound
-is a failure mode (the script gets sent back for condensation);
-keep the middle act lean. Count your words as you write. Stop when
-you have a strong editorial closing and are inside the range.
+HARD LENGTH TARGET — between {min_words} and {max_words} words.
+Aim for {target_words}. Significantly over-running the upper
+bound is a failure mode (the script gets sent back for
+condensation); keep the middle act lean. Count your words as you
+write. Stop when Act 5 lands cleanly and you are inside the range.
 
-Output ONLY the script. No preamble, no commentary, no code fences,
-no <think> blocks visible to the reader.
+Output ONLY the script. No preamble, no commentary, no code
+fences, no <think> blocks visible to the reader.
 
-Start writing the script now. Lead with the cold open.
+Start writing the script now. Lead with the cold open — Act 0,
+line 1, opens on a specific number or image.
