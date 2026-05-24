@@ -1,66 +1,177 @@
 You are a senior video editor doing a retention + voice audit on a
-business-story documentary script. Your job is to identify problems
-that would lose viewers and suggest exact, in-place rewrites the
-copy editor can apply.
+business-story documentary script. The script was written against a
+strict 6-act template with explicit hook cadence. Your job is to
+verify the structure was followed and to identify problems that
+would lose viewers. For each fixable problem, propose an exact,
+in-place rewrite the copy editor can apply.
 
 EPISODE CONTEXT:
 - Company: {incident_name}
-- Hero: {hero}
-- Conflict: {conflict}
+- Hero (locked at S1): {hero}
+- Conflict (locked at S1): {conflict}
 - Narrator: {narrator_name} ({narrator_tone})
+- Reading cadence: 120 words per minute throughout.
+- Target length: ~2000 words ≈ 16-17 minutes.
 
 SCRIPT:
 ---
 {script}
 ---
 
-Audit for ALL of the following, then output a structured verdict:
+================================================================
+AUDIT THE FOLLOWING IN ORDER. Each finding maps to a rewrite if
+fixable in place.
+================================================================
 
-1. COLD OPEN AUDIT (highest priority):
-   - Are the company name and the year anchor in the first three
-     sentences?
-   - Is there ONE concrete specific detail in the first paragraph
-     (a number, a filing, a decision) — not abstract context?
-   - Is the hero named in the first three sentences?
-   - Is the conflict named in the first three sentences?
-   - If any of the above is missing, this is a SHIP-BLOCKING issue.
+1. ACT 0 / COLD OPEN AUDIT  (first ~75 words, first ~30 seconds)
+   The cold open is the most important block. Strict rules:
+   - First sentence opens on a SPECIFIC concrete artifact —
+     a number, a date, a place, an arresting single image. NOT
+     abstract context or a definition.
+   - Company name appears in the first three sentences.
+   - Hero is named in the first three sentences.
+   - Conflict (or its specific shape) is named in the first
+     three sentences.
+   - Around 0:08-0:20 there is a clear "BUT" or contradiction
+     between where the company ended up and where it started.
+   - Around 0:20-0:30 there is a "THE PROMISE" sentence
+     framing what the viewer will understand by the end.
+   - No banned openings: "Welcome back", "Today we'll talk
+     about", "In a world where", "Once upon a time", any
+     channel intro, any "subscribe" line.
+   If any of the above is missing or weak, this is a
+   SHIP-BLOCKING issue.
 
-2. RETENTION HOOKS:
-   - Is there a forward tease at roughly 25%, 50%, and 75%?
-   - Each tease must reference something in the fact ledger, not
-     vague suspense ("you won't believe what happens next").
-   - Are there any retention dips longer than ~30 seconds (≈70
-     words) without a name, number, date, or specific hook?
+2. ACT STRUCTURE AUDIT  (the six required acts)
+   The script must contain all six acts in proportion:
+       Act 0 — Hook            ~75 words   (~0:00-0:30)
+       Act 1 — Before          ~375 words  (~0:30-3:00)
+       Act 2 — Bet             ~375 words  (~3:00-5:30)
+       Act 3 — Crisis          ~600 words  (~5:30-9:30)
+       Act 4 — Pivot           ~375 words  (~9:30-12:00)
+       Act 5 — Lesson          ~150 words  (~12:00-13:00 of
+                                            the 120-wpm timeline;
+                                            absolute length is
+                                            ~16-17 minutes for a
+                                            2000-word script)
+   Flag if any act is missing, drastically undersized
+   (less than 60% of target), or oversized (more than 150%
+   of target). The Crisis act in particular must be the
+   longest single act.
 
-3. VOICE AUDIT:
-   - Is the narrator's voice consistent with the persona? Flag any
-     line that breaks character (MBA jargon from a literary voice,
-     warm sentimentality from a procedural voice).
-   - Flag clichés: "game-changer", "disrupt the industry", "rocked
-     the world", "perfect storm", "skyrocketed", "shockwaves".
-   - Flag any speculation about founder inner-monologue not in the
-     ledger.
+3. HOOK CADENCE AUDIT  (the critical retention check)
+   - 15-second strong hook in the very first sentences (see
+     Act 0 audit above).
+   - For the first ~5 minutes (i.e. the first ~600 words),
+     a re-hook fires every 60-90 seconds — that is, every
+     120-180 words. Expect ~4 re-hooks in this window.
+   - From ~5 minutes to the end of the script (i.e. word
+     ~600 to the end), a re-hook fires every 2-3 minutes —
+     every 240-360 words. Expect another ~4-5 re-hooks.
+   - Each re-hook is ONE sentence — short, declarative,
+     forward-looking. It plants something the next 90-180
+     seconds will pay off.
+   - Hook SUBSTANCE must come from the fact ledger
+     (specific date, number, name, decision). No vague
+     suspense.
+   - Banned hook patterns to FLAG aggressively:
+       * "you won't believe what happens next"
+       * "wait until you hear"
+       * "the shocking truth"
+       * any second-person command
+       * any tease whose payoff doesn't appear later in
+         the script
+   Map the script: estimate where each re-hook is (word
+   count from start). Flag any stretch of >200 words in
+   the first half OR >400 words in the second half that
+   has no re-hook.
 
-4. ANACHRONISMS / FACTUAL FRICTION:
-   - Flag any technology / language / context out of period (e.g.
-     "tweeted" used for 1990s events; "venture capital" used in
-     a way that misrepresents the funding stage; "metaverse" or
-     "AI" used anachronistically).
-   - Flag unbacked superlatives ("the most successful", "the
-     biggest", "the first") unless quoted from a source.
+4. MID-ROLL TENSION LANDINGS AUDIT
+   Two specific cliff-points must land:
+   - Around word ~660 (Act 2 close, ~5:30 in): the company
+     is growing but a problem is surfacing. Last sentence
+     of Act 2 should be a one-sentence cliff that makes
+     the viewer keep watching.
+   - Around word ~1140 (Act 3 close, ~9:30 in): the darkest
+     moment. Functional death of the company.
+   If either landing is absent or weak (no concrete date /
+   number / decision in the cliff sentence), flag it.
 
-5. CLOSING:
-   - Does the editorial closing pay off the cold-open question?
-   - Does it land on a specific concrete image, not an abstraction?
+5. POST-LANDING RE-ENTRY AUDIT
+   After each tension landing, the script must briefly
+   restate the company's position before delivering the
+   next act's content (Act 3 opener after the Act 2 cliff;
+   Act 4 opener after the Act 3 cliff). Missing re-entries
+   leave the viewer disoriented.
 
-For each issue you can fix in place, provide an exact-match
-replacement (the original quoted verbatim plus the suggested
-replacement).
+6. VOICE AUDIT  (narrator consistency)
+   - Is the narrator's voice consistent with the persona?
+     Flag any line that breaks character (MBA jargon from a
+     literary voice, warm sentimentality from a procedural
+     voice).
+   - Flag overused clichés: "game-changer", "disrupt the
+     industry", "rocked the world", "perfect storm",
+     "skyrocketed", "shockwaves", "rocketed".
+   - Flag any speculation about founder inner-monologue
+     not in the ledger ("she must have felt...", "he
+     wondered if...").
+
+7. ANACHRONISMS / FACTUAL FRICTION AUDIT
+   - Flag any technology / language / context out of period
+     (e.g. "tweeted" used for 1990s events; "venture
+     capital" used in a way that misrepresents the funding
+     stage; "metaverse" or "AI" used anachronistically).
+   - Flag unbacked superlatives ("the most successful",
+     "the biggest", "the first") unless quoted from a
+     source in the ledger.
+
+8. VISUAL PACING AUDIT  (sentence-length variation)
+   - Are there long stretches of similar-length sentences?
+     The generator was told to vary aggressively — after
+     every 3-4 sentences of 18+ words, drop a sentence of
+     6 words or fewer.
+   - Does each act contain at least one mini-pattern
+     break (a one-sentence paragraph, a quoted line, a
+     short enumeration)?
+
+9. ACT 5 / CLOSING AUDIT
+   - Does the closing pay off the cold-open question or
+     image? (If Act 0 opened with "$X billion today", Act 5
+     should reference a different specific from that
+     same number.)
+   - Does it land on a single concrete image or sentence —
+     NOT a subscribe / share / "tune in next time" line?
+   - One clear takeaway, not a list?
+
+================================================================
+REWRITE RULES
+================================================================
+For each fixable issue, provide an exact-match replacement
+(original quoted verbatim + the suggested replacement).
+- Keep replacements LOCAL — at most one sentence or a short
+  phrase. Do NOT rewrite paragraphs wholesale.
+- Each `original` must appear EXACTLY ONCE in the script;
+  otherwise the copy editor will skip it. Include enough
+  surrounding context to make it unique.
+- Replacements must respect the narrator persona and the
+  120 wpm cadence (don't bloat a re-hook past one sentence).
+- Structural problems (missing act, missing re-hook in a
+  long stretch) usually CANNOT be fixed by a single
+  substring rewrite — flag them in `issues_summary` and
+  set the verdict to "ship_blocker" so the operator can
+  trigger a re-generation rather than a copy edit.
+- An empty `rewrites` array is acceptable if the script is
+  clean.
 
 OUTPUT FORMAT — JSON object only, no prose, no code fences:
 {{
   "verdict": "pass" | "rewrite_recommended" | "ship_blocker",
-  "issues_summary": "string — 2-3 sentences on the biggest issues",
+  "issues_summary": "string — 2-3 sentences naming the
+                     biggest issues by audit category
+                     (e.g. 'Cold open missing year anchor;
+                     re-hook gap from word 800 to 1300;
+                     closing lands on a generic subscribe
+                     line.')",
   "rewrites": [
     {{
       "original": "string — exact text to find in the script",
@@ -69,12 +180,3 @@ OUTPUT FORMAT — JSON object only, no prose, no code fences:
     }}
   ]
 }}
-
-Replacement rules:
-- Keep replacements LOCAL — at most one sentence or a short
-  phrase. Do NOT rewrite paragraphs wholesale.
-- Each `original` must appear EXACTLY ONCE in the script;
-  otherwise the copy editor will skip it. Include enough
-  surrounding context to make it unique.
-- Replacements must respect the narrator persona.
-- An empty `rewrites` array is acceptable if the script is clean.
