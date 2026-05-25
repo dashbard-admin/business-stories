@@ -188,6 +188,9 @@ def run(episode: dict, queue: dict) -> str | None:
                 backdrop=flux_credits_png if flux_credits_png.exists() else None,
                 workspace=ws,
                 brand_color=cfg.channel.get("brand_color", "#1a2b3c"),
+                text_color=cfg.production.get(
+                    "title_card_text_color", "#FFE600"
+                ),
             )
             try:
                 ken_burns_clip(
@@ -518,8 +521,18 @@ def _measure_title_block(lines: list[str], font: ImageFont.FreeTypeFont,
 
 
 def _render_closing_card(*, out_path: Path, backdrop: Path | None,
-                         workspace: Path, brand_color: str) -> None:
-    rgb = _hex_to_rgb(brand_color)
+                         workspace: Path, brand_color: str,
+                         text_color: str = "#FFE600") -> None:
+    """Render the closing source-attribution card.
+
+    Style intentionally matches the title card's colour palette
+    (all text in yellow, no stroke) but uses a thinner, normal-width
+    bold sans-serif so smaller text stays legible. No brand bar — a
+    clean text-only layout over the optionally-blurred FLUX credits
+    backdrop. Lines containing 'Unknown' or 'Untitled' are dropped
+    so missing source metadata doesn't clutter the credits.
+    """
+    fill_rgb = _hex_to_rgb(text_color)
 
     if backdrop is not None and backdrop.exists():
         with Image.open(backdrop) as bg:
@@ -538,16 +551,15 @@ def _render_closing_card(*, out_path: Path, backdrop: Path | None,
         img = Image.new("RGB", (OUT_W, OUT_H), color=(8, 10, 14))
 
     d = ImageDraw.Draw(img)
-    d.rectangle([0, 380, OUT_W, 388], fill=rgb)
     d.text((100, 410), "SOURCES & ATTRIBUTION",
-           fill=(220, 220, 220), font=_font(36))
+           fill=fill_rgb, font=_closing_font(48))
 
     lines: list[str] = []
     inv_path = workspace / "00_research" / "source_inventory.json"
     if inv_path.exists():
         try:
             for s in json.loads(inv_path.read_text())["sources"][:5]:
-                pub = s.get("publisher", "?")
+                pub = s.get("publisher", "")
                 tit = (s.get("title") or "")[:60]
                 lines.append(f"• {pub} — {tit}")
         except Exception:
@@ -574,9 +586,67 @@ def _render_closing_card(*, out_path: Path, backdrop: Path | None,
     lines.append("AI-assisted narration and AI-assisted illustrations where noted.")
     lines.append("All facts traced to references above.")
 
+    # Drop lines that contain placeholder tokens — they show up when
+    # a source has no title or a PD asset has no publisher recorded,
+    # and they make the credits look broken. Empty lines (blank
+    # spacers between sections) are preserved.
+    lines = [ln for ln in lines if not _is_placeholder_line(ln)]
+
     d.multiline_text((100, 490), "\n".join(lines),
-                     fill=(230, 230, 230), font=_font(24), spacing=8)
+                     fill=fill_rgb, font=_closing_font(30), spacing=8)
     img.save(out_path, "PNG")
+
+
+_PLACEHOLDER_TOKENS = ("unknown", "untitled")
+
+
+def _is_placeholder_line(line: str) -> bool:
+    """True if a line has visible content AND that content contains
+    a placeholder token (e.g. 'Unknown publisher' or 'Untitled')
+    that would clutter the credits. Empty lines (used as spacers
+    between sections) are deliberately kept."""
+    s = (line or "").strip()
+    if not s:
+        return False
+    low = s.lower()
+    return any(t in low for t in _PLACEHOLDER_TOKENS)
+
+
+def _closing_font(size: int) -> ImageFont.FreeTypeFont:
+    """Bold-but-thinner font for the closing credits.
+
+    Resembles the title's Impact-style boldness but with normal-width
+    letterforms so text stays legible at smaller sizes (24-48 px).
+    Prefers Helvetica Neue / Helvetica Bold via TTC index (typical
+    on macOS), falls back to standalone Arial Bold, then regular
+    Helvetica, and finally PIL's default.
+    """
+    # (path, index) candidates. Index targets the Bold face inside
+    # a macOS .ttc collection; standalone .ttf files ignore the
+    # index argument harmlessly.
+    candidates: list[tuple[str, int]] = [
+        # HelveticaNeue.ttc — Bold face is typically at index 1 on
+        # current macOS; older versions sometimes index=2.
+        ("/System/Library/Fonts/HelveticaNeue.ttc", 1),
+        ("/System/Library/Fonts/HelveticaNeue.ttc", 2),
+        # Helvetica.ttc — same pattern.
+        ("/System/Library/Fonts/Helvetica.ttc", 1),
+        ("/System/Library/Fonts/Helvetica.ttc", 2),
+        # Standalone Bold TTFs.
+        ("/System/Library/Fonts/Supplemental/Arial Bold.ttf", 0),
+        ("/Library/Fonts/Arial Bold.ttf", 0),
+        # Regular weight as the final usable fallback (still thinner
+        # than Impact, just not bold).
+        ("/System/Library/Fonts/HelveticaNeue.ttc", 0),
+        ("/System/Library/Fonts/Helvetica.ttc", 0),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 0),
+    ]
+    for path, index in candidates:
+        try:
+            return ImageFont.truetype(path, size, index=index)
+        except Exception:
+            continue
+    return ImageFont.load_default()
 
 
 def _build_captions(

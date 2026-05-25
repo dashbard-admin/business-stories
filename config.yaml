@@ -93,9 +93,8 @@ production:
                                           # per episode (seeded by id),
                                           # so re-runs are reproducible.
   title_card_uppercase: true              # SCREAM CASE for the title text
-  title_card_show_year: true              # small year tag in the opposite
-                                          # corner (set false for a pure
-                                          # title-only look)
+  title_card_show_year: false             # set true to add a small year
+                                          # tag in the opposite corner
 
 quality_gates:
   min_verified_facts: 5
