@@ -25,6 +25,7 @@ import hashlib
 import logging
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -153,51 +154,101 @@ class Flux:
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        cmd = [
-            self.binary,
-            prompt,
-            "--height", str(height),
-            "--width", str(width),
-            "--steps", str(steps),
-            "--seed", str(int(seed)),
-            "--output", str(out_path.resolve()),
-        ]
-        if req.extra_args:
-            cmd.extend(req.extra_args)
+        # Run the CLI from a CLEAN temp directory as CWD. Some FLUX
+        # CLI versions have been observed to (a) write to CWD instead
+        # of honoring an absolute --output path, or (b) write to a
+        # default basename in CWD when their post-generation move
+        # silently fails — producing the exact "Generation completed
+        # but output file not found" symptom. By isolating CWD we can
+        # scan the tempdir afterwards to recover whatever PNG the CLI
+        # actually produced and promote it to the requested path.
+        import tempfile
+        scan_start = time.time()
+        with tempfile.TemporaryDirectory(prefix="flux_") as tmpdir:
+            tmpdir_path = Path(tmpdir)
 
-        logger.info("flux (%s seed=%d) %dx%d steps=%d → %s",
-                    req.beat_id, seed, width, height, steps, out_path.name)
-        logger.debug("flux cmd: %s", " ".join(repr(c) for c in cmd))
+            cmd = [
+                self.binary,
+                prompt,
+                "--height", str(height),
+                "--width", str(width),
+                "--steps", str(steps),
+                "--seed", str(int(seed)),
+                "--output", str(out_path.resolve()),
+            ]
+            if req.extra_args:
+                cmd.extend(req.extra_args)
 
-        try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-            )
-        except subprocess.TimeoutExpired:
-            logger.warning("flux timed out after %ds for %s seed=%d",
-                           self.timeout, req.beat_id, seed)
-            return None
-        except FileNotFoundError:
-            logger.error("flux binary not found on PATH (binary=%r). "
-                         "Set flux_cli.binary in config.yaml or enable mock_mode.",
-                         self.binary)
-            return None
+            logger.info("flux (%s seed=%d) %dx%d steps=%d → %s",
+                        req.beat_id, seed, width, height, steps, out_path.name)
+            logger.debug("flux cmd: %s (cwd=%s)",
+                         " ".join(repr(c) for c in cmd), tmpdir_path)
 
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout,
+                    cwd=str(tmpdir_path),
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning("flux timed out after %ds for %s seed=%d",
+                               self.timeout, req.beat_id, seed)
+                return None
+            except FileNotFoundError:
+                logger.error("flux binary not found on PATH (binary=%r). "
+                             "Set flux_cli.binary in config.yaml or enable mock_mode.",
+                             self.binary)
+                return None
+
+            # Path 1: the CLI honored --output. Cheapest case.
+            if out_path.exists() and out_path.stat().st_size >= 1000:
+                return out_path
+
+            # Path 2: the CLI wrote SOMEWHERE in our clean tempdir
+            # (default basename, weird relative resolution, etc.).
+            # Recover the largest PNG and promote it.
+            recovered = _find_recovered_png(tmpdir_path, scan_start)
+            if recovered is not None:
+                logger.warning(
+                    "flux %s seed=%d: CLI wrote %s in cwd "
+                    "(not at --output); promoting to %s",
+                    req.beat_id, seed, recovered.name, out_path,
+                )
+                shutil.copy(str(recovered), str(out_path))
+                return out_path
+
+            # Path 3: the CLI wrote near the requested --output path
+            # (e.g. ignored our path and used a default filename in
+            # the parent dir).
+            recovered_parent = _find_recovered_png(out_path.parent, scan_start)
+            if (recovered_parent is not None
+                    and recovered_parent.resolve() != out_path.resolve()):
+                logger.warning(
+                    "flux %s seed=%d: CLI wrote %s in target dir "
+                    "(not at --output); promoting to %s",
+                    req.beat_id, seed, recovered_parent.name, out_path,
+                )
+                shutil.copy(str(recovered_parent), str(out_path))
+                return out_path
+
+        # Nothing recoverable. Surface the full stderr so the operator
+        # can diagnose the CLI behaviour.
         if proc.returncode != 0:
-            logger.warning("flux exit=%d for %s seed=%d: %s",
-                           proc.returncode, req.beat_id, seed,
-                           (proc.stderr or "")[-400:])
-            return None
-
-        if not out_path.exists() or out_path.stat().st_size < 1000:
-            logger.warning("flux produced no/empty file for %s seed=%d",
-                           req.beat_id, seed)
-            return None
-
-        return out_path
+            logger.warning(
+                "flux exit=%d for %s seed=%d; no output recovered. "
+                "stderr (last 2000 chars):\n%s",
+                proc.returncode, req.beat_id, seed,
+                (proc.stderr or "")[-2000:],
+            )
+        else:
+            logger.warning(
+                "flux exit=0 for %s seed=%d but no PNG produced anywhere. "
+                "stderr (last 2000 chars):\n%s",
+                req.beat_id, seed, (proc.stderr or "")[-2000:],
+            )
+        return None
 
     def _mock_render(self, out_path: Path) -> Path:
         from PIL import Image
@@ -205,3 +256,42 @@ class Flux:
         Image.new("RGB", (self.default_width, self.default_height),
                   color=(60, 35, 80)).save(out_path)
         return out_path
+
+
+def _find_recovered_png(dir_path: Path, since: float,
+                        min_bytes: int = 1000) -> Path | None:
+    """Find the largest PNG/JPEG file in `dir_path` created since
+    `since`. Used to recover the actual output of FLUX CLI versions
+    that write to CWD or a default location instead of honoring the
+    --output flag we passed.
+
+    Returns the file path, or None if nothing eligible.
+    """
+    try:
+        if not dir_path.exists() or not dir_path.is_dir():
+            return None
+    except OSError:
+        return None
+
+    candidates: list[Path] = []
+    for f in dir_path.iterdir():
+        if not f.is_file():
+            continue
+        if f.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+            continue
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        if st.st_size < min_bytes:
+            continue
+        # Accept files mtime >= since-1s for clock-skew slack.
+        if st.st_mtime + 1.0 < since:
+            continue
+        candidates.append(f)
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_size)
+
+

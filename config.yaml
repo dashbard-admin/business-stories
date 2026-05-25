@@ -193,7 +193,27 @@ image_qa:
   caption_pd_assets: true
   strict_borderline: true
 
-  pd_direct_use_threshold: 0.20
+  # PD-vs-FLUX routing thresholds (cosine similarity over sentence-T
+  # embeddings of beat description vs PD caption).
+  #
+  # CHANNEL STYLE IS COMIC BOOK PANELS — most beats SHOULD be FLUX
+  # renders so the visual style is consistent across the episode.
+  # PD assets should only display DIRECTLY when the semantic match
+  # is strong enough to justify the style mismatch (e.g. a real
+  # founder photo for a founder-portrait beat).
+  #
+  # pd_direct_use_threshold:
+  #   0.20 — almost everything routes to PD (documentary style,
+  #          like the maritime pipeline). Set this if your channel
+  #          tolerates photo realism mixed with comic.
+  #   0.55 — strict, comic-first (DEFAULT here). Real photos only
+  #          when the match is genuinely strong.
+  #   0.70 — extremely strict: PD displays only when the caption
+  #          essentially names the same subject as the beat.
+  pd_direct_use_threshold: 0.55
+  # pd_reference_threshold: any PD asset whose match exceeds this
+  # contributes its caption as text grounding into the FLUX prompt
+  # (always text-only — img2img is not supported by the CLI).
   pd_reference_threshold: 0.20
   pd_max_reuses_per_asset: 30
   pd_reference_strength: 0.1
