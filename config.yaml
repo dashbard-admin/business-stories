@@ -182,12 +182,18 @@ grok:
   # under the same filename, so downstream stages (S12) pick it up
   # transparently.
   #
-  # Authentication: set api_key below to your xAI key. While api_key
-  # is empty / matches the placeholder, the entire Grok pass is a
-  # silent no-op (S09 logs "Grok disabled: api_key not set" once at
-  # startup, then proceeds with the raw FLUX renders).
+  # Authentication: the xAI API key is read from environment
+  # variables in this order:
+  #   1. XAI_API_KEY  (canonical, matches xAI's own docs)
+  #   2. GROK_API_KEY (alias for ergonomics)
+  # Both can be set in a project-root .env file (gitignored). See
+  # .env.example for the template. NEVER paste the key into this
+  # config.yaml — GitHub's secret-scanning will reject the push,
+  # and config.yaml is committed to the repo. The api_key field
+  # below remains only as a last-resort back-compat fallback;
+  # KEEP IT EMPTY.
   enabled: true
-  api_key: "xai-uxx8qGwHfT2YPZLfuEGURYMh1xsvCwpRCGi4A1pyRGJb6NOp1ONMSp1i0Oub3oEcCzLaWIU6MoZJQBEn"
+  api_key: ""
   model: "grok-imagine-image"
   base_url: "https://api.x.ai/v1"
   endpoint_path: "/images/edits"        # OpenAI-compatible default;
