@@ -55,7 +55,7 @@ production:
   # is 0 (disabled) so the first frame is Act 0's cold open. Set to
   # 2-8 if you want a brand stamp at the cost of the cold-open 15s
   # retention window.
-  opening_title_card_seconds: 0
+  opening_title_card_seconds: 3
 
   # Closing source-attribution card (appended after Act 5). Default 5
   # seconds — enough for the operator's source citations to read,
