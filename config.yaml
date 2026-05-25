@@ -75,6 +75,29 @@ production:
   fade_in_seconds: 0.3
   fade_out_seconds: 0.3
 
+  # ----- Title-card styling (YouTube-thumbnail look) -----
+  # When opening_title_card_seconds > 0, S12 composites the episode
+  # title in a bold high-contrast font over the FLUX-rendered
+  # title.png backdrop. Style modelled after retail YouTube history
+  # channels (Tim Reborn History et al): yellow body, heavy red
+  # outline stroke, no background band — the stroke alone carries
+  # legibility against any backdrop.
+  title_card_text_color: "#FFE600"        # bright yellow
+  title_card_stroke_color: "#D02020"      # heavy red
+  title_card_stroke_width: 8              # px outline thickness
+  title_card_font_size_pct: 0.13          # frac of frame height: 0.13 * 1080 = 140px
+  title_card_padding_pct: 0.06            # frac of frame height: 65px edge padding
+  title_card_corner: "random"             # "random" | "top-left" |
+                                          # "top-right" | "bottom-left" |
+                                          # "bottom-right". When random,
+                                          # the corner is deterministic
+                                          # per episode (seeded by id),
+                                          # so re-runs are reproducible.
+  title_card_uppercase: true              # SCREAM CASE for the title text
+  title_card_show_year: true              # small year tag in the opposite
+                                          # corner (set false for a pure
+                                          # title-only look)
+
 quality_gates:
   min_verified_facts: 5
   min_pd_assets: 3

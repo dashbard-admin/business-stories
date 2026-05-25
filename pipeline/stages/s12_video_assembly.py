@@ -91,24 +91,22 @@ def run(episode: dict, queue: dict) -> str | None:
                 except Exception:
                     pass
             title_card_png = ws / "05_video" / "title_card.png"
-            narrator_id = episode.get("narrator")
-            narrator_name = None
-            if narrator_id:
-                try:
-                    narr = cfg.narrator_by_id(narrator_id)
-                    narrator_name = (narr or {}).get("name")
-                except Exception:
-                    pass
-
             flux_title_png = ws / "03_assets" / "flux" / "title.png"
+            prod = cfg.production
             _render_title_card(
                 out_path=title_card_png,
                 backdrop=flux_title_png if flux_title_png.exists() else None,
-                channel=cfg.channel["name"],
                 episode_title=episode["incident"]["company_name"],
                 year=episode["incident"].get("year_anchor"),
-                brand_color=cfg.channel.get("brand_color", "#1a2b3c"),
-                narrator_name=narrator_name,
+                episode_id=episode.get("id", "EP_unknown"),
+                text_color=prod.get("title_card_text_color", "#FFE600"),
+                stroke_color=prod.get("title_card_stroke_color", "#D02020"),
+                stroke_width=int(prod.get("title_card_stroke_width", 8)),
+                font_size_pct=float(prod.get("title_card_font_size_pct", 0.13)),
+                padding_pct=float(prod.get("title_card_padding_pct", 0.06)),
+                corner=str(prod.get("title_card_corner", "random")),
+                uppercase=bool(prod.get("title_card_uppercase", True)),
+                show_year=bool(prod.get("title_card_show_year", True)),
             )
             try:
                 ken_burns_clip(
@@ -262,40 +260,261 @@ def _hex_to_rgb(h: str) -> tuple[int, int, int]:
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore
 
 
-def _render_title_card(*, out_path: Path, backdrop: Path | None,
-                       channel: str, episode_title: str,
-                       year, brand_color: str,
-                       narrator_name: str | None) -> None:
-    """Render the opening title card. When `backdrop` is provided
-    (FLUX-rendered comic panel from S09), composite the title text
-    over the bottom third of it with a semi-transparent dark band
-    behind the text for legibility. Otherwise fall back to a
-    programmatic dark card with brand bar."""
-    rgb = _hex_to_rgb(brand_color)
+def _render_title_card(
+    *,
+    out_path: Path,
+    backdrop: Path | None,
+    episode_title: str,
+    year,
+    episode_id: str,
+    text_color: str = "#FFE600",
+    stroke_color: str = "#D02020",
+    stroke_width: int = 8,
+    font_size_pct: float = 0.13,
+    padding_pct: float = 0.06,
+    corner: str = "random",
+    uppercase: bool = True,
+    show_year: bool = True,
+) -> None:
+    """Render the opening title card in YouTube-thumbnail style.
 
+    Layout: large bold title text in a high-contrast colour (yellow
+    body + red stroke by default), slammed into one of the four
+    corners with edge padding. No background band or rectangle — the
+    stroke alone carries legibility against any backdrop, including
+    the FLUX-rendered title.png panel.
+
+    Style choices ported from retail YouTube history channels
+    (Tim Reborn History et al). Every visible value is configurable
+    via production.title_card_* in config.yaml; only the layout
+    geometry (corner / padding logic) is fixed.
+
+    `corner` accepts "random" (deterministic per episode_id),
+    "top-left", "top-right", "bottom-left", "bottom-right".
+
+    The small year tag, when shown, lands in the OPPOSITE corner from
+    the title — provides date context without crowding the title.
+    """
+    # ---- backdrop ----
     if backdrop is not None and backdrop.exists():
         with Image.open(backdrop) as bg:
             img = bg.convert("RGB").resize((OUT_W, OUT_H))
-        # Translucent dark band across the bottom third for text legibility
-        overlay = Image.new("RGBA", (OUT_W, OUT_H), (0, 0, 0, 0))
-        od = ImageDraw.Draw(overlay)
-        od.rectangle([0, OUT_H * 2 // 3, OUT_W, OUT_H], fill=(0, 0, 0, 160))
-        img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
     else:
-        img = Image.new("RGB", (OUT_W, OUT_H), color=(10, 12, 16))
+        # No FLUX backdrop — render onto a neutral dark canvas so the
+        # yellow + red title still has something to land on.
+        img = Image.new("RGB", (OUT_W, OUT_H), color=(15, 18, 22))
+
+    body_rgb = _hex_to_rgb(text_color)
+    stroke_rgb = _hex_to_rgb(stroke_color)
+
+    # ---- corner selection ----
+    corner_id = _resolve_title_corner(corner, episode_id)
+    pad = int(OUT_H * max(0.0, padding_pct))
+
+    # ---- title text fit ----
+    title = str(episode_title or "").strip()
+    if uppercase:
+        title = title.upper()
+
+    # Target font size, then shrink if we can't fit even a 1-word line.
+    # Allow up to 65% of the frame width for the title block (leaves
+    # breathing room on the side opposite the chosen corner).
+    target_size = max(48, int(OUT_H * font_size_pct))
+    max_block_w = int(OUT_W * 0.65)
+    # Allow the title to occupy up to ~55% of frame height before we
+    # call it too tall and reduce the font further.
+    max_block_h = int(OUT_H * 0.55)
+    title_font, wrapped_lines = _fit_bold_title(
+        text=title,
+        target_size=target_size,
+        max_block_w=max_block_w,
+        max_block_h=max_block_h,
+        stroke_width=stroke_width,
+    )
+
+    # ---- compute title block size ----
+    block_w, block_h, line_metrics = _measure_title_block(
+        wrapped_lines, title_font, stroke_width=stroke_width,
+    )
+
+    # ---- anchor + per-line alignment based on corner ----
+    if corner_id.startswith("top"):
+        block_y = pad
+    else:
+        block_y = OUT_H - pad - block_h
+
+    if corner_id.endswith("right"):
+        # Right-anchored block: per-line x is computed so the LINE
+        # right-edge lands at OUT_W - pad. Per-line, not block, so
+        # each line's right edge aligns cleanly.
+        align = "right"
+        block_x_right = OUT_W - pad
+    else:
+        align = "left"
+        block_x_left = pad
 
     d = ImageDraw.Draw(img)
-    d.rectangle([0, 940, OUT_W, 948], fill=rgb)
-    d.text((100, 750), channel.upper(), fill=(220, 220, 220), font=_font(36))
-    title_font = _font(64)
-    wrapped = "\n".join(textwrap.wrap(str(episode_title), width=32))
-    d.text((100, 800), wrapped, fill=(245, 245, 245), font=title_font)
-    if year:
-        d.text((100, 1010), str(year), fill=(190, 190, 190), font=_font(28))
-    if narrator_name:
-        d.text((OUT_W - 700, 1010), f"Narrator: {narrator_name}",
-               fill=(170, 170, 170), font=_font(22))
+
+    cursor_y = block_y
+    for line_text, (line_w, line_h) in zip(wrapped_lines, line_metrics):
+        if align == "right":
+            x = block_x_right - line_w
+        else:
+            x = block_x_left
+        d.text(
+            (x, cursor_y),
+            line_text,
+            fill=body_rgb,
+            font=title_font,
+            stroke_width=stroke_width,
+            stroke_fill=stroke_rgb,
+        )
+        cursor_y += line_h
+
+    # ---- year tag in the opposite corner (small, plain) ----
+    if show_year and year:
+        year_font_size = max(28, int(OUT_H * font_size_pct * 0.25))
+        year_font = _bold_font(year_font_size)
+        year_text = str(year)
+        # Small stroke so the year stays legible without the loud
+        # red outline of the title.
+        year_stroke_w = max(2, stroke_width // 4)
+        ytext_w, ytext_h = _text_size(d, year_text, year_font,
+                                       stroke_width=year_stroke_w)
+
+        # Opposite corner: invert both axes from the title corner.
+        opp_top = not corner_id.startswith("top")
+        opp_right = not corner_id.endswith("right")
+        yx = (OUT_W - pad - ytext_w) if opp_right else pad
+        yy = pad if opp_top else (OUT_H - pad - ytext_h)
+        d.text(
+            (yx, yy),
+            year_text,
+            fill=body_rgb,
+            font=year_font,
+            stroke_width=year_stroke_w,
+            stroke_fill=stroke_rgb,
+        )
+
     img.save(out_path, "PNG")
+
+
+def _resolve_title_corner(corner: str, episode_id: str) -> str:
+    """Map config 'corner' value to one of four concrete corners.
+    'random' is seeded by episode_id so re-runs produce identical
+    output and a multi-episode channel cycles across all four."""
+    corner = (corner or "random").strip().lower().replace("_", "-")
+    valid = {"top-left", "top-right", "bottom-left", "bottom-right"}
+    if corner in valid:
+        return corner
+    # Deterministic random.
+    import hashlib
+    h = hashlib.md5((episode_id or "").encode()).hexdigest()
+    seed = int(h[:8], 16)
+    return ("top-left", "top-right", "bottom-left", "bottom-right")[seed % 4]
+
+
+def _bold_font(size: int) -> ImageFont.FreeTypeFont:
+    """Locate a bold condensed display font for the title.
+
+    Tries Impact (the YouTube-thumbnail default) first, then Anton
+    or Bebas Neue if the operator bundled them, then HelveticaNeue
+    Black/Bold as a safe fallback. As a last resort falls back to
+    PIL's default bitmap font — workable but visually flat."""
+    candidates = [
+        "/System/Library/Fonts/Supplemental/Impact.ttf",
+        "/Library/Fonts/Impact.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Black.ttf",
+        "/Library/Fonts/Arial Black.ttf",
+        "/System/Library/Fonts/HelveticaNeue.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ]
+    for c in candidates:
+        try:
+            return ImageFont.truetype(c, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _text_size(d: ImageDraw.ImageDraw, text: str,
+               font: ImageFont.FreeTypeFont, *, stroke_width: int = 0
+               ) -> tuple[int, int]:
+    """Measure a single line's bounding box, stroke-aware."""
+    bbox = d.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+
+def _fit_bold_title(*, text: str, target_size: int, max_block_w: int,
+                    max_block_h: int, stroke_width: int
+                    ) -> tuple[ImageFont.FreeTypeFont, list[str]]:
+    """Find the largest font size at which `text` wraps to fit inside
+    (max_block_w, max_block_h). Tries the target size first, shrinks
+    by 8 px increments down to a floor of 56 px. Word-wraps greedily
+    line-by-line."""
+    size = target_size
+    floor = 56
+    dummy = Image.new("RGB", (10, 10))
+    draw = ImageDraw.Draw(dummy)
+    while size >= floor:
+        font = _bold_font(size)
+        lines = _wrap_to_width(text, font, max_block_w, draw, stroke_width)
+        # Estimate block height as sum of per-line heights.
+        total_h = 0
+        ok = True
+        for ln in lines:
+            _, h = _text_size(draw, ln, font, stroke_width=stroke_width)
+            total_h += h
+        if total_h <= max_block_h:
+            return font, lines
+        size -= 8
+    # Floor: accept overflow if we ran out of headroom.
+    font = _bold_font(floor)
+    lines = _wrap_to_width(text, font, max_block_w, draw, stroke_width)
+    return font, lines
+
+
+def _wrap_to_width(text: str, font: ImageFont.FreeTypeFont,
+                   max_w: int, draw: ImageDraw.ImageDraw,
+                   stroke_width: int) -> list[str]:
+    """Greedy word-wrap for the title. Falls back to character-break
+    if a single word is wider than max_w."""
+    words = text.split()
+    if not words:
+        return []
+    lines: list[str] = []
+    cur = words[0]
+    for w in words[1:]:
+        trial = f"{cur} {w}"
+        tw, _ = _text_size(draw, trial, font, stroke_width=stroke_width)
+        if tw <= max_w:
+            cur = trial
+        else:
+            lines.append(cur)
+            cur = w
+    lines.append(cur)
+    return lines
+
+
+def _measure_title_block(lines: list[str], font: ImageFont.FreeTypeFont,
+                         *, stroke_width: int
+                         ) -> tuple[int, int, list[tuple[int, int]]]:
+    """Return (block_w, block_h, per_line_metrics).
+
+    Per-line metrics carry each rendered line's bounding-box size, so
+    the caller can right-align by line if needed.
+    """
+    dummy = Image.new("RGB", (10, 10))
+    draw = ImageDraw.Draw(dummy)
+    metrics: list[tuple[int, int]] = []
+    block_w = 0
+    block_h = 0
+    for ln in lines:
+        w, h = _text_size(draw, ln, font, stroke_width=stroke_width)
+        metrics.append((w, h))
+        block_w = max(block_w, w)
+        block_h += h
+    return block_w, block_h, metrics
 
 
 def _render_closing_card(*, out_path: Path, backdrop: Path | None,
