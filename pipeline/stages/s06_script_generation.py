@@ -110,6 +110,21 @@ def run(episode: dict, queue: dict) -> str | None:
     target_beats = (cfg.quality_gates["min_total_beats"]
                     + cfg.quality_gates["max_total_beats"]) // 2
 
+    # Load character iconography if S05's profile sub-step produced it.
+    # Missing file is fine — the writer falls back to a neutral
+    # placeholder and the prompt instructs it to plant visual cues
+    # only when iconography is available.
+    character_iconography = "(not available)"
+    cp_path = ws / "01_factcheck" / "character_profile.json"
+    if cp_path.exists():
+        try:
+            cp = json.loads(cp_path.read_text())
+            icon = (cp.get("iconography") or "").strip()
+            if icon:
+                character_iconography = icon
+        except Exception as e:
+            logger.warning("character_profile.json unreadable: %s", e)
+
     prompt = template.format(
         incident_name=incident["company_name"],
         year=incident.get("year_anchor"),
@@ -126,6 +141,7 @@ def run(episode: dict, queue: dict) -> str | None:
         narrator_id=narrator,
         narrator_full_instructions=narr["full_instructions"],
         visual_style_name=style_yaml["name"],
+        character_iconography=character_iconography,
         fact_ledger_json=json.dumps(
             [{"id": c.get("claim_id"),
               "fact_type": c.get("fact_type"),

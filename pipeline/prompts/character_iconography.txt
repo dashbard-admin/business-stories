@@ -1,0 +1,36 @@
+You are briefing a comic-book illustrator about the iconic visual
+identity of {founder}, the founder/protagonist of {company}.
+
+Based on what you know from public photographs and press coverage,
+describe their iconic visual markers — the things a reader would
+recognise them by at a glance.
+
+Focus on:
+- Hair: shape, length, colour, hairline if notable
+- Facial hair: kind, density, style
+- Signature glasses, hats, or other facial accessories
+- Signature clothing: a specific garment they are known for
+  (black turtleneck, hoodie, suit-no-tie, bohemian linen, etc.)
+- Signature posture or stance: how they typically hold themselves
+- Signature props or environment: a specific phone, a podium,
+  a stage backdrop, a recurring object
+
+Do NOT describe individual facial proportions, exact age in years,
+or anything requiring photorealistic likeness. The goal is
+COMIC-BOOK ICONOGRAPHY — the iconic markers, not the face. A
+reader should be able to recognise this person from a silhouette
+plus the markers, without needing a photoreal portrait.
+
+If you genuinely do not have enough information about this person
+to be specific — for example, a private founder with no public
+photographs — return an empty iconography string. Do NOT fabricate
+markers you are not confident about.
+
+OUTPUT FORMAT — JSON object only, no prose, no code fences:
+{{
+  "iconography": "<60-100 word paragraph the illustrator can paste
+                   directly into a prompt; starts with the most
+                   distinctive marker; no second-person; no preamble;
+                   do not use the person's name inside the paragraph.
+                   Empty string if you cannot be specific.>"
+}}

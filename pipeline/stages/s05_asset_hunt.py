@@ -38,6 +38,7 @@ from PIL import Image
 from ..browser import Browser, safe_filename
 from ..config import load_config
 from ..generic_stash import ensure_stash_manifest
+from ..llm import LLM
 from ..state import find_episode_workspace
 from ..vlm import VLM
 from .. import wikimedia
@@ -72,6 +73,19 @@ def run(episode: dict, queue: dict) -> str | None:
     incident = episode["incident"]
     company = incident["company_name"]
     founder = (incident.get("founder_or_protagonist") or "").strip()
+
+    # ---- character iconography profile (always runs) ----
+    # Builds 01_factcheck/character_profile.json with the hero's
+    # iconic visual markers (hair, signature glasses, signature
+    # clothing, signature props). S06 reads it to plant visual cues
+    # in the script; S08 auto-prepends it to every hero-beat FLUX
+    # prompt. This sub-step runs INDEPENDENTLY of the asset_hunt
+    # master switch — it's cheap (1 Wikimedia query + 1 VLM call,
+    # or 1 LLM call if no photo is found) and provides cross-beat
+    # character consistency even when full PD asset hunt is off.
+    _run_character_profile(
+        ws=ws, founder=founder, company=company,
+    )
 
     # ---- master switch ----
     # When asset_hunt.enabled is false (config default for this
@@ -475,3 +489,174 @@ def _phash_or_md5(path: Path) -> str:
     except Exception:
         with path.open("rb") as f:
             return f"md5:{hashlib.md5(f.read()).hexdigest()}"
+
+
+# ============================================================
+# Character iconography sub-step
+# ============================================================
+
+def _run_character_profile(*, ws: Path, founder: str, company: str) -> None:
+    """Build 01_factcheck/character_profile.json with the hero's
+    iconic visual markers.
+
+    Two-stage approach:
+      1. Search Wikimedia for a portrait of the founder. If one is
+         found and downloadable, the VLM (Qwen3-VL) extracts
+         iconography from the photo via the
+         describe_iconography() prompt.
+      2. If no usable photo is found OR the VLM fails, fall back to
+         the writer LLM (Qwen3.6) generating an iconography
+         description from its general-knowledge training, prompted
+         via character_iconography.txt. The LLM is explicitly
+         allowed to return an empty string when it doesn't know
+         enough — we never fabricate.
+
+    Output flows into S06 (so the script can plant visual cues
+    naturally) and S08 (auto-prepended to every hero-beat FLUX
+    prompt). On any failure path we silently skip writing the
+    file — downstream stages treat a missing profile as "no
+    iconography available" and carry on.
+
+    Idempotent: a pre-existing character_profile.json is reused.
+    Delete the file to force regeneration on the next S05 run.
+    """
+    if not founder:
+        logger.info("S05: no founder_or_protagonist set; skipping character profile")
+        return
+
+    out_path = ws / "01_factcheck" / "character_profile.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_path.exists():
+        logger.info("S05: %s exists; skipping iconography pass "
+                    "(delete to regenerate)", out_path.name)
+        return
+
+    cfg = load_config()
+    iconography: str | None = None
+    portrait_source: str | None = None
+
+    # --- Stage 1: Wikimedia portrait + VLM iconography ---
+    if not cfg.mock_mode:
+        try:
+            from .. import wikimedia
+            hits = wikimedia.search(founder, limit=10)
+            portrait = _pick_portrait_hit(hits, founder)
+            if portrait is not None:
+                tmp_ref = out_path.parent / "_character_ref.jpg"
+                browser = Browser()
+                ok = browser.download(portrait.url, tmp_ref, timeout=60)
+                if ok and tmp_ref.exists() and tmp_ref.stat().st_size > 5000:
+                    vlm = VLM()
+                    desc = vlm.describe_iconography(tmp_ref, founder)
+                    if desc:
+                        iconography = desc
+                        portrait_source = portrait.description_url
+                        logger.info(
+                            "S05 character profile: VLM iconography from "
+                            "Wikimedia portrait (%d chars)", len(desc),
+                        )
+                try:
+                    tmp_ref.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning("S05 character profile: VLM stage failed: %s", e)
+
+    # --- Stage 2: writer-LLM fallback from general knowledge ---
+    if not iconography:
+        try:
+            iconography = _llm_iconography_fallback(founder, company)
+            if iconography:
+                logger.info(
+                    "S05 character profile: writer-LLM fallback (%d chars)",
+                    len(iconography),
+                )
+        except Exception as e:
+            logger.warning("S05 character profile: LLM fallback failed: %s", e)
+
+    if not iconography:
+        logger.info(
+            "S05 character profile: no usable iconography produced for %r — "
+            "S06/S08 will run without per-character grounding",
+            founder,
+        )
+        return
+
+    profile = {
+        "founder_or_protagonist": founder,
+        "iconography": iconography,
+        "portrait_source": portrait_source,
+        "method": "vlm_from_wikimedia" if portrait_source else "llm_general_knowledge",
+    }
+    out_path.write_text(json.dumps(profile, indent=2))
+
+
+def _pick_portrait_hit(hits, founder: str):
+    """From a list of Wikimedia CommonsImage hits, pick the best
+    portrait-like one. Scoring favours:
+      - filename contains every name token (e.g. 'Adam_Neumann')
+      - non-SVG, non-tiny image
+      - taller-than-wide aspect (portrait orientation)
+    Returns the chosen CommonsImage, or None if nothing usable.
+    """
+    name_tokens = {t.lower() for t in founder.split() if len(t) > 2}
+    scored: list[tuple[float, object]] = []
+    for h in hits:
+        if not getattr(h, "url", None):
+            continue
+        mime = (getattr(h, "mime", "") or "").lower()
+        if "svg" in mime:
+            continue
+        w = getattr(h, "width", 0) or 0
+        ht = getattr(h, "height", 0) or 0
+        if min(w, ht) < 300:
+            continue
+        title_low = (getattr(h, "title", "") or "").lower()
+        # Score: how many name tokens match the filename?
+        token_score = sum(1 for t in name_tokens if t in title_low)
+        # Portrait aspect bonus
+        aspect_score = 1.0 if ht > w else 0.0
+        # Reject if no name token matched at all (likely off-topic)
+        if name_tokens and token_score == 0:
+            continue
+        scored.append((token_score + aspect_score, h))
+    if not scored:
+        return None
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored[0][1]
+
+
+def _llm_iconography_fallback(founder: str, company: str) -> str | None:
+    """Ask the writer LLM (Qwen3.6) to describe the founder's iconic
+    visual markers from its training-time knowledge. Returns the
+    iconography string (60-100 words typically) or None when the
+    model declines or returns nothing usable.
+
+    The prompt explicitly permits the model to return an empty
+    string when it lacks confident specifics — we prefer no
+    iconography over hallucinated iconography.
+    """
+    cfg = load_config()
+    template_path = cfg.prompts_dir / "character_iconography.txt"
+    if not template_path.exists():
+        logger.warning(
+            "S05: character_iconography.txt prompt missing at %s",
+            template_path,
+        )
+        return None
+    template = template_path.read_text()
+    prompt = template.format(founder=founder, company=company)
+
+    llm = LLM(role="writer")
+    try:
+        result = llm.complete_json(prompt, temperature=0.4, max_tokens=400)
+    except Exception as e:
+        logger.warning("S05: iconography LLM call failed: %s", e)
+        return None
+
+    if not isinstance(result, dict):
+        return None
+    icon = (result.get("iconography") or "").strip()
+    if not icon or len(icon) < 40:
+        return None
+    return icon[:1200]

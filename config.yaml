@@ -288,27 +288,27 @@ narrators:
   - id: N1
     name: "Marcus Reed - Business Editor"
     voice: "am_michael"
-    speed: 0.95
+    speed: 1.00
     pitch_shift: 0.0
     breath_pause_ms: 300
     tone: "measured, authoritative, dry"
   - id: N2
     name: "Daniel Hayes - Investigative Skeptic"
     voice: "bm_lewis"
-    speed: 0.92
+    speed: 1.00
     pitch_shift: -1.0
     breath_pause_ms: 350
     tone: "skeptical, probing, restrained"
   - id: N3
     name: "Emma Gray - Documentary Storyteller"
     voice: "bf_emma"
-    speed: 0.96
+    speed: 1.00
     pitch_shift: 0.0
     breath_pause_ms: 300
     tone: "warm, novelistic, humane"
   - id: N4
     name: "Nicole Jensen - Modern Tech Voice"
-    voice: "af_bella"
+    voice: "af_alloy"
     speed: 1.00
     pitch_shift: 0.0
     breath_pause_ms: 220

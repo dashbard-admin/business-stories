@@ -312,6 +312,16 @@ class LLM:
                     "rewrites": [],
                     # S8 beat sheet shape (catch-all)
                     "beats": [],
+                    # S05 character iconography fallback
+                    "iconography": (
+                        "Long dark wavy hair past the shoulders, paired with "
+                        "a casual black t-shirt and faded jeans. Bohemian, "
+                        "loose-limbed posture — one hand often pressed to the "
+                        "chest while speaking. Carries an old leather notebook "
+                        "everywhere. Strikes a tall, expansive stance even in "
+                        "small rooms; gestures wide. Always wears scuffed "
+                        "boots, never sneakers."
+                    ),
                 }),
                 model=self.model_name + "-mock",
             )

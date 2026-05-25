@@ -129,6 +129,37 @@ def _coerce(data: dict) -> ImageVerdict | None:
         return None
 
 
+_ICONOGRAPHY_PROMPT = """\
+You are briefing a comic-book illustrator about the iconic visual
+identity of {person_name}. Look at the reference photograph and
+describe what makes them visually distinct — the markers a reader
+would recognise them by at a glance.
+
+Focus on:
+- Hair: shape, length, colour, hairline if notable
+- Facial hair: kind, density, style
+- Signature glasses, hats, or other facial accessories
+- Signature clothing: a specific garment they are known for
+  (black turtleneck, hoodie, suit-no-tie, bohemian linen, etc.)
+- Signature posture or stance: how they typically hold themselves
+- Signature props or environment: a specific phone, a podium,
+  a stage backdrop, a recurring object
+
+Do NOT describe individual facial proportions, exact age in years,
+skin texture, or anything that would require photorealistic likeness.
+The goal is COMIC-BOOK ICONOGRAPHY — the iconic markers, not the
+face. A reader should be able to recognise this person from a
+silhouette + the markers, without needing a photoreal portrait.
+
+Write 60-100 words as a single paragraph the illustrator can paste
+directly into a prompt. Do NOT use second person ("you see..."),
+do NOT preamble, do NOT use the person's name in the paragraph.
+Start with the most distinctive marker.
+
+Output ONLY the paragraph. No JSON, no markdown, no preamble.
+"""
+
+
 _CAPTION_PROMPT = """\
 You are captioning an archival image for a business-story documentary
 pipeline. The caption will be used by a semantic-search system to
@@ -219,6 +250,64 @@ class VLM:
             return None
         caption = caption.strip('"\'').strip()
         return caption or None
+
+    def describe_iconography(self, image_path: Path, person_name: str) -> str | None:
+        """Brief a comic-book illustrator on a person's iconic visual
+        markers (hair, signature glasses/clothing/props, stance).
+
+        Used by S05's character-profile sub-step. Returns a 60-100
+        word paragraph the illustrator can paste directly into a
+        FLUX prompt, or None on any infrastructure failure.
+
+        Critically, the prompt explicitly tells the VLM to AVOID
+        face-proportion specifics, because base FLUX cannot reliably
+        reproduce facial likeness from text. We aim for COMIC-BOOK
+        ICONOGRAPHY (signature markers) rather than portraiture.
+        """
+        if not person_name:
+            return None
+        try:
+            if not image_path.exists() or image_path.stat().st_size < 1000:
+                return None
+            b64 = base64.standard_b64encode(image_path.read_bytes()).decode("ascii")
+        except OSError as e:
+            logger.warning("VLM cannot read %s: %s", image_path, e)
+            return None
+
+        payload = {
+            "model": self.model_name,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text",
+                     "text": _ICONOGRAPHY_PROMPT.format(person_name=person_name)},
+                    {"type": "image_url",
+                     "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                ],
+            }],
+            "temperature": 0.35,
+            "max_tokens": 250,
+        }
+
+        try:
+            r = requests.post(
+                f"{VLM_BASE}/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {VLM_API_KEY}"},
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            text = r.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            logger.warning("VLM iconography failed for %s: %s",
+                           image_path.name, e)
+            return None
+
+        cleaned = _clean(text).strip().strip('"\'').strip()
+        # Reject pathological outputs (single word, refusal, etc.).
+        if len(cleaned) < 40 or len(cleaned) > 1500:
+            return None
+        return cleaned
 
     def critique_image(self, image_path: Path, prompt: str) -> ImageVerdict | None:
         """Critique `image_path` against `prompt` for comic-panel artifacts.

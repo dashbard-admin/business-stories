@@ -68,6 +68,26 @@ def run(episode: dict, queue: dict) -> str | None:
         else {"pd_assets": []}
     pd_assets = manifest.get("pd_assets", [])
 
+    # Load character iconography for hero-beat FLUX-prompt injection.
+    # Missing file = no iconography injection, beats render normally.
+    character_profile: dict = {}
+    cp_path = ws / "01_factcheck" / "character_profile.json"
+    if cp_path.exists():
+        try:
+            character_profile = json.loads(cp_path.read_text())
+        except Exception as e:
+            logger.warning("character_profile.json unreadable: %s", e)
+    founder_name = (
+        (episode.get("incident") or {}).get("founder_or_protagonist") or ""
+    ).strip()
+    # Tokens used to detect "this beat shows the hero". Filter out
+    # short / common tokens; require length > 2 so "Adam" qualifies
+    # but stop-words don't.
+    founder_tokens = {
+        t.lower() for t in re.findall(r"[A-Za-z][A-Za-z']+", founder_name)
+        if len(t) > 2
+    }
+
     visual_style = episode["visual_style"]
     style_yaml = yaml.safe_load(
         (cfg.style_profiles_dir / f"{visual_style}.yaml").read_text()
@@ -240,10 +260,24 @@ def run(episode: dict, queue: dict) -> str | None:
         "printed sentences, typography, labels, name tags, banners with words"
     )
 
+    iconography = (character_profile.get("iconography") or "").strip()
+    hero_inject_count = 0
+
     for b in beats:
         if "pd_asset_id" in b:
             continue
         beat_prompt = b.get("flux_fallback_prompt", "") or b.get("specific_visual_description", "")
+
+        # Hero-beat iconography injection. If the beat's
+        # visual_description references the founder by name OR the
+        # visual_intent is one of the "hero is central" intents,
+        # prepend the iconography paragraph so FLUX renders a
+        # consistent character across beats. Cross-beat consistency,
+        # not photorealistic likeness — base FLUX can't do faces
+        # from text alone.
+        if iconography and _beat_shows_hero(b, founder_tokens):
+            beat_prompt = f"{iconography} {beat_prompt}"
+            hero_inject_count += 1
 
         # Path A — text grounding: weave PD reference description into prompt
         ref_desc = (b.get("reference_description") or "").strip()
@@ -276,6 +310,11 @@ def run(episode: dict, queue: dict) -> str | None:
 
     pd_matched = sum(1 for b in beats if "pd_asset_id" in b)
     flux_needed = sum(1 for b in beats if "flux_render_request" in b)
+    if iconography:
+        logger.info("S08 iconography: injected into %d hero-beat FLUX prompts",
+                    hero_inject_count)
+    else:
+        logger.info("S08 iconography: skipped (no character_profile.json)")
 
     (ws / "02_script" / "beat_sheet.json").write_text(
         json.dumps({
@@ -283,8 +322,41 @@ def run(episode: dict, queue: dict) -> str | None:
             "total_estimated_seconds": sum(b["estimated_seconds"] for b in beats),
             "matched_pd_count": pd_matched,
             "flux_needed_count": flux_needed,
+            "hero_iconography_injections": hero_inject_count,
         }, indent=2)
     )
     logger.info("S08 complete: %d beats, %d direct PD, %d FLUX",
                 len(beats), pd_matched, flux_needed)
     return None
+
+
+# Visual intents that almost always centre on the hero — even when
+# the founder's name isn't in the description (e.g. "founder at his
+# workbench", "the founder in profile"). Iconography injection
+# fires unconditionally on these.
+_HERO_CENTRIC_INTENTS = {
+    "founder_portrait",
+    "boardroom_meeting",
+    "courtroom_scene",
+}
+
+
+def _beat_shows_hero(beat: dict, founder_tokens: set[str]) -> bool:
+    """Decide whether to prepend the character iconography to this
+    beat's FLUX prompt. True iff:
+      - the beat's visual_intent is one of the hero-centric intents
+        (founder_portrait, boardroom_meeting, courtroom_scene), OR
+      - any meaningful token of the founder's name appears in the
+        beat's visual description / fallback prompt (case-insensitive).
+    """
+    intent = (beat.get("visual_intent") or "").strip().lower()
+    if intent in _HERO_CENTRIC_INTENTS:
+        return True
+    if not founder_tokens:
+        return False
+    haystack = " ".join([
+        beat.get("specific_visual_description") or "",
+        beat.get("flux_fallback_prompt") or "",
+        beat.get("script_text") or "",
+    ]).lower()
+    return any(t in haystack for t in founder_tokens)

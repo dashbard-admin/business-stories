@@ -19,6 +19,22 @@ EPISODE PARAMETERS:
 - Narrator persona: {narrator_name} ({narrator_tone})
 - Visual style locked: {visual_style_name}
 
+CHARACTER ICONOGRAPHY — the hero's iconic visual identity (use this
+to plant visual cues throughout the script so the viewer sees the
+same recognisable figure on screen across beats):
+{character_iconography}
+
+If the iconography reads "(not available)", skip planting visual
+cues entirely. Otherwise, weave 2-4 short references to specific
+markers from the iconography (signature glasses, signature
+clothing, signature posture, signature props) into the prose at
+NATURAL moments — e.g. when introducing the hero in Act 1, when
+they make the pivotal decision in Act 4, and once more in the
+editorial closing. Do NOT list the markers as a description; weave
+them in as in-scene detail ("he pushed the round glasses back up
+his nose", "the black turtleneck looked the same as it always
+did"). One natural mention per Act is plenty.
+
 FACT LEDGER — these are the ONLY facts you may state as true:
 {fact_ledger_json}
 
