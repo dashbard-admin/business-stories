@@ -72,8 +72,8 @@ production:
   # disables the fade entirely on whichever side. Each fade is
   # internally clamped to max 40% of the clip's duration so short
   # beats stay coherent.
-  fade_in_seconds: 0.3
-  fade_out_seconds: 0.3
+  fade_in_seconds: 0.5
+  fade_out_seconds: 0.5
 
   # ----- Title-card styling (YouTube-thumbnail look) -----
   # When opening_title_card_seconds > 0, S12 composites the episode
@@ -100,12 +100,12 @@ quality_gates:
   min_verified_facts: 5
   min_pd_assets: 3
   min_total_beats: 50
-  max_total_beats: 65
+  max_total_beats: 70
   min_sources: 8
-  max_sources: 100                  # hard cap for S2 inventory size
+  max_sources: 50                  # hard cap for S2 inventory size
   min_tier1_sources: 1              # ≥1 primary-source filing / Wikipedia anchor
-  min_script_words: 1700            # 2000 ± ~15%
-  max_script_words: 2400
+  min_script_words: 1900            # 2000 ± ~15%
+  max_script_words: 2600
   audio_lufs_target: -14
   audio_lufs_min: -15
   audio_lufs_max: -13
@@ -187,7 +187,7 @@ grok:
   # silent no-op (S09 logs "Grok disabled: api_key not set" once at
   # startup, then proceeds with the raw FLUX renders).
   enabled: true
-  api_key: "REPLACE_WITH_XAI_KEY"
+  api_key: "xai-uxx8qGwHfT2YPZLfuEGURYMh1xsvCwpRCGi4A1pyRGJb6NOp1ONMSp1i0Oub3oEcCzLaWIU6MoZJQBEn"
   model: "grok-imagine-image"
   base_url: "https://api.x.ai/v1"
   endpoint_path: "/images/edits"        # OpenAI-compatible default;
@@ -244,7 +244,7 @@ stock_sources:
 pd_upscale:
   # On-demand image upscaler — Real-ESRGAN x4 + GFPGAN face restore.
   # S5 spawns this as a subprocess at the end of its asset hunt.
-  enabled: true
+  enabled: false
   python: "~/.maritime-services/upscale-venv/bin/python"
   script: "~/.maritime-services/upscale_cli.py"
   target_min_dimension: 800
