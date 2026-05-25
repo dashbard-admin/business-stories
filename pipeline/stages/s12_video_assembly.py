@@ -268,7 +268,7 @@ def _render_title_card(
     year,
     episode_id: str,
     text_color: str = "#FFE600",
-    stroke_color: str = "#D02020",
+    stroke_color: str = "#000000",
     stroke_width: int = 8,
     font_size_pct: float = 0.13,
     padding_pct: float = 0.06,
@@ -279,7 +279,7 @@ def _render_title_card(
     """Render the opening title card in YouTube-thumbnail style.
 
     Layout: large bold title text in a high-contrast colour (yellow
-    body + red stroke by default), slammed into one of the four
+    body + black stroke by default), slammed into one of the four
     corners with edge padding. No background band or rectangle — the
     stroke alone carries legibility against any backdrop, including
     the FLUX-rendered title.png panel.
