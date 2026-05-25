@@ -65,6 +65,12 @@ def run(episode: dict, queue: dict) -> str | None:
     clips_dir = ws / "05_video" / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
 
+    # Per-clip fade in / fade out. Applied to title card, every beat,
+    # and the closing card. Configurable via production.fade_in_seconds
+    # and production.fade_out_seconds. Set to 0 to disable either side.
+    fade_in = float(cfg.production.get("fade_in_seconds", 0.0))
+    fade_out = float(cfg.production.get("fade_out_seconds", 0.0))
+
     # The new 6-act writer prompt is explicit: NO INTRO, NO LOGO,
     # NO "WELCOME BACK". The first frame should be Act 0's cold open.
     # `production.opening_title_card_seconds` defaults to 0 (disabled).
@@ -105,8 +111,12 @@ def run(episode: dict, queue: dict) -> str | None:
                 narrator_name=narrator_name,
             )
             try:
-                ken_burns_clip(title_card_png, title_card_seconds,
-                               "slow_zoom_in", title_clip)
+                ken_burns_clip(
+                    title_card_png, title_card_seconds, "slow_zoom_in",
+                    title_clip,
+                    fade_in_seconds=fade_in,
+                    fade_out_seconds=fade_out,
+                )
             except Exception as e:
                 return f"title card render failed: {e}"
         clip_paths.append(title_clip)
@@ -155,7 +165,11 @@ def run(episode: dict, queue: dict) -> str | None:
 
         motion = b.get("ken_burns_motion", "slow_zoom_in")
         try:
-            ken_burns_clip(image_path, float(duration), motion, clip_path)
+            ken_burns_clip(
+                image_path, float(duration), motion, clip_path,
+                fade_in_seconds=fade_in,
+                fade_out_seconds=fade_out,
+            )
         except Exception as e:
             return f"ken burns render failed for {beat_id}: {e}"
         clip_paths.append(clip_path)
@@ -178,8 +192,12 @@ def run(episode: dict, queue: dict) -> str | None:
                 brand_color=cfg.channel.get("brand_color", "#1a2b3c"),
             )
             try:
-                ken_burns_clip(closing_png, closing_card_seconds,
-                               "hold_still", closing_clip)
+                ken_burns_clip(
+                    closing_png, closing_card_seconds, "hold_still",
+                    closing_clip,
+                    fade_in_seconds=fade_in,
+                    fade_out_seconds=fade_out,
+                )
             except Exception as e:
                 return f"closing card render failed: {e}"
         clip_paths.append(closing_clip)

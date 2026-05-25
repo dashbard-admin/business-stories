@@ -63,6 +63,18 @@ production:
   # Set to 0 to disable entirely.
   closing_card_seconds: 5
 
+  # Per-clip fade in / fade out. Applied to EVERY clip in S12 (title,
+  # every beat, closing). Each beat's clip plays: black -> image
+  # (over fade_in_seconds) -> hold -> image -> black (over
+  # fade_out_seconds). Between two beats you see beat-N fade out
+  # then beat-N+1 fade in, giving the classic documentary
+  # punctuated-cut feel. 0.2-0.4 each is subtle but visible; 0
+  # disables the fade entirely on whichever side. Each fade is
+  # internally clamped to max 40% of the clip's duration so short
+  # beats stay coherent.
+  fade_in_seconds: 0.3
+  fade_out_seconds: 0.3
+
 quality_gates:
   min_verified_facts: 5
   min_pd_assets: 3

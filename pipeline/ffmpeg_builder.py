@@ -82,8 +82,17 @@ def ken_burns_clip(
     duration: float,
     motion: str,
     out_path: Path,
+    *,
+    fade_in_seconds: float = 0.0,
+    fade_out_seconds: float = 0.0,
 ) -> None:
-    """Render a single Ken Burns clip from a still image."""
+    """Render a single Ken Burns clip from a still image.
+
+    `fade_in_seconds` / `fade_out_seconds` add ffmpeg `fade` filters at
+    the start / end of the clip respectively. Each fade is internally
+    clamped to at most 40% of `duration` so very short beats remain
+    visible. Pass 0 (default) to disable either side.
+    """
     p = motion_to_params(motion)
     n_frames = max(1, int(duration * FPS))
 
@@ -102,6 +111,20 @@ def ken_burns_clip(
     x_expr = f"iw*{xc}-(iw/zoom)/2"
     y_expr = f"ih*{yc}-(ih/zoom)/2"
 
+    # Clamp fade lengths so they cannot overlap or exceed the clip.
+    # 40% of duration on each side leaves at least 20% solid hold for
+    # any clip; for typical 12-18 s beats with 0.3 s fades this is a
+    # no-op (clamp doesn't fire).
+    cap = max(0.0, duration * 0.4)
+    fi = max(0.0, min(float(fade_in_seconds), cap))
+    fo = max(0.0, min(float(fade_out_seconds), cap))
+
+    fade_chain = ""
+    if fi > 0:
+        fade_chain += f"fade=t=in:st=0:d={fi:.3f},"
+    if fo > 0:
+        fade_chain += f"fade=t=out:st={max(0.0, duration - fo):.3f}:d={fo:.3f},"
+
     vf = (
         f"scale={OVERSCAN_W}:{OVERSCAN_H}:force_original_aspect_ratio=increase,"
         f"crop={OVERSCAN_W}:{OVERSCAN_H},"
@@ -112,6 +135,7 @@ def ken_burns_clip(
         f"x='{x_expr}':"
         f"y='{y_expr}':"
         f"d=1:s={OUT_W}x{OUT_H}:fps={FPS},"
+        f"{fade_chain}"
         f"format=yuv420p"
     )
 
