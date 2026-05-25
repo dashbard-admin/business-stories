@@ -65,7 +65,6 @@ class _PD:
 
 def run(episode: dict, queue: dict) -> str | None:
     cfg = load_config()
-    browser = Browser()
     ws = find_episode_workspace(episode["id"])
     if not ws:
         return "no episode workspace"
@@ -73,6 +72,29 @@ def run(episode: dict, queue: dict) -> str | None:
     incident = episode["incident"]
     company = incident["company_name"]
     founder = (incident.get("founder_or_protagonist") or "").strip()
+
+    # ---- master switch ----
+    # When asset_hunt.enabled is false (config default for this
+    # pipeline), S05 is a near-instant no-op: it writes an empty
+    # asset_manifest.json and returns. S08 then routes every beat to
+    # FLUX, which is the right call for comic-book-styled episodes
+    # where PD photo assets would clash with the locked visual style.
+    if not bool((cfg.raw.get("asset_hunt") or {}).get("enabled", True)):
+        logger.info("S05: asset_hunt.enabled=false — skipping PD hunt; "
+                    "all beats will route to FLUX")
+        empty = {
+            "company_name": company,
+            "founder_or_protagonist": founder,
+            "pd_assets": [],
+            "skipped_reason": "asset_hunt.enabled=false in config.yaml",
+        }
+        (ws / "03_assets").mkdir(parents=True, exist_ok=True)
+        (ws / "03_assets" / "asset_manifest.json").write_text(
+            json.dumps(empty, indent=2)
+        )
+        return None
+
+    browser = Browser()
 
     # Try to enrich query terms from the fact ledger (key products,
     # competitors, locations).

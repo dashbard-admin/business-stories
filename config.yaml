@@ -150,6 +150,15 @@ flux_cli:
   # prompt as "... -- avoid: <neg>" since the CLI has no separate flag.
   fold_negative_into_prompt: true
 
+asset_hunt:
+  # Master switch for S05 (PD Asset Hunt). When false, S05 writes an
+  # empty asset_manifest.json and returns immediately — no Wikimedia
+  # calls, no SearXNG image search, no upscaling, no VLM captioning.
+  # S08 then routes every beat to FLUX, which is the right call for
+  # comic-book-styled episodes where PD photo assets don't fit the
+  # visual style anyway. Set true to restore the full PD-hunt path.
+  enabled: false
+
 generic_stash:
   enabled: true
   threshold: 0.18
