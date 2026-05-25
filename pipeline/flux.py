@@ -132,6 +132,17 @@ class Flux:
 
     def _render_one(self, req: FluxRequest, out_path: Path, seed: int) -> Path | None:
         if self._mock:
+            _log_prompt(
+                out_path=out_path,
+                beat_id=req.beat_id,
+                seed=seed,
+                width=self.default_width,
+                height=self.default_height,
+                steps=self.default_steps,
+                prompt=req.prompt,
+                negative_prompt=req.negative_prompt,
+                result="ok_mock",
+            )
             return self._mock_render(out_path)
 
         prompt = req.prompt
@@ -208,15 +219,30 @@ class Flux:
             except subprocess.TimeoutExpired:
                 logger.warning("flux timed out after %ds for %s seed=%d",
                                self.timeout, req.beat_id, seed)
+                _log_prompt(out_path=out_path, beat_id=req.beat_id,
+                            seed=seed, width=width, height=height,
+                            steps=steps, prompt=prompt,
+                            negative_prompt=req.negative_prompt,
+                            result="fail_timeout")
                 return None
             except FileNotFoundError:
                 logger.error("flux binary not found on PATH (binary=%r). "
                              "Set flux_cli.binary in config.yaml or enable mock_mode.",
                              self.binary)
+                _log_prompt(out_path=out_path, beat_id=req.beat_id,
+                            seed=seed, width=width, height=height,
+                            steps=steps, prompt=prompt,
+                            negative_prompt=req.negative_prompt,
+                            result="fail_binary_not_found")
                 return None
 
             # Path 1: the CLI honored --output. Cheapest case.
             if out_path.exists() and out_path.stat().st_size >= 1000:
+                _log_prompt(out_path=out_path, beat_id=req.beat_id,
+                            seed=seed, width=width, height=height,
+                            steps=steps, prompt=prompt,
+                            negative_prompt=req.negative_prompt,
+                            result="ok")
                 return out_path
 
             # Path 2: the CLI wrote SOMEWHERE in our clean tempdir
@@ -230,6 +256,12 @@ class Flux:
                     req.beat_id, seed, recovered.name, out_path,
                 )
                 shutil.copy(str(recovered), str(out_path))
+                _log_prompt(out_path=out_path, beat_id=req.beat_id,
+                            seed=seed, width=width, height=height,
+                            steps=steps, prompt=prompt,
+                            negative_prompt=req.negative_prompt,
+                            result="ok_recovered_cwd",
+                            result_detail=recovered.name)
                 return out_path
 
             # Path 3: the CLI wrote near the requested --output path
@@ -244,23 +276,36 @@ class Flux:
                     req.beat_id, seed, recovered_parent.name, out_path,
                 )
                 shutil.copy(str(recovered_parent), str(out_path))
+                _log_prompt(out_path=out_path, beat_id=req.beat_id,
+                            seed=seed, width=width, height=height,
+                            steps=steps, prompt=prompt,
+                            negative_prompt=req.negative_prompt,
+                            result="ok_recovered_parent",
+                            result_detail=recovered_parent.name)
                 return out_path
 
         # Nothing recoverable. Surface the full stderr so the operator
         # can diagnose the CLI behaviour.
+        stderr_tail = (proc.stderr or "")[-2000:]
         if proc.returncode != 0:
             logger.warning(
                 "flux exit=%d for %s seed=%d; no output recovered. "
                 "stderr (last 2000 chars):\n%s",
-                proc.returncode, req.beat_id, seed,
-                (proc.stderr or "")[-2000:],
+                proc.returncode, req.beat_id, seed, stderr_tail,
             )
+            result_tag = f"fail_exit_{proc.returncode}"
         else:
             logger.warning(
                 "flux exit=0 for %s seed=%d but no PNG produced anywhere. "
                 "stderr (last 2000 chars):\n%s",
-                req.beat_id, seed, (proc.stderr or "")[-2000:],
+                req.beat_id, seed, stderr_tail,
             )
+            result_tag = "fail_no_output"
+        _log_prompt(out_path=out_path, beat_id=req.beat_id,
+                    seed=seed, width=width, height=height, steps=steps,
+                    prompt=prompt, negative_prompt=req.negative_prompt,
+                    result=result_tag,
+                    result_detail=stderr_tail[-300:] if stderr_tail else None)
         return None
 
     def _mock_render(self, out_path: Path) -> Path:
@@ -269,6 +314,62 @@ class Flux:
         Image.new("RGB", (self.default_width, self.default_height),
                   color=(60, 35, 80)).save(out_path)
         return out_path
+
+
+PROMPTS_LOG_NAME = "prompts.jsonl"
+
+
+def _log_prompt(
+    *,
+    out_path: Path,
+    beat_id: str,
+    seed: int,
+    width: int,
+    height: int,
+    steps: int,
+    prompt: str,
+    negative_prompt: str,
+    result: str,
+    result_detail: str | None = None,
+) -> None:
+    """Append one JSONL record to prompts.jsonl in the renders dir.
+
+    One line per FLUX CLI invocation (title card, credits card, every
+    per-beat attempt). Captures the exact prompt sent to the binary,
+    the seed used, output target, and a result tag — so the operator
+    can reconstruct any rendered image after the fact, or diff prompts
+    that produced good vs bad results.
+
+    Inspect with `jq` or plain `cat`:
+        jq 'select(.beat_id=="title")' 03_assets/flux/prompts.jsonl
+        jq -r '.prompt' 03_assets/flux/prompts.jsonl | head -1
+
+    Failures don't propagate — logging must never break a render.
+    """
+    try:
+        import json
+        from datetime import datetime, timezone
+        log_dir = out_path.parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "beat_id": beat_id,
+            "seed": int(seed),
+            "width": int(width),
+            "height": int(height),
+            "steps": int(steps),
+            "output_path": out_path.name,
+            "prompt": prompt,
+            "negative_prompt": negative_prompt or "",
+            "result": result,
+        }
+        if result_detail:
+            record["result_detail"] = result_detail
+        line = json.dumps(record, ensure_ascii=False)
+        with (log_dir / PROMPTS_LOG_NAME).open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception as e:
+        logger.warning("prompt-log write failed for %s: %s", beat_id, e)
 
 
 def _find_recovered_png(dir_path: Path, since: float,
