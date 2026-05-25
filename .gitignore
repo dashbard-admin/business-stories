@@ -1,0 +1,35 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.DS_Store
+
+# Per-episode workspace + transient state — never commit.
+state/*.json
+state/locks/
+episodes/
+logs/
+
+# Operator-curated audio + image libraries are large and not part of
+# the code distribution. The manifest.json files inside are committed
+# (they hold the metadata schema); only the binary assets are excluded.
+assets/music_library/*.wav
+assets/music_library/*.mp3
+assets/music_library/*.flac
+assets/music_library/*.aiff
+assets/music_library/*.ogg
+assets/music_library/*.m4a
+assets/generic_stock/*.png
+assets/generic_stock/*.jpg
+assets/generic_stock/*.jpeg
+assets/generic_stock/*.webp
+
+# Secrets — keep API keys out of git. .env at the project root is
+# loaded into os.environ at package import time. Copy .env.example
+# to .env locally and fill in your keys.
+.env
+.env.*
+!.env.example
+
+# Operator secrets directory (legacy convention).
+secrets/

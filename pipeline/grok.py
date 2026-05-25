@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
 from pathlib import Path
 
 import requests
@@ -31,6 +32,11 @@ from .config import load_config
 logger = logging.getLogger("hermes.grok")
 
 PLACEHOLDER_KEY_TOKENS = ("replace_with", "your_key", "todo", "xxx")
+
+# Environment variables checked, in priority order, for the xAI API
+# key. XAI_API_KEY is the canonical name (matches xAI's own docs);
+# GROK_API_KEY is accepted as an alias for ergonomics.
+API_KEY_ENV_VARS = ("XAI_API_KEY", "GROK_API_KEY")
 
 
 class Grok:
@@ -45,7 +51,16 @@ class Grok:
         cfg = load_config()
         gc = cfg.grok
         self.enabled: bool = bool(gc.get("enabled", False))
-        self.api_key: str = (gc.get("api_key") or "").strip()
+        # API key resolution order:
+        #   1. XAI_API_KEY in os.environ
+        #   2. GROK_API_KEY in os.environ
+        #   3. config.yaml > grok.api_key (back-compat only; not
+        #      recommended — GitHub secret-scanning rejects pushes
+        #      containing real keys. Operator workflow: keep keys in
+        #      .env at the project root; .env is gitignored.)
+        # pipeline/__init__.py loads .env into os.environ at import
+        # time, so adapters never have to touch the file directly.
+        self.api_key: str = _resolve_api_key(gc.get("api_key", ""))
         self.model: str = gc.get("model", "grok-imagine-image")
         self.base_url: str = (gc.get("base_url") or "").rstrip("/")
         self.endpoint_path: str = gc.get("endpoint_path", "/images/edits")
@@ -216,3 +231,24 @@ class Grok:
         except Exception as e:
             logger.warning("grok mock correction failed: %s", e)
             return None
+
+
+def _resolve_api_key(config_value: str) -> str:
+    """Pick the xAI API key from the highest-priority source available.
+
+    Priority:
+      1. XAI_API_KEY env var (xAI's canonical name)
+      2. GROK_API_KEY env var (alias for ergonomics)
+      3. config.yaml > grok.api_key (back-compat only — discouraged
+         because committing a real key to config.yaml will trip
+         GitHub's secret scanner and reject the push)
+
+    .env files at the project root are loaded into os.environ at
+    package import time by pipeline/__init__.py, so any of these
+    paths work transparently.
+    """
+    for var in API_KEY_ENV_VARS:
+        val = (os.environ.get(var) or "").strip()
+        if val:
+            return val
+    return (config_value or "").strip()
