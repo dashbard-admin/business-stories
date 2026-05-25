@@ -33,6 +33,7 @@ from pathlib import Path
 
 from ..config import load_config
 from ..flux import Flux, FluxRequest, compute_seed
+from ..grok import Grok
 from ..state import find_episode_workspace
 from ..vlm import VLM, ImageVerdict
 
@@ -79,6 +80,28 @@ def run(episode: dict, queue: dict) -> str | None:
     logger.info("S09: image QA %s, max_attempts_per_beat=%d, strict_borderline=%s",
                 "enabled" if qa_enabled else "disabled",
                 max_attempts, strict_borderline)
+
+    # Grok text-correction sub-phase. Lazy: only spun up if available;
+    # otherwise the per-beat loop skips correction transparently.
+    grok = Grok()
+    grok_prompt_template: str | None = None
+    grok_dir = ws / "03_assets" / "grok"
+    if grok.available:
+        try:
+            grok_prompt_template = (
+                cfg.prompts_dir / "grok_text_correction.txt"
+            ).read_text()
+            grok_dir.mkdir(parents=True, exist_ok=True)
+            logger.info("S09: Grok text-correction enabled "
+                        "(model=%s, endpoint=%s%s)",
+                        grok.model, grok.base_url, grok.endpoint_path)
+        except Exception as e:
+            logger.warning("S09: Grok prompt template unreadable "
+                           "(%s); correction disabled", e)
+            grok_prompt_template = None
+    else:
+        logger.info("S09: Grok text-correction disabled (%s)",
+                    grok.unavailability_reason())
 
     # ----- title + credits cards (rendered first so S12 can pick them up
     # even if the per-beat loop bails mid-way) -----
@@ -194,6 +217,38 @@ def run(episode: dict, queue: dict) -> str | None:
             logger.error("S09 %s: every render attempt failed", beat_id)
             continue
 
+        # ----- Grok text-correction sub-phase -----
+        # If the VLM verdict on the winning image flags malformed /
+        # illegible text artifacts AND the Grok adapter is available,
+        # send the image + the FLUX prompt to xAI Grok for a text-fix
+        # pass. The corrected output replaces chosen_path; both the
+        # raw FLUX render and the Grok output are archived to
+        # 03_assets/grok/<beat_id>_*.png for visual comparison.
+        grok_correction_info: dict | None = None
+        if (grok_prompt_template
+                and grok.available
+                and chosen_verdict
+                and _has_malformed_text(chosen_verdict)):
+            grok_correction_info = _correct_text_via_grok(
+                src=chosen_path,
+                beat_id=beat_id,
+                flux_prompt=fr["prompt"],
+                verdict=chosen_verdict,
+                grok=grok,
+                grok_dir=grok_dir,
+                prompt_template=grok_prompt_template,
+            )
+            if grok_correction_info and grok_correction_info.get("corrected_path"):
+                # Promote the corrected image to be the canonical
+                # chosen path. The original FLUX render lives on at
+                # grok_correction_info["original_archive_path"].
+                chosen_path = Path(grok_correction_info["corrected_path"])
+                logger.info("S09 %s: Grok corrected (artifacts=%s)",
+                            beat_id, grok_correction_info.get("triggering_artifacts"))
+            else:
+                logger.warning("S09 %s: Grok correction attempted but failed; "
+                               "keeping uncorrected FLUX render", beat_id)
+
         try:
             if out_path.exists():
                 out_path.unlink()
@@ -216,6 +271,16 @@ def run(episode: dict, queue: dict) -> str | None:
                if chosen_verdict
                else {"verdict": "unjudged", "reasoning": "VLM unavailable"}),
         }
+        if grok_correction_info:
+            # Preserve original verdict but flag that Grok rewrote
+            # the pixels. Operator can audit which beats this hit by
+            # grepping image_qa.grok_correction in beat_sheet.json.
+            b["image_qa"]["grok_correction"] = {
+                "applied": True,
+                "triggering_artifacts": grok_correction_info.get("triggering_artifacts"),
+                "original_archive": grok_correction_info.get("original_archive_path"),
+                "corrected_archive": grok_correction_info.get("corrected_archive_path"),
+            }
         manifest["flux_assets"].append({
             "id": beat_id,
             "local_path": b["flux_asset_path"],
@@ -231,6 +296,112 @@ def run(episode: dict, queue: dict) -> str | None:
     if failed > 0 and failed > rendered * 0.1:
         return f"FLUX rendering failed for {failed}/{rendered + failed} beats"
     return None
+
+
+# ---------------- Grok text-correction helpers ----------------
+
+# Keyword set used to decide whether a VLM verdict implicates
+# malformed/illegible/garbled text in the rendered image. Checked
+# case-insensitively against verdict.artifacts entries AND the
+# verdict.reasoning string. The list is intentionally generous —
+# false positives cost one extra Grok call per beat, false negatives
+# leave bad text in the final video.
+_MALFORMED_TEXT_KEYWORDS = (
+    "malformed text", "illegible text", "incomprehensible text",
+    "garbled text", "gibberish", "glyph", "glyphic", "glyph soup",
+    "unreadable", "scribble", "scribbled", "scribble-like",
+    "fake text", "nonsense text", "jumbled text", "text artifact",
+    "text artifacts", "broken text", "text is unreadable",
+    "letters", "lettering", "alphabet", "word salad",
+    "garbled writing", "garbled letters", "garbled signage",
+    "garbled lettering", "unintelligible text",
+)
+
+
+def _has_malformed_text(verdict: ImageVerdict) -> tuple[bool, list[str]]:
+    """Scan the VLM verdict for malformed-text indicators.
+
+    Returns (triggered, matching_phrases). `triggered` is True when
+    at least one keyword from _MALFORMED_TEXT_KEYWORDS appears in
+    either an artifact entry or in verdict.reasoning. The matching
+    phrases (artifacts strings or "reasoning: ...") are returned so
+    they can be logged + stamped into image_qa for audit.
+    """
+    matches: list[str] = []
+    haystack: list[tuple[str, str]] = []
+    for a in (verdict.artifacts or []):
+        haystack.append(("artifact", str(a)))
+    if verdict.reasoning:
+        haystack.append(("reasoning", verdict.reasoning))
+    for source, text in haystack:
+        low = text.lower()
+        for kw in _MALFORMED_TEXT_KEYWORDS:
+            if kw in low:
+                matches.append(f"{source}: {text[:160]}")
+                break  # one match per haystack entry is enough
+    return (bool(matches), matches)
+
+
+def _correct_text_via_grok(
+    *,
+    src: Path,
+    beat_id: str,
+    flux_prompt: str,
+    verdict: ImageVerdict,
+    grok: Grok,
+    grok_dir: Path,
+    prompt_template: str,
+) -> dict | None:
+    """Archive the FLUX render, call Grok with the FLUX prompt + image,
+    archive the Grok output. Returns a metadata dict for the caller
+    to stamp into image_qa, or None on any failure.
+
+    Output filenames (under grok_dir = 03_assets/grok/):
+      - <beat_id>_flux_original.png  — pre-correction FLUX render
+      - <beat_id>_grok_corrected.png — Grok output (also becomes the
+                                       new canonical FLUX image at
+                                       03_assets/flux/<beat_id>.png)
+
+    On failure (Grok API error, malformed response, decode failure)
+    returns None — caller keeps the uncorrected FLUX render.
+    """
+    triggered, matches = _has_malformed_text(verdict)
+    if not triggered:
+        return None
+    logger.info("S09 %s: VLM flagged malformed text — routing to Grok. "
+                "triggers: %s", beat_id, matches[:3])
+
+    grok_dir.mkdir(parents=True, exist_ok=True)
+    original_archive = grok_dir / f"{beat_id}_flux_original.png"
+    corrected_archive = grok_dir / f"{beat_id}_grok_corrected.png"
+
+    # Archive the FLUX original. shutil.copy keeps the src in place
+    # so the caller's subsequent shutil.move(chosen_path, out_path)
+    # still works if the Grok call fails and we fall back.
+    try:
+        import shutil as _sh
+        _sh.copy(str(src), str(original_archive))
+    except Exception as e:
+        logger.warning("S09 %s: failed to archive FLUX original "
+                       "to %s: %s", beat_id, original_archive, e)
+        return None
+
+    # Compose the Grok prompt with the original FLUX prompt embedded.
+    grok_prompt = prompt_template.format(flux_prompt=flux_prompt)
+
+    # Call Grok.
+    result = grok.correct_image(
+        image_path=src, prompt=grok_prompt, out_path=corrected_archive,
+    )
+    if result is None or not corrected_archive.exists():
+        return None
+
+    return {
+        "triggering_artifacts": matches,
+        "original_archive_path": str(original_archive),
+        "corrected_archive_path": str(corrected_archive),
+        "corrected_path": str(corrected_archive),
+    }
 
 
 # ---------------- title + credits cards ----------------

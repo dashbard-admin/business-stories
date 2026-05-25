@@ -170,6 +170,38 @@ music_library:
   voice_dynaudnorm_gauss: 11
   voice_dynaudnorm_max_gain: 15.0
 
+grok:
+  # xAI Grok image-correction pass (S09 sub-phase). When a FLUX render
+  # comes back with malformed / illegible text artifacts flagged by
+  # the VLM, S09 sends the image + the original FLUX prompt to Grok
+  # via xAI's API. Grok regenerates the image with the text corrected
+  # and the rest of the composition preserved as faithfully as
+  # possible. Both the original FLUX render and the Grok-corrected
+  # version are archived to 03_assets/grok/ for comparison; the
+  # corrected version replaces the FLUX image at 03_assets/flux/
+  # under the same filename, so downstream stages (S12) pick it up
+  # transparently.
+  #
+  # Authentication: set api_key below to your xAI key. While api_key
+  # is empty / matches the placeholder, the entire Grok pass is a
+  # silent no-op (S09 logs "Grok disabled: api_key not set" once at
+  # startup, then proceeds with the raw FLUX renders).
+  enabled: true
+  api_key: "REPLACE_WITH_XAI_KEY"
+  model: "grok-imagine-image"
+  base_url: "https://api.x.ai/v1"
+  endpoint_path: "/images/edits"        # OpenAI-compatible default;
+                                        # adjust if xAI's image-edit
+                                        # endpoint lives elsewhere.
+  timeout_seconds: 180
+  # Size requested from Grok. xAI accepts OpenAI-compatible "WIDTHxHEIGHT".
+  # Falls back to 2K 16:9 (2048x1152) if 1920x1080 is rejected.
+  size_primary: "1920x1080"
+  size_fallback: "2048x1152"
+  # Operator-editable prompt template lives at
+  # pipeline/prompts/grok_text_correction.txt. The {flux_prompt}
+  # placeholder is replaced with the exact prompt FLUX rendered from.
+
 flux_cli:
   # The flux CLI is invoked exactly as:
   #   flux "<prompt>" --height 1080 --width 1920 --steps 24 \

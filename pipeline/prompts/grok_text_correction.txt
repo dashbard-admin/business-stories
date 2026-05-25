@@ -1,0 +1,8 @@
+A lesser GenAI image model has produced an image following a custom prompt.
+Unfortunately the image has text and the model cannot generate text that well, which is why the text is malformed in the resulted image.
+I need you to help me correct the text in this image and make it intelligible to implement the prompt instructions, but keep the same style, colours and overall composition that the previous model has applied to the picture.
+Please output the resulted picture at 1920 x 1080 resolution, or 2K with 16:9 ratio as alternative.
+
+You have the picture attached and here is the LLM prompt that produced that picture:
+
+{flux_prompt}
