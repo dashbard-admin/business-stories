@@ -291,7 +291,10 @@ def audio_post_mix(spec: AudioMixSpec) -> None:
                 f":LRA={spec.lra}:print_format=json"),
         "-f", "null", "-",
     ]
-    proc = subprocess.run(analyze_cmd, capture_output=True, text=True)
+    proc = subprocess.run(
+        analyze_cmd, capture_output=True, text=True,
+        stdin=subprocess.DEVNULL,
+    )
     m = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", proc.stderr or "", re.DOTALL)
     measured: dict | None = None
     if m:
@@ -426,7 +429,10 @@ def probe(path: Path) -> dict:
            "-print_format", "json",
            "-show_format", "-show_streams",
            str(path)]
-    out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(
+        cmd, capture_output=True, text=True, check=True,
+        stdin=subprocess.DEVNULL,
+    ).stdout
     return json.loads(out)
 
 
@@ -451,6 +457,10 @@ def _run(cmd: list[str], timeout: float = 1800.0) -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        # Explicit DEVNULL stdin. Same reason as pipeline/flux.py —
+        # protects child interpreters/binaries from inheriting a
+        # broken parent fd 0 in cron / long-running daemon contexts.
+        stdin=subprocess.DEVNULL,
     )
     try:
         stdout, stderr = proc.communicate(timeout=timeout)

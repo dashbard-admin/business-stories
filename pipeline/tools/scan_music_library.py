@@ -33,7 +33,10 @@ def _duration_seconds(path: Path) -> float:
            "-of", "default=noprint_wrappers=1:nokey=1",
            str(path)]
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
+        out = subprocess.run(
+            cmd, capture_output=True, text=True, check=True,
+            stdin=subprocess.DEVNULL,
+        ).stdout.strip()
         return float(out)
     except Exception as e:
         logger.warning("ffprobe failed on %s: %s", path.name, e)

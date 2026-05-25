@@ -191,6 +191,19 @@ class Flux:
                     text=True,
                     timeout=self.timeout,
                     cwd=str(tmpdir_path),
+                    # Explicit /dev/null stdin. Without this the child
+                    # inherits the orchestrator's fd 0, which in cron /
+                    # daemon contexts (and sometimes after many prior
+                    # subprocess calls accumulate state) can be closed
+                    # or invalid. The FLUX CLI's Python interpreter
+                    # then crashes during startup with
+                    #   "Fatal Python error: init_sys_streams:
+                    #    can't initialize sys standard streams"
+                    #   "OSError: [Errno 9] Bad file descriptor"
+                    # in <20 ms — before any FLUX code runs. Passing
+                    # DEVNULL gives the child a guaranteed-valid
+                    # read-only empty stdin.
+                    stdin=subprocess.DEVNULL,
                 )
             except subprocess.TimeoutExpired:
                 logger.warning("flux timed out after %ds for %s seed=%d",
