@@ -359,7 +359,7 @@ _MALFORMED_TEXT_KEYWORDS = (
     "text artifacts", "broken text", "text is unreadable",
     "letters", "lettering", "alphabet", "word salad",
     "garbled writing", "garbled letters", "garbled signage",
-    "garbled lettering", "unintelligible text",
+    "garbled lettering", "unintelligible text", " illegible", " illegibility",
 )
 
 
