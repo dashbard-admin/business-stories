@@ -216,24 +216,32 @@ def run(episode: dict, queue: dict) -> str | None:
             logger.error("S09 %s: every render attempt failed", beat_id)
             continue
 
-        # ----- Grok text-correction sub-phase -----
-        # If the VLM verdict on the winning image flags malformed /
-        # illegible text artifacts AND the Grok adapter is available,
-        # send the image + the FLUX prompt to xAI Grok for a text-fix
-        # pass. The corrected output replaces chosen_path; both the
-        # raw FLUX render and the Grok output are archived to
-        # 03_assets/grok/<beat_id>_*.png for visual comparison.
+        # ----- Grok regeneration sub-phase -----
+        # If the VLM verdict on the winning image flags EITHER
+        # malformed/illegible text artifacts OR anatomical issues
+        # (anatomy_ok=False), AND the Grok adapter is available,
+        # ask Grok to regenerate the panel from the FLUX prompt
+        # (text-to-image). The Grok output replaces chosen_path;
+        # both the raw FLUX render and the Grok output are archived
+        # to 03_assets/grok/<beat_id>_*.png for visual comparison.
         grok_correction_info: dict | None = None
         if grok_prompt_template and grok.available and chosen_verdict:
-            # _has_malformed_text returns a (bool, list) TUPLE. Earlier
-            # versions used the tuple directly in the boolean gate,
-            # which is always truthy in Python (any 2-item tuple is)
-            # — that meant Grok was attempted on every beat with the
-            # only "successful" no-op being _correct_text_via_grok's
-            # internal recheck. We unpack explicitly to make the gate
-            # check the actual bool.
-            triggered, triggers = _has_malformed_text(chosen_verdict)
-            if triggered:
+            # Two independent gate predicates. Either is enough to
+            # route to Grok. Both checked here in the orchestrator
+            # so the routing decision is auditable from one log line.
+            text_triggered, text_triggers = _has_malformed_text(chosen_verdict)
+            anatomy_bad = not chosen_verdict.anatomy_ok
+            triggers: list[str] = list(text_triggers)
+            if anatomy_bad:
+                anat_msg = "anatomy_ok=False"
+                if chosen_verdict.reasoning:
+                    anat_msg = (
+                        f"{anat_msg}: {chosen_verdict.reasoning[:160]}"
+                    )
+                # Anatomy goes to the front of the triggers list so
+                # it's visible first in the log + the audit field.
+                triggers.insert(0, anat_msg)
+            if text_triggered or anatomy_bad:
                 grok_correction_info = _correct_text_via_grok(
                     src=chosen_path,
                     beat_id=beat_id,
@@ -242,13 +250,14 @@ def run(episode: dict, queue: dict) -> str | None:
                     grok=grok,
                     grok_dir=grok_dir,
                     prompt_template=grok_prompt_template,
+                    triggers=triggers,
                 )
                 if grok_correction_info and grok_correction_info.get("corrected_path"):
                     # Promote the corrected image to be the canonical
                     # chosen path. The original FLUX render lives on at
                     # grok_correction_info["original_archive_path"].
                     chosen_path = Path(grok_correction_info["corrected_path"])
-                    logger.info("S09 %s: Grok corrected (artifacts=%s)",
+                    logger.info("S09 %s: Grok corrected (triggers=%s)",
                                 beat_id, grok_correction_info.get("triggering_artifacts"))
                 else:
                     logger.warning("S09 %s: Grok correction attempted but failed; "
@@ -431,11 +440,19 @@ def _correct_text_via_grok(
     grok: Grok,
     grok_dir: Path,
     prompt_template: str,
+    triggers: list[str],
 ) -> dict | None:
     """Archive the FLUX render, ask Grok to regenerate from the same
     prompt (text-to-image — no image upload, no edit semantics), and
     archive the Grok output. Returns a metadata dict for the caller
     to stamp into image_qa, or None on any failure.
+
+    `triggers` is the list of strings describing WHY the orchestrator
+    routed to Grok (combined text + anatomy triggers, computed in
+    the caller). Passed in so the gate decision and the function's
+    logging stay in sync — earlier versions re-checked
+    `_has_malformed_text` inside the function and silently no-oped
+    when anatomy-only triggered the route.
 
     Output filenames (under grok_dir = 03_assets/grok/):
       - <beat_id>_flux_original.png  — pre-correction FLUX render
@@ -447,11 +464,10 @@ def _correct_text_via_grok(
     On failure (Grok API error, malformed response) returns None —
     the caller keeps the uncorrected FLUX render.
     """
-    triggered, matches = _has_malformed_text(verdict)
-    if not triggered:
+    if not triggers:
         return None
-    logger.info("S09 %s: VLM flagged malformed text — routing to Grok. "
-                "triggers: %s", beat_id, matches[:3])
+    logger.info("S09 %s: VLM flagged issues — routing to Grok. "
+                "triggers: %s", beat_id, triggers[:3])
 
     grok_dir.mkdir(parents=True, exist_ok=True)
     original_archive = grok_dir / f"{beat_id}_flux_original.png"
@@ -485,7 +501,7 @@ def _correct_text_via_grok(
         return None
 
     return {
-        "triggering_artifacts": matches,
+        "triggering_artifacts": triggers,
         "original_archive_path": str(original_archive),
         "corrected_archive_path": str(corrected_archive),
         "corrected_path": str(corrected_archive),

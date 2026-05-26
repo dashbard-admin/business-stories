@@ -122,6 +122,37 @@ orchestrator:
   max_topic_discovery_retries: 5
   per_invocation_max_runtime_seconds: 5400   # 90 min cap per cron run
 
+topic_validation:
+  # S01 pre-commit demand check. Before persisting a topic the
+  # writer LLM picked, we probe SearXNG to confirm the topic has
+  # actual audience demand and isn't already saturated.
+  #
+  # Two signals, both via the same SearXNG instance S02 uses:
+  #
+  #   - `<company> documentary` under categories=videos
+  #     → saturation window: min..max distinct video URLs.
+  #       Below min = obscure (no demand). Above max = saturated
+  #       (we can't break into the niche).
+  #
+  #   - `<company>` under categories=news
+  #     → recent-news count. Advisory only; logged but never
+  #       rejects. High counts mean "trending right now" — a
+  #       company that filed for bankruptcy last week is a
+  #       goldmine and the rolling-window news count tells you so.
+  #
+  # The non-US ratio enforces geographic diversity. With
+  # non_us_ratio=0.33 and non_us_ratio_lookback=6, the last six
+  # picks must contain at least round(6*0.33) = 2 non-US topics;
+  # if they don't, the next pick is force-routed to non-US via a
+  # hard hint in the prompt and a post-validation country check.
+  enabled: true
+  min_youtube_results: 3            # below = topic too obscure
+  max_youtube_results: 50           # above = topic too saturated
+  prefer_decline_stories: true      # bias prompt toward failure arcs
+  non_us_ratio: 0.33                # 1-in-3 episodes non-US
+  non_us_ratio_lookback: 6          # measured over the last N picks
+  trending_news_lookback_days: 30   # advisory; logged in signals dict
+
 upload:
   mode: "manual"                    # "manual" only — no automatic upload in this pipeline
   schedule_offset_hours: 36
