@@ -115,6 +115,39 @@ class Config:
         return merged
 
     @property
+    def topic_validation(self) -> dict[str, Any]:
+        """S01 pre-commit demand check thresholds.
+
+        - enabled: master switch. When false, S01 skips the YouTube /
+          news lookups entirely (useful for offline runs or for
+          warming up the rolling-window from scratch).
+        - min_youtube_results / max_youtube_results: saturation
+          window. SearXNG `categories=videos` count outside this
+          range fails the gate.
+        - prefer_decline_stories: when true, the S01 prompt is biased
+          toward rise_and_fall / scandal_postmortem / disruption arcs
+          via a hint injected at template-format time.
+        - non_us_ratio: target share of non-US picks in the rolling
+          window (0.33 = 1-in-3). Combined with non_us_ratio_lookback,
+          this drives the country-rotation hint into the prompt and
+          rejects US picks when the rolling window has fallen below
+          the floor.
+        - trending_news_lookback_days: documented in the gate logic
+          but currently advisory only (SearXNG news returns recent
+          items by default; the count is the signal).
+        """
+        defaults = {
+            "enabled": True,
+            "min_youtube_results": 3,
+            "max_youtube_results": 50,
+            "prefer_decline_stories": True,
+            "non_us_ratio": 0.33,
+            "non_us_ratio_lookback": 6,
+            "trending_news_lookback_days": 30,
+        }
+        return {**defaults, **(self.raw.get("topic_validation") or {})}
+
+    @property
     def grok(self) -> dict[str, Any]:
         defaults = {
             "enabled": False,

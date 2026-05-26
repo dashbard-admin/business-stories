@@ -32,6 +32,34 @@ CONSTRAINTS:
   prefer topics whose core record is on SEC, courtlistener, or open
   outlets.
 
+AUDIENCE DEMAND (THIS IS WHAT KILLS MOST FACELESS CHANNELS):
+A topic is not viable just because it is interesting. It must have
+an existing audience signal:
+- The company name should be searchable. Audiences who'd watch a
+  business documentary should already be googling this company or
+  founder. If the topic is too obscure ("a regional plumbing supply
+  chain in 1962"), no one will search for it and the video will
+  not surface. After your topic is proposed, an external system will
+  query SearXNG / YouTube for `"<company> documentary"` and reject
+  anything with fewer than 3 hits.
+- The topic should NOT already be saturated to death. A few dozen
+  competing videos is healthy demand. Hundreds means the niche is
+  closed off to new entrants. The external system also rejects any
+  topic returning more than 50 distinct video URLs. So: well-known
+  enough that people search for it, but not so picked-over that the
+  top results are all 100k-view explainers from 2019.
+- Prefer companies/founders with RECENT NEWS ACTIVITY where
+  applicable. A company that filed for bankruptcy in the last
+  12-24 months is a goldmine — the news cycle drives traffic.
+  Likewise a founder back in headlines, a scandal anniversary, a
+  documentary release, a court ruling. Trending tailwinds matter.
+
+DECLINE-OVER-RISE BIAS (this is the channel's editorial line):
+{decline_preference_hint}
+
+GEOGRAPHIC DIVERSITY:
+{non_us_required_hint}
+
 PRIORITIZE topics that meet at least 3 of these:
 - A clearly named HERO whose decisions were pivotal (a founder, a
   CEO who took over, a whistleblower, a rival who outflanked them).
@@ -64,6 +92,7 @@ Every proposal must have:
 
 ROTATION CONSTRAINTS (avoid duplicating recent episodes):
 - Recent story_kind values already covered: {recent_story_kinds}
+- Recent HQ countries already covered: {recent_countries}
 
 OUTPUT FORMAT — JSON only, no prose, no code fences:
 {{
@@ -71,6 +100,7 @@ OUTPUT FORMAT — JSON only, no prose, no code fences:
   "founder_or_protagonist": "string — the central person",
   "year_anchor": integer — the year the central event happens,
   "story_kind": "origin | rise_and_fall | disruption | pivot | underdog_comeback | founder_drama | scandal_postmortem",
+  "hq_country": "ISO 3166-1 alpha-2 code (e.g. US, GB, DE, JP, KR, SE, CN, IN, BR, MX, AU, CA, NL, FR, IT, ES, IL). The country where the company was headquartered or primarily operated during the events of the story.",
   "one_line_pitch": "string, max 25 words, the angle for THIS episode",
   "hero": "string, 1-2 sentences naming the protagonist with a specific characteristic",
   "conflict": "string, 1-2 sentences naming the specific adversary or constraint",

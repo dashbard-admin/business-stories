@@ -81,6 +81,11 @@ def _init_queue() -> dict[str, Any]:
             "archetypes": [],
             "narrators": [],
             "visual_styles": [],
+            # ISO 3166-1 alpha-2 country code of the protagonist
+            # company's HQ. Pushed by S01 on every successful
+            # topic commit; consumed by pipeline.trends.non_us_required
+            # to enforce the 1-in-N non-US ratio.
+            "countries": [],
         },
     }
 
@@ -246,12 +251,21 @@ def push_rolling_window(
     narrator: str,
     visual_style: str,
     keep: int = 6,
+    *,
+    country: str | None = None,
 ) -> None:
+    """Append the assignment dimensions (and optionally the country)
+    to the rolling-window state, trimming to the most recent `keep`
+    entries per key. `country` is optional only because legacy callers
+    that pre-date the country track may not pass it; S01 always does."""
     rw = queue["rolling_window"]
-    for key, val in [
+    entries: list[tuple[str, str]] = [
         ("archetypes", archetype),
         ("narrators", narrator),
         ("visual_styles", visual_style),
-    ]:
+    ]
+    if country is not None:
+        entries.append(("countries", country))
+    for key, val in entries:
         rw.setdefault(key, []).append(val)
         rw[key] = rw[key][-keep:]

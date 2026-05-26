@@ -286,6 +286,7 @@ class LLM:
                     "founder_or_protagonist": "Jordan Lee",
                     "year_anchor": 1998,
                     "story_kind": "rise_and_fall",
+                    "hq_country": "US",
                     "one_line_pitch": "Mock business story for pipeline testing.",
                     "hero": "Jordan Lee, the relentless outsider",
                     "conflict": "An incumbent giant and a market that wasn't ready",
