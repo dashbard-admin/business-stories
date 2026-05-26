@@ -1,188 +1,533 @@
 {
-  "_comment": "Starter manifest for the local music library — 13 tracks covering every archetype, both visual styles, all narrators, all story_kinds. Each track has a _source_hint field: a search phrase you can paste into YouTube Audio Library, Pixabay Music, or Epidemic Sound to find a real track that matches the mood. Either RENAME your downloaded file to the `file` value below, OR edit `file` to point at whatever you actually saved. Either approach works — the picker only cares that the file exists on disk and that the metadata describes it accurately. Duration_seconds is approximate; for accuracy run `python -m pipeline.tools.scan_music_library` after dropping files in and it will overwrite duration_seconds from ffprobe.",
-
+  "_comment": "Starter manifest for the local music library \u2014 13 tracks covering every archetype, both visual styles, all narrators, all story_kinds. Each track has a _source_hint field: a search phrase you can paste into YouTube Audio Library, Pixabay Music, or Epidemic Sound to find a real track that matches the mood. Either RENAME your downloaded file to the `file` value below, OR edit `file` to point at whatever you actually saved. Either approach works \u2014 the picker only cares that the file exists on disk and that the metadata describes it accurately. Duration_seconds is approximate; for accuracy run `python -m pipeline.tools.scan_music_library` after dropping files in and it will overwrite duration_seconds from ffprobe.",
   "tracks": [
     {
       "file": "ambient_underdog_slow_build_01.mp3",
-      "mood": ["hopeful", "rising", "determined", "patient"],
+      "mood": [
+        "hopeful",
+        "rising",
+        "determined",
+        "patient"
+      ],
       "tempo": "slow",
-      "instruments": ["piano", "strings"],
-      "tags": ["origin", "founder", "underdog", "comeback", "early-days", "garage", "journey"],
+      "instruments": [
+        "piano",
+        "strings"
+      ],
+      "tags": [
+        "origin",
+        "founder",
+        "underdog",
+        "comeback",
+        "early-days",
+        "garage",
+        "journey"
+      ],
       "duration_seconds": 147,
-      "suits_narrators": ["N1", "N3"],
-      "suits_archetypes": ["A1", "A5"],
-      "suits_styles": ["V1"],
-      "suits_story_kinds": ["origin", "underdog_comeback"],
+      "suits_narrators": [
+        "N1",
+        "N3"
+      ],
+      "suits_archetypes": [
+        "A1",
+        "A5"
+      ],
+      "suits_styles": [
+        "V1"
+      ],
+      "suits_story_kinds": [
+        "origin",
+        "underdog_comeback"
+      ],
       "gain_db_hint": 0.0,
-      "_source_hint": "YouTube Audio Library: filter Cinematic + Slow + Inspirational; Pixabay: 'inspiring piano strings slow build'"
+      "_source_hint": "YouTube Audio Library: filter Cinematic + Slow + Inspirational; Pixabay: 'inspiring piano strings slow build'",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": ""
     },
     {
       "file": "ambient_warmth_piano_01.mp3",
-      "mood": ["contemplative", "warm", "reflective"],
+      "mood": [
+        "contemplative",
+        "warm",
+        "reflective"
+      ],
       "tempo": "slow",
-      "instruments": ["piano", "synth_pad"],
-      "tags": ["origin", "founder", "early-days", "kitchen-table", "quiet"],
+      "instruments": [
+        "piano",
+        "synth_pad"
+      ],
+      "tags": [
+        "origin",
+        "founder",
+        "early-days",
+        "kitchen-table",
+        "quiet"
+      ],
       "duration_seconds": 96,
-      "suits_narrators": ["N3"],
-      "suits_archetypes": ["A1", "A3"],
-      "suits_styles": ["V1"],
-      "suits_story_kinds": ["origin", "disruption"],
+      "suits_narrators": [
+        "N3"
+      ],
+      "suits_archetypes": [
+        "A1",
+        "A3"
+      ],
+      "suits_styles": [
+        "V1"
+      ],
+      "suits_story_kinds": [
+        "origin",
+        "disruption"
+      ],
       "gain_db_hint": 0.0,
-      "_source_hint": "YouTube Audio Library: Ambient + Calm + Inspirational; Pixabay: 'warm piano ambient documentary'"
+      "_source_hint": "YouTube Audio Library: Ambient + Calm + Inspirational; Pixabay: 'warm piano ambient documentary'",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": ""
     },
     {
       "file": "cinematic_hopeful_strings_01.mp3",
-      "mood": ["hopeful", "uplifting", "spacious", "anthemic"],
+      "mood": [
+        "hopeful",
+        "uplifting",
+        "spacious",
+        "anthemic"
+      ],
       "tempo": "mid",
-      "instruments": ["strings", "piano", "muted_brass"],
-      "tags": ["takeoff", "comeback", "breakthrough", "pivot", "hockey-stick"],
+      "instruments": [
+        "strings",
+        "piano",
+        "muted_brass"
+      ],
+      "tags": [
+        "takeoff",
+        "comeback",
+        "breakthrough",
+        "pivot",
+        "hockey-stick"
+      ],
       "duration_seconds": 81,
-      "suits_narrators": ["N1", "N3", "N4"],
-      "suits_archetypes": ["A4", "A5"],
-      "suits_styles": ["V1"],
-      "suits_story_kinds": ["pivot", "underdog_comeback"],
+      "suits_narrators": [
+        "N1",
+        "N3",
+        "N4"
+      ],
+      "suits_archetypes": [
+        "A4",
+        "A5"
+      ],
+      "suits_styles": [
+        "V1"
+      ],
+      "suits_story_kinds": [
+        "pivot",
+        "underdog_comeback"
+      ],
       "gain_db_hint": -1.0,
-      "_source_hint": "Pixabay: 'hopeful cinematic strings'; Epidemic Sound: search 'documentary uplift mid-tempo strings'"
+      "_source_hint": "Pixabay: 'hopeful cinematic strings'; Epidemic Sound: search 'documentary uplift mid-tempo strings'",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": ""
     },
     {
       "file": "ambient_tension_minor_01.mp3",
-      "mood": ["tense", "restrained", "ominous"],
+      "mood": [
+        "tense",
+        "restrained",
+        "ominous"
+      ],
       "tempo": "slow",
-      "instruments": ["piano", "strings", "low_drone"],
-      "tags": ["rise-and-fall", "warning-signs", "crisis", "scandal", "decline", "minor-key"],
+      "instruments": [
+        "piano",
+        "strings",
+        "low_drone"
+      ],
+      "tags": [
+        "rise-and-fall",
+        "warning-signs",
+        "crisis",
+        "scandal",
+        "decline",
+        "minor-key"
+      ],
       "duration_seconds": 120,
-      "suits_narrators": ["N2"],
-      "suits_archetypes": ["A2", "A6"],
-      "suits_styles": ["V2"],
-      "suits_story_kinds": ["rise_and_fall", "scandal_postmortem", "founder_drama"],
+      "suits_narrators": [
+        "N2"
+      ],
+      "suits_archetypes": [
+        "A2",
+        "A6"
+      ],
+      "suits_styles": [
+        "V2"
+      ],
+      "suits_story_kinds": [
+        "rise_and_fall",
+        "scandal_postmortem",
+        "founder_drama"
+      ],
       "gain_db_hint": -1.0,
-      "_source_hint": "YouTube Audio Library: Dark + Dramatic; Pixabay: 'dark tension piano strings minor'"
+      "_source_hint": "YouTube Audio Library: Dark + Dramatic; Pixabay: 'dark tension piano strings minor'",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": ""
     },
     {
       "file": "cinematic_brooding_strings_01.mp3",
-      "mood": ["brooding", "ominous", "weighty", "gravitas"],
+      "mood": [
+        "brooding",
+        "ominous",
+        "weighty",
+        "gravitas"
+      ],
       "tempo": "slow",
-      "instruments": ["strings", "low_brass", "piano"],
-      "tags": ["collapse", "rise-and-fall", "scandal", "lawsuit", "investigation", "indictment"],
+      "instruments": [
+        "strings",
+        "low_brass",
+        "piano"
+      ],
+      "tags": [
+        "collapse",
+        "rise-and-fall",
+        "scandal",
+        "lawsuit",
+        "investigation",
+        "indictment"
+      ],
       "duration_seconds": 144,
-      "suits_narrators": ["N2"],
-      "suits_archetypes": ["A2", "A6"],
-      "suits_styles": ["V2"],
-      "suits_story_kinds": ["rise_and_fall", "scandal_postmortem"],
+      "suits_narrators": [
+        "N2"
+      ],
+      "suits_archetypes": [
+        "A2",
+        "A6"
+      ],
+      "suits_styles": [
+        "V2"
+      ],
+      "suits_story_kinds": [
+        "rise_and_fall",
+        "scandal_postmortem"
+      ],
       "gain_db_hint": -1.5,
-      "_source_hint": "Pixabay: 'brooding cinematic strings low brass'; Epidemic Sound: 'corporate scandal documentary'"
+      "_source_hint": "Pixabay: 'brooding cinematic strings low brass'; Epidemic Sound: 'corporate scandal documentary'",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": ""
     },
     {
       "file": "ambient_noir_synth_01.mp3",
-      "mood": ["noir", "dark", "moody", "claustrophobic"],
+      "mood": [
+        "noir",
+        "dark",
+        "moody",
+        "claustrophobic"
+      ],
       "tempo": "slow",
-      "instruments": ["synth_pad", "subbass", "muted_piano"],
-      "tags": ["scandal", "decline", "postmortem", "after-hours", "empty-boardroom", "rain-on-glass"],
+      "instruments": [
+        "synth_pad",
+        "subbass",
+        "muted_piano"
+      ],
+      "tags": [
+        "scandal",
+        "decline",
+        "postmortem",
+        "after-hours",
+        "empty-boardroom",
+        "rain-on-glass"
+      ],
       "duration_seconds": 162,
-      "suits_narrators": ["N2", "N4"],
-      "suits_archetypes": ["A2"],
-      "suits_styles": ["V2"],
-      "suits_story_kinds": ["scandal_postmortem", "rise_and_fall"],
+      "suits_narrators": [
+        "N2",
+        "N4"
+      ],
+      "suits_archetypes": [
+        "A2"
+      ],
+      "suits_styles": [
+        "V2"
+      ],
+      "suits_story_kinds": [
+        "scandal_postmortem",
+        "rise_and_fall"
+      ],
       "gain_db_hint": -2.0,
-      "_source_hint": "YouTube Audio Library: Cinematic + Dark + Suspense; Pixabay: 'noir ambient synth pad dark'"
+      "_source_hint": "YouTube Audio Library: Cinematic + Dark + Suspense; Pixabay: 'noir ambient synth pad dark'",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": ""
     },
     {
       "file": "ambient_modern_synth_01.mp3",
-      "mood": ["modern", "clean", "spacious", "curious"],
+      "mood": [
+        "modern",
+        "clean",
+        "spacious",
+        "curious"
+      ],
       "tempo": "mid",
-      "instruments": ["synth_pad", "soft_arpeggio", "piano"],
-      "tags": ["disruption", "tech", "startup", "innovation", "silicon-valley"],
+      "instruments": [
+        "synth_pad",
+        "soft_arpeggio",
+        "piano"
+      ],
+      "tags": [
+        "disruption",
+        "tech",
+        "startup",
+        "innovation",
+        "silicon-valley"
+      ],
       "duration_seconds": 131,
-      "suits_narrators": ["N4"],
-      "suits_archetypes": ["A3"],
-      "suits_styles": ["V1"],
-      "suits_story_kinds": ["disruption", "origin"],
+      "suits_narrators": [
+        "N4"
+      ],
+      "suits_archetypes": [
+        "A3"
+      ],
+      "suits_styles": [
+        "V1"
+      ],
+      "suits_story_kinds": [
+        "disruption",
+        "origin"
+      ],
       "gain_db_hint": 0.0,
-      "_source_hint": "Pixabay: 'modern tech synth ambient documentary'; YouTube Audio Library: Ambient + Bright"
+      "_source_hint": "Pixabay: 'modern tech synth ambient documentary'; YouTube Audio Library: Ambient + Bright",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": ""
     },
     {
       "file": "cinematic_motion_pulse_01.mp3",
-      "mood": ["forward-motion", "purposeful", "building"],
+      "mood": [
+        "forward-motion",
+        "purposeful",
+        "building"
+      ],
       "tempo": "mid",
-      "instruments": ["piano", "soft_pulse", "strings"],
-      "tags": ["disruption", "pivot", "decision", "momentum", "growth"],
+      "instruments": [
+        "piano",
+        "soft_pulse",
+        "strings"
+      ],
+      "tags": [
+        "disruption",
+        "pivot",
+        "decision",
+        "momentum",
+        "growth"
+      ],
       "duration_seconds": 94,
-      "suits_narrators": ["N1", "N4"],
-      "suits_archetypes": ["A3", "A4"],
-      "suits_styles": ["V1"],
-      "suits_story_kinds": ["disruption", "pivot"],
+      "suits_narrators": [
+        "N1",
+        "N4"
+      ],
+      "suits_archetypes": [
+        "A3",
+        "A4"
+      ],
+      "suits_styles": [
+        "V1"
+      ],
+      "suits_story_kinds": [
+        "disruption",
+        "pivot"
+      ],
       "gain_db_hint": -0.5,
-      "_source_hint": "YouTube Audio Library: Cinematic + Mid + Inspirational; Pixabay: 'forward motion piano pulse documentary'"
+      "_source_hint": "YouTube Audio Library: Cinematic + Mid + Inspirational; Pixabay: 'forward motion piano pulse documentary'",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": ""
     },
     {
       "file": "ambient_decision_clock_01.mp3",
-      "mood": ["suspenseful", "patient", "weighing"],
+      "mood": [
+        "suspenseful",
+        "patient",
+        "weighing"
+      ],
       "tempo": "slow",
-      "instruments": ["strings", "soft_tick_layer", "piano"],
-      "tags": ["decision", "pivot", "fork-in-the-road", "deadline", "midnight-meeting"],
+      "instruments": [
+        "strings",
+        "soft_tick_layer",
+        "piano"
+      ],
+      "tags": [
+        "decision",
+        "pivot",
+        "fork-in-the-road",
+        "deadline",
+        "midnight-meeting"
+      ],
       "duration_seconds": 112,
-      "suits_narrators": ["N1", "N2"],
-      "suits_archetypes": ["A4"],
-      "suits_styles": ["V1", "V2"],
-      "suits_story_kinds": ["pivot"],
+      "suits_narrators": [
+        "N1",
+        "N2"
+      ],
+      "suits_archetypes": [
+        "A4"
+      ],
+      "suits_styles": [
+        "V1",
+        "V2"
+      ],
+      "suits_story_kinds": [
+        "pivot"
+      ],
       "gain_db_hint": -1.0,
-      "_source_hint": "YouTube Audio Library: Suspense + Slow; Pixabay: 'suspenseful strings clock ticking documentary'"
+      "_source_hint": "YouTube Audio Library: Suspense + Slow; Pixabay: 'suspenseful strings clock ticking documentary'",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": ""
     },
     {
       "file": "ambient_investigative_slow_01.mp3",
-      "mood": ["procedural", "investigative", "dry", "restrained"],
+      "mood": [
+        "procedural",
+        "investigative",
+        "dry",
+        "restrained"
+      ],
       "tempo": "slow",
-      "instruments": ["piano", "strings", "low_drone"],
-      "tags": ["investigation", "lawsuit", "filing", "deposition", "court", "indictment", "sec"],
+      "instruments": [
+        "piano",
+        "strings",
+        "low_drone"
+      ],
+      "tags": [
+        "investigation",
+        "lawsuit",
+        "filing",
+        "deposition",
+        "court",
+        "indictment",
+        "sec"
+      ],
       "duration_seconds": 78,
-      "suits_narrators": ["N1", "N2"],
-      "suits_archetypes": ["A2", "A6"],
-      "suits_styles": ["V2"],
-      "suits_story_kinds": ["scandal_postmortem", "rise_and_fall"],
+      "suits_narrators": [
+        "N1",
+        "N2"
+      ],
+      "suits_archetypes": [
+        "A2",
+        "A6"
+      ],
+      "suits_styles": [
+        "V2"
+      ],
+      "suits_story_kinds": [
+        "scandal_postmortem",
+        "rise_and_fall"
+      ],
       "gain_db_hint": -1.5,
-      "_source_hint": "Epidemic Sound: 'investigative documentary slow'; YouTube Audio Library: Dramatic + Slow + Suspense"
+      "_source_hint": "Epidemic Sound: 'investigative documentary slow'; YouTube Audio Library: Dramatic + Slow + Suspense",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": ""
     },
     {
       "file": "ambient_neutral_pad_01.mp3",
-      "mood": ["neutral", "spacious", "calm"],
+      "mood": [
+        "neutral",
+        "spacious",
+        "calm"
+      ],
       "tempo": "slow",
-      "instruments": ["synth_pad", "soft_piano"],
-      "tags": ["bed", "general", "interstitial"],
+      "instruments": [
+        "synth_pad",
+        "soft_piano"
+      ],
+      "tags": [
+        "bed",
+        "general",
+        "interstitial"
+      ],
       "duration_seconds": 222,
       "suits_narrators": [],
       "suits_archetypes": [],
       "suits_styles": [],
       "suits_story_kinds": [],
       "gain_db_hint": -1.0,
-      "_source_hint": "Pixabay: 'soft ambient pad documentary background long'"
+      "_source_hint": "Pixabay: 'soft ambient pad documentary background long'",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": ""
     },
     {
       "file": "ambient_neutral_documentary_01.mp3",
-      "mood": ["documentary", "warm", "neutral"],
+      "mood": [
+        "documentary",
+        "warm",
+        "neutral"
+      ],
       "tempo": "mid",
-      "instruments": ["piano", "strings", "synth_pad"],
-      "tags": ["bed", "general", "documentary"],
+      "instruments": [
+        "piano",
+        "strings",
+        "synth_pad"
+      ],
+      "tags": [
+        "bed",
+        "general",
+        "documentary"
+      ],
       "duration_seconds": 110,
       "suits_narrators": [],
       "suits_archetypes": [],
       "suits_styles": [],
       "suits_story_kinds": [],
       "gain_db_hint": 0.0,
-      "_source_hint": "YouTube Audio Library: Cinematic + Calm + Inspirational; Pixabay: 'documentary background music piano strings'"
+      "_source_hint": "YouTube Audio Library: Cinematic + Calm + Inspirational; Pixabay: 'documentary background music piano strings'",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": ""
     },
     {
       "file": "cinematic_resolution_strings_01.mp3",
-      "mood": ["resolution", "warm", "settled", "uplifting"],
+      "mood": [
+        "resolution",
+        "warm",
+        "settled",
+        "uplifting"
+      ],
       "tempo": "slow",
-      "instruments": ["strings", "piano", "muted_brass"],
-      "tags": ["lesson", "act-five", "closing", "legacy", "aftermath", "epilogue"],
+      "instruments": [
+        "strings",
+        "piano",
+        "muted_brass"
+      ],
+      "tags": [
+        "lesson",
+        "act-five",
+        "closing",
+        "legacy",
+        "aftermath",
+        "epilogue"
+      ],
       "duration_seconds": 144,
-      "suits_narrators": ["N1", "N3"],
-      "suits_archetypes": ["A1", "A5"],
-      "suits_styles": ["V1"],
-      "suits_story_kinds": ["origin", "underdog_comeback", "pivot"],
+      "suits_narrators": [
+        "N1",
+        "N3"
+      ],
+      "suits_archetypes": [
+        "A1",
+        "A5"
+      ],
+      "suits_styles": [
+        "V1"
+      ],
+      "suits_story_kinds": [
+        "origin",
+        "underdog_comeback",
+        "pivot"
+      ],
       "gain_db_hint": 0.0,
-      "_source_hint": "Pixabay: 'cinematic resolution warm strings ending'; Epidemic Sound: 'documentary epilogue strings'"
+      "_source_hint": "Pixabay: 'cinematic resolution warm strings ending'; Epidemic Sound: 'documentary epilogue strings'",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": ""
     }
   ]
 }

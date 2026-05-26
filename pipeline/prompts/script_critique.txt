@@ -1,6 +1,6 @@
 You are a senior video editor doing a retention + voice audit on a
 business-story documentary script. The script was written against a
-strict 6-act template with explicit hook cadence. Your job is to
+strict 7-act template with explicit hook cadence. Your job is to
 verify the structure was followed and to identify problems that
 would lose viewers. For each fixable problem, propose an exact,
 in-place rewrite the copy editor can apply.
@@ -11,7 +11,9 @@ EPISODE CONTEXT:
 - Conflict (locked at S1): {conflict}
 - Narrator: {narrator_name} ({narrator_tone})
 - Reading cadence: 120 words per minute throughout.
-- Target length: ~2000 words ≈ 16-17 minutes.
+- Target length: ~2300 words ≈ 18-19 minutes spoken (template
+  retuned to 7 acts in Batch A 2026-05-26 — Act 3.5 "The
+  Investigation" was inserted between the old Act 3 and Act 4).
 
 SCRIPT:
 ---
@@ -42,32 +44,39 @@ fixable in place.
    If any of the above is missing or weak, this is a
    SHIP-BLOCKING issue.
 
-2. ACT STRUCTURE AUDIT  (the six required acts)
-   The script must contain all six acts in proportion:
-       Act 0 — Hook            ~75 words   (~0:00-0:30)
-       Act 1 — Before          ~375 words  (~0:30-3:00)
-       Act 2 — Bet             ~375 words  (~3:00-5:30)
-       Act 3 — Crisis          ~600 words  (~5:30-9:30)
-       Act 4 — Pivot           ~375 words  (~9:30-12:00)
-       Act 5 — Lesson          ~150 words  (~12:00-13:00 of
-                                            the 120-wpm timeline;
-                                            absolute length is
-                                            ~16-17 minutes for a
-                                            2000-word script)
+2. ACT STRUCTURE AUDIT  (the seven required acts)
+   The script must contain all seven acts in proportion:
+       Act 0   — Hook            ~60 words   (~0:00-0:30)
+       Act 1   — Before          ~360 words  (~0:30-3:30)
+       Act 2   — Bet             ~300 words  (~3:30-6:00)
+       Act 3   — Crisis          ~480 words  (~6:00-10:00)
+       Act 3.5 — Investigation   ~300 words  (~10:00-12:30)
+       Act 4   — Pivot           ~360 words  (~12:30-15:30)
+       Act 5   — Lesson          ~300 words  (~15:30-17:30 of
+                                              the 120-wpm timeline;
+                                              absolute length is
+                                              ~18-19 minutes for a
+                                              2300-word script)
    Flag if any act is missing, drastically undersized
    (less than 60% of target), or oversized (more than 150%
    of target). The Crisis act in particular must be the
    longest single act.
+   Act 3.5 (THE INVESTIGATION) is the spine of the doc — flag if
+   it's missing entirely, or if it advances the narrative timeline
+   instead of walking through documentary evidence (filings, court
+   records, leaked emails, depositions). It's allowed to be short
+   (~150 words) when the fact ledger has fewer than 2 documentary-
+   evidence claims, but never absent.
 
 3. HOOK CADENCE AUDIT  (the critical retention check)
    - 15-second strong hook in the very first sentences (see
      Act 0 audit above).
-   - For the first ~5 minutes (i.e. the first ~600 words),
+   - For the first ~6 minutes (i.e. the first ~720 words),
      a re-hook fires every 60-90 seconds — that is, every
-     120-180 words. Expect ~4 re-hooks in this window.
-   - From ~5 minutes to the end of the script (i.e. word
-     ~600 to the end), a re-hook fires every 2-3 minutes —
-     every 240-360 words. Expect another ~4-5 re-hooks.
+     120-180 words. Expect ~5 re-hooks in this window.
+   - From ~6 minutes to the end of the script (i.e. word
+     ~720 to the end), a re-hook fires every 2-3 minutes —
+     every 240-360 words. Expect another ~5-6 re-hooks.
    - Each re-hook is ONE sentence — short, declarative,
      forward-looking. It plants something the next 90-180
      seconds will pay off.
@@ -82,17 +91,20 @@ fixable in place.
        * any tease whose payoff doesn't appear later in
          the script
    Map the script: estimate where each re-hook is (word
-   count from start). Flag any stretch of >200 words in
-   the first half OR >400 words in the second half that
-   has no re-hook.
+   count from start). Flag any stretch of >270 words (i.e.
+   >45 seconds at 120 wpm) in the first half OR >540 words
+   (>90 seconds) in the second half that has no re-hook. The
+   45-second threshold is the empirical retention-dip floor
+   on this format (was 30s on the 12-min cut; raised in Batch
+   A 2026-05-26 for the 18-min target).
 
 4. MID-ROLL TENSION LANDINGS AUDIT
    Two specific cliff-points must land:
-   - Around word ~660 (Act 2 close, ~5:30 in): the company
+   - Around word ~720 (Act 2 close, ~6:00 in): the company
      is growing but a problem is surfacing. Last sentence
      of Act 2 should be a one-sentence cliff that makes
      the viewer keep watching.
-   - Around word ~1140 (Act 3 close, ~9:30 in): the darkest
+   - Around word ~1200 (Act 3 close, ~10:00 in): the darkest
      moment. Functional death of the company.
    If either landing is absent or weak (no concrete date /
    number / decision in the cliff sentence), flag it.

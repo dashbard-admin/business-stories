@@ -40,10 +40,18 @@ models:
 
 production:
   target_episodes_per_week: 2
-  target_duration_seconds: 750      # 12.5 min midpoint (10-15 min target)
-  duration_tolerance_seconds: 150
-  target_words: 2000
-  word_count_tolerance: 200
+  target_duration_seconds: 1100     # 18.3 min midpoint (15-22 min target)
+                                    # (bumped 2026-05-26 — Batch A. YouTube
+                                    # algo since mid-2024 rewards longer
+                                    # videos: more mid-roll ad slots and
+                                    # stronger session-watch-time signal.
+                                    # Modern MBA / Business Casual / Cold
+                                    # Fusion all pivoted to 18-25 min in
+                                    # 2024-25.)
+  duration_tolerance_seconds: 210   # +/- 3.5 min around the 18.3-min mid
+  target_words: 2300                # 120wpm × 18 min ≈ 2160 spoken words;
+                                    # +160 buffer for SFX/music pauses.
+  word_count_tolerance: 250
   wpm_effective: 120                # Anchored to script_generate.txt
                                     # which schedules Act 0-5 hook
                                     # cadence at 120 wpm. Changing this
@@ -99,13 +107,20 @@ production:
 quality_gates:
   min_verified_facts: 5
   min_pd_assets: 3
-  min_total_beats: 50
-  max_total_beats: 70
+  # Beat-count window — bumped 2026-05-26 (Batch A) to match the
+  # 18-min target length. The 7-act template distributes beats as:
+  # Act 0 1-2 / Act 1 12 / Act 2 11 / Act 3 16 / Act 3.5 9 /
+  # Act 4 12 / Act 5 5-6 → ~70 mid, up to ~95 for longer scripts.
+  min_total_beats: 65
+  max_total_beats: 95
   min_sources: 8
   max_sources: 50                  # hard cap for S2 inventory size
   min_tier1_sources: 1              # ≥1 primary-source filing / Wikipedia anchor
-  min_script_words: 1900            # 2000 ± ~15%
-  max_script_words: 2600
+  # Script-word window — bumped 2026-05-26 (Batch A) for 18-min target.
+  # 120wpm × 18min ≈ 2160 spoken; we widen to 1900-2700 to allow
+  # natural variance across narrators and story_kinds.
+  min_script_words: 1900
+  max_script_words: 2700
   audio_lufs_target: -14
   audio_lufs_min: -15
   audio_lufs_max: -13
@@ -147,7 +162,7 @@ topic_validation:
   # hard hint in the prompt and a post-validation country check.
   enabled: true
   min_youtube_results: 3            # below = topic too obscure
-  max_youtube_results: 50           # above = topic too saturated
+  max_youtube_results: 100          # above = topic too saturated
   prefer_decline_stories: true      # bias prompt toward failure arcs
   non_us_ratio: 0.33                # 1-in-3 episodes non-US
   non_us_ratio_lookback: 6          # measured over the last N picks
@@ -175,15 +190,22 @@ music_library:
   #     ├── manifest.json           # per-track metadata
   #     └── *.wav / *.mp3 / *.flac
   #
-  # Each manifest entry shape:
+  # Each manifest entry shape (license fields added 2026-05-26 Batch A):
   #   {"file": "ambient_rise_01.wav",
   #    "mood": ["hopeful","rising","determined"],
   #    "tempo": "slow|mid|fast",
   #    "instruments": ["piano","strings","synth_pad"],
   #    "tags": ["origin","founder","underdog"],
   #    "duration_seconds": 312,
-  #    "suits_narrators": ["N1","N3"]   # optional pin
+  #    "suits_narrators": ["N1","N3"],   # optional pin
+  #    "license": "CC0 | CC-BY | YouTube-Audio-Library | Pixabay | Epidemic-Sound | royalty-free | unknown",
+  #    "attribution": "Composer Name — Track Title",  # required for CC-BY
+  #    "source_url": "https://..."                    # where the file came from
   #   }
+  # The license metadata is emitted by S12 into the per-episode
+  # 06_metadata/license_attributions.txt for paste into the YouTube
+  # description box. Missing license = unknown = warning logged but
+  # the track is still pickable.
   enabled: true
   path: "${root}/assets/music_library"
   manifest: "${root}/assets/music_library/manifest.json"

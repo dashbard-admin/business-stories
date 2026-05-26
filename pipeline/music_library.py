@@ -105,6 +105,46 @@ class MusicLibrary:
         logger.warning("music_library: track file missing on disk: %s", p)
         return None
 
+    # ----- license reporting (added Batch A 2026-05-26) -----
+
+    def license_report(self, file_names: list[str]) -> list[dict]:
+        """For each file in `file_names` that resolves to a manifest
+        track, return a dict with `{file, license, attribution,
+        source_url}`. Missing / unknown licenses surface as
+        `license="unknown"` so the operator sees them at attribution
+        time. Unknown tracks (not in the manifest at all) get a
+        warning and a sentinel entry.
+
+        S12 calls this with the list of bed-track filenames actually
+        used in the episode (from mix_manifest.json), emits the
+        result to 06_metadata/license_attributions.txt for paste
+        into the YouTube description.
+        """
+        by_file = {(t.get("file") or ""): t for t in self._tracks}
+        out: list[dict] = []
+        for fn in file_names:
+            t = by_file.get(fn)
+            if not t:
+                logger.warning(
+                    "music_library.license_report: track %s not in manifest",
+                    fn,
+                )
+                out.append({
+                    "file": fn,
+                    "license": "unknown",
+                    "attribution": "",
+                    "source_url": "",
+                    "warning": "not in manifest",
+                })
+                continue
+            out.append({
+                "file": fn,
+                "license": (t.get("license") or "unknown"),
+                "attribution": (t.get("attribution") or ""),
+                "source_url": (t.get("source_url") or ""),
+            })
+        return out
+
     # ----- public picker -----
 
     def pick_bed(
