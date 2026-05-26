@@ -119,10 +119,11 @@ class Config:
         defaults = {
             "enabled": False,
             "api_key": "",
-            "model": "grok-imagine-image",
+            "model": "grok-imagine-image-quality",
             "base_url": "https://api.x.ai/v1",
-            "endpoint_path": "/images/edits",
+            "endpoint_path": "/images/generations",
             "timeout_seconds": 180,
+            "resolution": "2k",
             "aspect_ratio": "16:9",
         }
         return {**defaults, **(self.raw.get("grok") or {})}

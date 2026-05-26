@@ -194,22 +194,22 @@ grok:
   # KEEP IT EMPTY.
   enabled: true
   api_key: ""
-  model: "grok-imagine-image"
+  model: "grok-imagine-image-quality"   # quality variant — higher fidelity
+                                        # than grok-imagine-image, worth the
+                                        # extra latency for correction beats.
   base_url: "https://api.x.ai/v1"
-  endpoint_path: "/images/edits"        # OpenAI-compatible default;
-                                        # adjust if xAI's image-edit
-                                        # endpoint lives elsewhere.
+  endpoint_path: "/images/generations"  # text-to-image; we no longer ask
+                                        # Grok to edit the FLUX image, we
+                                        # ask it to regenerate from the
+                                        # same prompt.
   timeout_seconds: 180
-  # xAI's /v1/images/edits uses aspect_ratio strings ("16:9", "1:1",
-  # "2:1", "9:16") rather than OpenAI's "WIDTHxHEIGHT" format. The
-  # output resolution is decided by xAI's image model itself. For
-  # this pipeline 16:9 matches the FLUX-rendered 1920x1080 panels.
+  resolution: "2k"                      # Grok defaults to 1K — explicitly
+                                        # request 2K. Combined with 16:9
+                                        # aspect_ratio this produces 2048x1152
+                                        # which downsamples cleanly to the
+                                        # 1920x1080 the rest of the pipeline
+                                        # expects.
   aspect_ratio: "16:9"
-  # Two public Grok image-edit models. "quality" is recommended by
-  # xAI for the highest fidelity; the default model is faster but
-  # slightly less detailed. Override grok.model above if you want
-  # quality:
-  #   model: "grok-imagine-image-quality"
   # Operator-editable prompt template lives at
   # pipeline/prompts/grok_text_correction.txt. The {flux_prompt}
   # placeholder is replaced with the exact prompt FLUX rendered from.

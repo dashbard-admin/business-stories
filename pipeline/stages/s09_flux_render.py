@@ -432,18 +432,20 @@ def _correct_text_via_grok(
     grok_dir: Path,
     prompt_template: str,
 ) -> dict | None:
-    """Archive the FLUX render, call Grok with the FLUX prompt + image,
+    """Archive the FLUX render, ask Grok to regenerate from the same
+    prompt (text-to-image — no image upload, no edit semantics), and
     archive the Grok output. Returns a metadata dict for the caller
     to stamp into image_qa, or None on any failure.
 
     Output filenames (under grok_dir = 03_assets/grok/):
       - <beat_id>_flux_original.png  — pre-correction FLUX render
-      - <beat_id>_grok_corrected.png — Grok output (also becomes the
-                                       new canonical FLUX image at
+                                       (archived for visual comparison)
+      - <beat_id>_grok_corrected.png — Grok regeneration (also becomes
+                                       the new canonical FLUX image at
                                        03_assets/flux/<beat_id>.png)
 
-    On failure (Grok API error, malformed response, decode failure)
-    returns None — caller keeps the uncorrected FLUX render.
+    On failure (Grok API error, malformed response) returns None —
+    the caller keeps the uncorrected FLUX render.
     """
     triggered, matches = _has_malformed_text(verdict)
     if not triggered:
@@ -455,9 +457,10 @@ def _correct_text_via_grok(
     original_archive = grok_dir / f"{beat_id}_flux_original.png"
     corrected_archive = grok_dir / f"{beat_id}_grok_corrected.png"
 
-    # Archive the FLUX original. shutil.copy keeps the src in place
-    # so the caller's subsequent shutil.move(chosen_path, out_path)
-    # still works if the Grok call fails and we fall back.
+    # Archive the FLUX original for side-by-side comparison. shutil.copy
+    # keeps the src in place so the caller's subsequent
+    # shutil.move(chosen_path, out_path) still works if the Grok call
+    # fails and we fall back.
     try:
         import shutil as _sh
         _sh.copy(str(src), str(original_archive))
@@ -466,12 +469,17 @@ def _correct_text_via_grok(
                        "to %s: %s", beat_id, original_archive, e)
         return None
 
-    # Compose the Grok prompt with the original FLUX prompt embedded.
+    # The Grok prompt template wraps the FLUX prompt. Default template
+    # is just {flux_prompt} pass-through — operator-editable in
+    # pipeline/prompts/grok_text_correction.txt.
     grok_prompt = prompt_template.format(flux_prompt=flux_prompt)
 
-    # Call Grok.
-    result = grok.correct_image(
-        image_path=src, prompt=grok_prompt, out_path=corrected_archive,
+    # Text-to-image regeneration. We deliberately do NOT send the FLUX
+    # image as a reference — image-edit produced low-quality results
+    # in practice. A fresh generation from the same prompt lets Grok
+    # render text legibly without inheriting FLUX's artifacts.
+    result = grok.regenerate_from_prompt(
+        prompt=grok_prompt, out_path=corrected_archive,
     )
     if result is None or not corrected_archive.exists():
         return None
