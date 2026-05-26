@@ -274,7 +274,7 @@ image_qa:
   # VLM judge for S9 FLUX renders. Comic-book artifacts list includes
   # wrong-era logos, garbled signage text, distorted faces.
   enabled: true
-  max_attempts_per_beat: 2
+  max_attempts_per_beat: 1
   timeout_seconds: 30
   caption_pd_assets: true
   strict_borderline: true
