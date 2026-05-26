@@ -115,6 +115,25 @@ class Config:
         return merged
 
     @property
+    def brand_safety(self) -> dict[str, Any]:
+        """Brand-safety / defamation review gate (Batch B 2026-05-26).
+        Configures the brand_safety_review.txt prompt that runs as the
+        tail of S07 critique.
+
+        Fields:
+          enabled: bool — master switch.
+          gate_on_severity: "high" | "low" | "off" — how strict the
+            ship-blocking gate is. "high" (default) blocks on any
+            high-severity flag; "low" blocks on any flag; "off"
+            log-only.
+        """
+        defaults = {
+            "enabled": True,
+            "gate_on_severity": "high",
+        }
+        return {**defaults, **(self.raw.get("brand_safety") or {})}
+
+    @property
     def topic_validation(self) -> dict[str, Any]:
         """S01 pre-commit demand check thresholds.
 

@@ -314,10 +314,13 @@ ffmpeg pipeline assembly. 8000px Ken Burns supersample (S12), sidechain-ducked m
 Single CLI entry point. Holds the global file lock for the duration of one stage execution. `STAGE_DISPATCH` is the source of truth for stage → module mapping.
 
 **CLI surface:**
-- `--enqueue N` — add N empty episode records.
+- `--enqueue N` — add N empty episode records. Combine with `--preview` to tag them.
 - `--inject-topic FILE` — queue one episode with a manually-authored incident JSON. Schema-validated at inject time; S1 short-circuits the LLM call. Optional pins for archetype/narrator/visual_style in the JSON.
 - `--no-validate` — with `--inject-topic`, skip the SearXNG demand-validation gate.
-- `--status` — print queue state. Manual picks tagged `(manual)`.
+- `--preview` *(added Batch B 2026-05-26)* — modifier flag (use with `--enqueue` or `--inject-topic`). Tags the new episode as `preview_mode=True`. S06 generates only Act 0 + Act 5 (~360 words, ~8 beats); S12 outputs `05_video/final_preview.mp4`. Tone-check render, ~10 min of compute vs. the full 3-4 hours.
+- `--approve EP_ID` *(added Batch B 2026-05-26)* — clear any S07 brand-safety gate or S08 in-flight gate on the named episode so it can advance.
+- `--rerender EP_ID BEAT_ID [--from-edited-prompt]` *(added Batch B 2026-05-26)* — re-run S09 FLUX render for a single beat. Existing render + any Grok-corrected version archived to `03_assets/quarantine/` first. `--from-edited-prompt` re-reads the beat's FLUX prompt fresh from beat_sheet.json (operator edited it).
+- `--status` — print queue state. Manual picks tagged `(manual)`; preview picks tagged `(preview)`; brand-safety flag counts surfaced as `(safety_flags=NH/NL)`.
 - `-v / --verbose` — DEBUG logging.
 - (default, no flags) — run one stage of the next pending episode and exit.
 
@@ -384,13 +387,21 @@ Writer LLM with `script_generate.txt`. **Seven-act retention template at 120 wpm
 Multi-pass length adjustment: if word count is outside `[min_script_words, max_script_words]` tolerance, re-prompt with a delta. Forbidden-phrase lint via `pipeline/lint/forbidden_phrases.txt`.
 
 ### S07 — Script Critique (`s07_script_critique.py`)
-Critic LLM with `script_critique.txt`. Flags weak cold-open, missing forward teases at beat boundaries, monotone hook cadence, anachronisms, unbacked superlatives, retention dips > 30s. Operator-controlled fuzzy-replace machinery applies safe edits in place.
+Critic LLM with `script_critique.txt`. Flags weak cold-open, missing forward teases at beat boundaries, monotone hook cadence, anachronisms, unbacked superlatives, retention dips > 45s *(threshold raised Batch A 2026-05-26)*. Operator-controlled fuzzy-replace machinery applies safe edits in place.
+
+**Brand-safety review pass *(added Batch B 2026-05-26)*:** after the rewrite loops, runs an independent skeptic with `brand_safety_review.txt` over the post-critique script. Output: `02_script/brand_safety_flags.json` with `{verdict, high_severity_count, low_severity_count, flags: [...]}`. Each flag has `severity ∈ {high, low}`, `flag_type ∈ {intent_attribution, criminal_characterization, corporate_defamation, unframed_speculation, subjective, missing_attribution, vague_time}`, and a `suggested_rewrite`. When `cfg.brand_safety.gate_on_severity == "high"` (default) AND any high-severity flag fires, S07 returns a `needs_human` reason; operator reviews the flag file then clears with `--approve <ep_id>`. Flag counts surface on the episode record as `safety_flags_count` and in `--status`.
 
 ### S08 — Beat Sheet (`s08_beat_sheet.py`)
-Splits the script into 50–70 beats. Per beat, the writer LLM emits a `visual_intent` (comic-panel catalog: `founder_portrait | office_environment | product_reveal | boardroom_meeting | street_scene | crowd_or_market | factory_or_workshop | document_or_headline | chart_abstraction | montage_panel`) and a `sfx_cue` (documentation only — S11 doesn't synthesise SFX). Three passes route beats to PD-direct / PD-reference / FLUX based on cosine similarity (sentence-transformers) between beat description and PD asset captions. PD-reference contributes the caption as text grounding to the FLUX prompt — img2img isn't available with the CLI flux binary.
+Splits the script into 65–95 beats *(beat window widened Batch A 2026-05-26 for the 18-min target)*. Per beat, the writer LLM emits a `visual_intent` (comic-panel catalog: `founder_portrait | office_environment | product_reveal | boardroom_meeting | street_scene | crowd_or_market | factory_or_workshop | document_or_headline | chart_abstraction | montage_panel`) and a `sfx_cue` (documentation only — S11 doesn't synthesise SFX). Three passes route beats to PD-direct / PD-reference / FLUX based on cosine similarity (sentence-transformers) between beat description and PD asset captions. PD-reference contributes the caption as text grounding to the FLUX prompt — img2img isn't available with the CLI flux binary.
+
+**In-flight gate *(added Batch B 2026-05-26)*:** when `cfg.orchestrator.gate_at_S08: true`, S08 writes the beat sheet to disk then returns a `needs_human` reason with a summary table (beat count, PD/FLUX split, visual_intent distribution). Operator inspects `02_script/beat_sheet.json` and clears with `--approve <ep_id>` to advance to S09. Default `false` — flip to `true` for the first few episodes to calibrate beat-distribution intuition before committing FLUX compute.
 
 ### S09 — FLUX Render (`s09_flux_render.py`)
 For each beat that routes to FLUX, the stage:
+
+*(Batch B 2026-05-26 — added the `rerender_single_beat(episode, beat_id, from_edited_prompt=False)` entry point that the orchestrator's `--rerender` CLI calls. Archives existing renders to `03_assets/quarantine/<beat_id>.<flux|grok>.<timestamp>.png` before re-rendering. Reuses the same VLM judge + Grok fallback path as the main loop.)*
+
+
 1. Builds the prompt from the visual-style prefix/suffix + beat description + character-iconography hint (founder appearance, when applicable) + PD reference caption (when applicable).
 2. Renders N candidates via `flux.py`.
 3. Judges each via the VLM (`vlm.judge()`).
@@ -435,6 +446,7 @@ Music-library only — no MusicGen, no SFX synthesis.
 | `character_iconography.txt` | S9 helper | `{founder}, {company}` | Per-episode founder appearance hint folded into FLUX prompts. |
 | `title_generate.txt` | S9 helper / S12 | `{incident}` | Episode title + title-card composition. |
 | `grok_text_correction.txt` | S9 Grok sub-phase | `{flux_prompt}` | Currently a pass-through — the FLUX prompt is sent verbatim to Grok. |
+| `brand_safety_review.txt` *(added Batch B 2026-05-26)* | S7 tail | `{incident_name}, {hero}, {conflict}, {fact_ledger_json}, {script}` | Defamation-risk skeptic. Returns structured flags with severity ∈ {high, low}. |
 | `sfx_cue_prompts.yaml` | — (doc only) | n/a | SFX cue catalog. S11 doesn't synthesise; kept for a future SFX pass. |
 
 ---
@@ -635,4 +647,4 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-26 — Batch A landed (episode length bump to 18min, 7-act template with Act 3.5, music license fields, sponsor-slot placeholder).*
+*This file last updated: 2026-05-26 — Batch B landed (preview mode, S08 gate, per-beat re-render, brand-safety review).*

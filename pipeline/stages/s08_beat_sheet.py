@@ -327,6 +327,25 @@ def run(episode: dict, queue: dict) -> str | None:
     )
     logger.info("S08 complete: %d beats, %d direct PD, %d FLUX",
                 len(beats), pd_matched, flux_needed)
+
+    # In-flight gate (Batch B 2026-05-26). Default off; flip on for
+    # the first few episodes to calibrate operator intuition for beat
+    # distribution / visual intent quality before committing FLUX compute.
+    if cfg.orchestrator.get("gate_at_S08", False):
+        # Compose a beat-distribution summary for the operator.
+        intent_counts: dict[str, int] = {}
+        for b in beats:
+            vi = b.get("visual_intent") or "?"
+            intent_counts[vi] = intent_counts.get(vi, 0) + 1
+        dist = ", ".join(f"{k}={v}"
+                         for k, v in sorted(intent_counts.items(),
+                                            key=lambda kv: -kv[1]))
+        return (
+            f"S08 gate enabled: review 02_script/beat_sheet.json "
+            f"({len(beats)} beats, {pd_matched} PD, {flux_needed} FLUX; "
+            f"distribution: {dist}) then run `--approve "
+            f"{episode['id']}` to advance to S09."
+        )
     return None
 
 

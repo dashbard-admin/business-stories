@@ -137,6 +137,36 @@ orchestrator:
   max_topic_discovery_retries: 5
   per_invocation_max_runtime_seconds: 5400   # 90 min cap per cron run
 
+  # In-flight gate after S08 (Batch B 2026-05-26). When true, S08
+  # completes the beat-sheet write to disk then marks the stage
+  # `needs_human` with a summary table. Operator reviews
+  # 02_script/beat_sheet.json (and the beat distribution by
+  # visual_intent) and runs:
+  #   python -m pipeline.hermes_orchestrator --approve <ep_id>
+  # to clear the gate and advance to S09. Useful for the first few
+  # episodes to build operator intuition for the beat-distribution
+  # quality; flip back to false once trust is established (the
+  # auto-pilot is the value).
+  gate_at_S08: false
+
+brand_safety:
+  # Defamation-risk review pass added Batch B 2026-05-26. Runs as
+  # the tail of S07 critique. The brand_safety_review.txt prompt
+  # produces 02_script/brand_safety_flags.json with structured
+  # flags. Each flag has severity ∈ {high, low}; high-severity
+  # flags trigger a `needs_human` gate so the operator can review
+  # before S08 runs.
+  enabled: true
+  gate_on_severity: high     # "high" | "low" | "off". When "high",
+                              # any high-severity flag marks S07 as
+                              # needs_human. When "low", any flag at
+                              # all blocks. When "off", flags are
+                              # logged-only.
+  # An operator who has reviewed and intentionally approved a
+  # high-severity flag can clear the gate the same way the S08 gate
+  # is cleared:
+  #   python -m pipeline.hermes_orchestrator --approve <ep_id>
+
 topic_validation:
   # S01 pre-commit demand check. Before persisting a topic the
   # writer LLM picked, we probe SearXNG to confirm the topic has

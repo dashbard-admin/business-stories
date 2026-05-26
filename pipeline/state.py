@@ -149,8 +149,13 @@ def new_episode_record(episode_id: str) -> dict[str, Any]:
     }
 
 
-def enqueue_episodes(n: int) -> list[str]:
-    """Add `n` empty episode records to the queue. Returns new IDs."""
+def enqueue_episodes(n: int, *, preview_mode: bool = False) -> list[str]:
+    """Add `n` empty episode records to the queue. Returns new IDs.
+
+    `preview_mode=True` flags each new record so S06 generates only
+    Act 0 + Act 5 (added Batch B 2026-05-26) — a tone-check render
+    that takes ~10 min of compute instead of 3-4 hours.
+    """
     queue = load_queue()
     existing = {e["id"] for e in queue["episodes"]}
     next_idx = 1
@@ -159,7 +164,10 @@ def enqueue_episodes(n: int) -> list[str]:
     new_ids = []
     for i in range(n):
         eid = f"EP_{next_idx + i:03d}"
-        queue["episodes"].append(new_episode_record(eid))
+        rec = new_episode_record(eid)
+        if preview_mode:
+            rec["preview_mode"] = True
+        queue["episodes"].append(rec)
         new_ids.append(eid)
     save_queue(queue)
     return new_ids
@@ -172,6 +180,7 @@ def enqueue_manual_episode(
     narrator: str | None = None,
     visual_style: str | None = None,
     skip_validation: bool = False,
+    preview_mode: bool = False,
 ) -> str:
     """Add ONE episode record with the incident pre-filled by the
     operator (not the LLM). S01 detects `incident_origin == "manual"`
@@ -202,6 +211,8 @@ def enqueue_manual_episode(
     rec["incident"] = dict(incident)
     rec["incident_origin"] = "manual"
     rec["skip_validation"] = bool(skip_validation)
+    if preview_mode:
+        rec["preview_mode"] = True
     if archetype:
         rec["archetype_pin"] = archetype
     if narrator:
@@ -259,6 +270,48 @@ def update_episode(queue: dict[str, Any], episode_id: str, **fields: Any) -> Non
         if ep["id"] == episode_id:
             ep.update(fields)
             return
+
+
+def find_episode(queue: dict[str, Any], episode_id: str) -> dict[str, Any] | None:
+    """Return the episode record for `episode_id`, or None. Added Batch B
+    2026-05-26 for the --approve and --rerender CLI flows."""
+    for ep in queue["episodes"]:
+        if ep["id"] == episode_id:
+            return ep
+    return None
+
+
+def clear_blockers(
+    queue: dict[str, Any],
+    episode_id: str,
+    *,
+    stage_filter: str | None = None,
+) -> bool:
+    """Clear blockers on `episode_id` and reset any `needs_human` stage
+    back to `pending` so the orchestrator can resume. If `stage_filter`
+    is given, only clear blockers/needs_human for that stage. Returns
+    True iff something was cleared. Added Batch B 2026-05-26 for the
+    --approve CLI flow."""
+    ep = find_episode(queue, episode_id)
+    if ep is None:
+        return False
+    cleared = False
+    keep: list[dict[str, Any]] = []
+    for b in (ep.get("blockers") or []):
+        if stage_filter is None or b.get("stage") == stage_filter:
+            cleared = True
+            continue
+        keep.append(b)
+    ep["blockers"] = keep
+    for sid, sval in (ep.get("stages") or {}).items():
+        if sval.get("status") != "needs_human":
+            continue
+        if stage_filter is not None and sid != stage_filter:
+            continue
+        ep["stages"][sid] = {"status": "pending", "ts": _now()}
+        ep["current_stage"] = sid
+        cleared = True
+    return cleared
 
 
 def episode_workspace(episode_id: str, slug: str | None = None) -> Path:

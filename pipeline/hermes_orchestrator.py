@@ -22,9 +22,11 @@ import traceback
 
 from .config import load_config
 from .state import (
+    clear_blockers,
     enqueue_episodes,
     enqueue_manual_episode,
     file_lock,
+    find_episode,
     load_queue,
     mark_stage_done,
     mark_stage_failed,
@@ -184,6 +186,44 @@ def cli() -> int:
             "story the channel cares about regardless of search demand)."
         ),
     )
+    parser.add_argument(
+        "--preview", action="store_true",
+        help=(
+            "modifier flag (use with --enqueue or --inject-topic). "
+            "Tags the new episode as preview_mode — S06 generates "
+            "only Act 0 + Act 5 (~360 words, ~8 beats), and the rest "
+            "of the pipeline renders only those beats. Tone-check the "
+            "voice, visual style, hook, and closing without committing "
+            "the full 3-4hr compute. Output: 05_video/final_preview.mp4."
+        ),
+    )
+    parser.add_argument(
+        "--approve", metavar="EP_ID",
+        help=(
+            "clear any S07 brand-safety gate or S08 in-flight gate on "
+            "the named episode so it can advance to the next stage. "
+            "Use after reviewing the flag file or beat sheet."
+        ),
+    )
+    parser.add_argument(
+        "--rerender", nargs=2, metavar=("EP_ID", "BEAT_ID"),
+        help=(
+            "re-run S09 FLUX render for a single beat. Use after "
+            "editing beat_sheet.json's prompt for that beat, or after "
+            "a FLUX render came out subjectively bad. Beat ID is the "
+            "beat's `id` field (e.g. BEAT_023). The existing render "
+            "and any Grok-corrected version are archived to "
+            "03_assets/quarantine/ before the re-render."
+        ),
+    )
+    parser.add_argument(
+        "--from-edited-prompt", action="store_true",
+        help=(
+            "with --rerender: re-read the beat's FLUX prompt fresh "
+            "from beat_sheet.json (operator edited it) instead of "
+            "re-using the prompt the original S09 invocation built."
+        ),
+    )
     parser.add_argument("--status", action="store_true",
                         help="print queue status and exit")
     parser.add_argument("-v", "--verbose", action="count", default=0)
@@ -192,18 +232,42 @@ def cli() -> int:
     _setup_logging(args.verbose)
 
     if args.enqueue:
-        ids = enqueue_episodes(args.enqueue)
-        print(f"enqueued {len(ids)}: {', '.join(ids)}")
+        ids = enqueue_episodes(args.enqueue, preview_mode=args.preview)
+        tag = " (preview_mode)" if args.preview else ""
+        print(f"enqueued {len(ids)}{tag}: {', '.join(ids)}")
         return 0
 
     if args.inject_topic:
-        return _inject_topic_cmd(args.inject_topic, skip_validation=args.no_validate)
+        return _inject_topic_cmd(
+            args.inject_topic,
+            skip_validation=args.no_validate,
+            preview_mode=args.preview,
+        )
+
+    if args.approve:
+        return _approve_cmd(args.approve)
+
+    if args.rerender:
+        ep_id, beat_id = args.rerender
+        return _rerender_cmd(
+            ep_id, beat_id, from_edited_prompt=args.from_edited_prompt,
+        )
 
     if args.status:
         q = load_queue()
         for ep in q["episodes"]:
             inc = (ep.get("incident") or {}).get("company_name", "<no topic>")
-            origin = " (manual)" if ep.get("incident_origin") == "manual" else ""
+            tags: list[str] = []
+            if ep.get("incident_origin") == "manual":
+                tags.append("manual")
+            if ep.get("preview_mode"):
+                tags.append("preview")
+            sf = ep.get("safety_flags_count") or {}
+            if sf.get("high"):
+                tags.append(f"safety_flags={sf['high']}H/{sf.get('low', 0)}L")
+            elif sf.get("low"):
+                tags.append(f"safety_flags=0H/{sf['low']}L")
+            origin = f" ({', '.join(tags)})" if tags else ""
             blocked = "BLOCKED" if ep.get("blockers") else ""
             print(f"{ep['id']:8s}  stage={ep['current_stage']:4s}  "
                   f"{blocked:7s}  {inc}{origin}")
@@ -238,7 +302,12 @@ _MANUAL_REQUIRED_FIELDS = (
 _MANUAL_OPTIONAL_PINS = ("archetype", "narrator", "visual_style")
 
 
-def _inject_topic_cmd(path_str: str, *, skip_validation: bool) -> int:
+def _inject_topic_cmd(
+    path_str: str,
+    *,
+    skip_validation: bool,
+    preview_mode: bool = False,
+) -> int:
     """CLI entry point for --inject-topic. Reads + validates the JSON,
     then enqueues a manual episode. Prints the new episode ID and the
     next stage that will run."""
@@ -285,6 +354,7 @@ def _inject_topic_cmd(path_str: str, *, skip_validation: bool) -> int:
             narrator=pins.get("narrator"),
             visual_style=pins.get("visual_style"),
             skip_validation=skip_validation,
+            preview_mode=preview_mode,
         )
     except ValueError as e:
         print(f"--inject-topic: {e}", file=sys.stderr)
@@ -294,12 +364,105 @@ def _inject_topic_cmd(path_str: str, *, skip_validation: bool) -> int:
     if pins:
         pin_str = " pins=" + ",".join(f"{k}={v}" for k, v in pins.items())
     val_str = " (validation skipped)" if skip_validation else ""
+    pv_str = " (preview_mode)" if preview_mode else ""
     print(
         f"injected {eid}: {raw['company_name']} "
         f"[{raw.get('hq_country', '??')}, {raw.get('year_anchor')}, "
-        f"{raw.get('story_kind')}]{pin_str}{val_str}"
+        f"{raw.get('story_kind')}]{pin_str}{val_str}{pv_str}"
     )
     return 0
+
+
+# ----------------------------------------------------------------------
+# Batch B: --approve and --rerender
+# ----------------------------------------------------------------------
+
+def _approve_cmd(episode_id: str) -> int:
+    """Clear any needs_human gate on `episode_id` so the next cron
+    tick can pick the stage back up. Used after operator reviews a
+    brand-safety flag file or a beat sheet."""
+    cfg = load_config()
+    lock_path = cfg.state_dir / "locks" / "orchestrator.lock"
+    stale = cfg.orchestrator["stale_lock_hours"] * 3600
+    try:
+        with file_lock(lock_path, stale_seconds=stale):
+            queue = load_queue()
+            ep = find_episode(queue, episode_id)
+            if ep is None:
+                print(f"--approve: no such episode {episode_id}",
+                      file=sys.stderr)
+                return 2
+            if not (ep.get("blockers") or any(
+                s.get("status") == "needs_human"
+                for s in (ep.get("stages") or {}).values()
+            )):
+                print(f"--approve: {episode_id} has no blockers / no "
+                      f"needs_human stages — nothing to clear.")
+                return 0
+            cleared = clear_blockers(queue, episode_id)
+            save_queue(queue)
+            if cleared:
+                print(f"approved {episode_id}: blockers cleared; "
+                      f"current_stage={ep['current_stage']}")
+                return 0
+            print(f"--approve: nothing changed for {episode_id}",
+                  file=sys.stderr)
+            return 2
+    except RuntimeError as e:
+        print(f"--approve: lock contention: {e}", file=sys.stderr)
+        return 2
+
+
+def _rerender_cmd(
+    episode_id: str,
+    beat_id: str,
+    *,
+    from_edited_prompt: bool = False,
+) -> int:
+    """Re-run S09's FLUX render path for a single beat. Loads the
+    episode workspace, locates the beat in beat_sheet.json, archives
+    any existing render under 03_assets/quarantine/, then re-renders
+    via the same code path S09 uses. Optionally re-reads the prompt
+    from beat_sheet.json (when --from-edited-prompt is set).
+
+    Lives in the orchestrator (not in S09) because it's an out-of-
+    band operation — the queue's stage status is not touched; the
+    episode stays at whatever stage it was at."""
+    cfg = load_config()
+    lock_path = cfg.state_dir / "locks" / "orchestrator.lock"
+    stale = cfg.orchestrator["stale_lock_hours"] * 3600
+    try:
+        with file_lock(lock_path, stale_seconds=stale):
+            queue = load_queue()
+            ep = find_episode(queue, episode_id)
+            if ep is None:
+                print(f"--rerender: no such episode {episode_id}",
+                      file=sys.stderr)
+                return 2
+
+            # Delegate the actual re-render work to the stage module so
+            # the FLUX call site stays in one place.
+            from .stages import s09_flux_render as s09
+            try:
+                ok = s09.rerender_single_beat(
+                    ep, beat_id,
+                    from_edited_prompt=from_edited_prompt,
+                )
+            except FileNotFoundError as e:
+                print(f"--rerender: {e}", file=sys.stderr)
+                return 2
+
+            if not ok:
+                print(f"--rerender: failed for {episode_id}/{beat_id}",
+                      file=sys.stderr)
+                return 2
+
+            save_queue(queue)
+            print(f"rerendered {episode_id}/{beat_id} successfully")
+            return 0
+    except RuntimeError as e:
+        print(f"--rerender: lock contention: {e}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

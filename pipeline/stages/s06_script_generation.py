@@ -110,6 +110,36 @@ def run(episode: dict, queue: dict) -> str | None:
     target_beats = (cfg.quality_gates["min_total_beats"]
                     + cfg.quality_gates["max_total_beats"]) // 2
 
+    # Preview-mode short-circuit (Batch B 2026-05-26). Operator
+    # invoked --preview when queueing this episode; render only
+    # Act 0 + Act 5 so the operator can sanity-check tone, voice,
+    # visual style, hook, and closing without burning the full
+    # 3-4hr compute. The override is implemented as:
+    #   1. Tight word window (~280-480 words).
+    #   2. Small target_beats (~8).
+    #   3. A prepended directive in the prompt telling the LLM to
+    #      skip Acts 1, 2, 3, 3.5, 4 entirely.
+    preview_mode = bool(episode.get("preview_mode"))
+    preview_directive = ""
+    if preview_mode:
+        target_words = 360
+        target_beats = 8
+        preview_directive = (
+            ">>> PREVIEW MODE — RENDER ONLY ACT 0 AND ACT 5 <<<\n"
+            "This run is a tone-check, not a publishable episode. "
+            "Skip Acts 1, 2, 3, 3.5, and 4 ENTIRELY. Generate ONLY:\n"
+            "  - Act 0 (the hook, ~60 words, 1-2 beats)\n"
+            "  - Act 5 (the closing, ~300 words, 5-6 beats)\n"
+            "Place a literal line `## BEAT 2 ## [PREVIEW: Acts 1-4 "
+            "skipped]` between Act 0's last beat and Act 5's first "
+            "beat so the operator can see where the gap is. Total "
+            "word count 280-480; total beat count 6-10. The hard-"
+            "length-gate rules below are RELAXED for this mode — "
+            "ignore them.\n\n"
+        )
+        logger.info("S06 preview-mode: targeting %d words / %d beats",
+                    target_words, target_beats)
+
     # Load character iconography if S05's profile sub-step produced it.
     # Missing file is fine — the writer falls back to a neutral
     # placeholder and the prompt instructs it to plant visual cues
@@ -125,15 +155,22 @@ def run(episode: dict, queue: dict) -> str | None:
         except Exception as e:
             logger.warning("character_profile.json unreadable: %s", e)
 
+    min_w = cfg.quality_gates["min_script_words"]
+    max_w = cfg.quality_gates["max_script_words"]
+    if preview_mode:
+        min_w = 280
+        max_w = 480
+
     prompt = template.format(
+        preview_mode_directive=preview_directive,
         incident_name=incident["company_name"],
         year=incident.get("year_anchor"),
         hero=incident.get("hero", ""),
         conflict=incident.get("conflict", ""),
         story_kind=incident.get("story_kind", ""),
         target_words=target_words,
-        min_words=cfg.quality_gates["min_script_words"],
-        max_words=cfg.quality_gates["max_script_words"],
+        min_words=min_w,
+        max_words=max_w,
         archetype_name=arch["name"],
         archetype_guidance=arch_guidance,
         narrator_name=narr["name"],
@@ -152,9 +189,6 @@ def run(episode: dict, queue: dict) -> str | None:
         ),
         target_beats=target_beats,
     )
-
-    min_w = cfg.quality_gates["min_script_words"]
-    max_w = cfg.quality_gates["max_script_words"]
 
     script = _generate_within_range(
         llm, prompt, min_w=min_w, max_w=max_w, target_w=target_words,

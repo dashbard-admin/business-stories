@@ -205,11 +205,18 @@ def run(episode: dict, queue: dict) -> str | None:
         logger.info("S12 closing card: %.1fs", closing_card_seconds)
 
     # ----- concat -----
-    final_mp4 = ws / "05_video" / "final.mp4"
+    # Preview mode (Batch B 2026-05-26): produces final_preview.mp4
+    # to signal it's a tone-check render, not for upload.
+    preview_mode = bool(episode.get("preview_mode"))
+    final_name = "final_preview.mp4" if preview_mode else "final.mp4"
+    final_mp4 = ws / "05_video" / final_name
     try:
         concat_clips(clip_paths, final_mix, final_mp4)
     except Exception as e:
         return f"final concat failed: {e}"
+    if preview_mode:
+        logger.info("S12 PREVIEW MODE: muxed %s (Acts 0+5 only, "
+                    "tone-check render)", final_mp4)
 
     # ----- captions -----
     # Caption timestamps are offset by however many seconds of

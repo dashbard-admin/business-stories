@@ -10,9 +10,21 @@ paraphrases lightly — smart vs straight quotes, em vs en dashes,
 collapsed whitespace. We do a normalized-text match so those near-
 misses still apply instead of being silently skipped.
 
+After the rewrite loops, an independent brand-safety pass runs the
+brand_safety_review.txt prompt to flag defamation risk on living
+named people, unframed speculation, and intent attributions not
+supported by the fact ledger. Output flags go to
+02_script/brand_safety_flags.json. When cfg.brand_safety.enabled
+is true AND any flag at gate_on_severity or above fires, S07
+returns a needs_human reason so the operator can review before
+the pipeline advances to S08. The operator clears the gate via
+`python -m pipeline.hermes_orchestrator --approve <ep_id>`. Added
+Batch B 2026-05-26.
+
 Inputs:  02_script/script.txt
 Outputs: 02_script/script.txt (modified)
          02_script/critique_history.json
+         02_script/brand_safety_flags.json
 """
 
 from __future__ import annotations
@@ -181,4 +193,124 @@ def run(episode: dict, queue: dict) -> str | None:
     (ws / "02_script" / "critique_history.json").write_text(
         json.dumps(history, indent=2)
     )
+
+    # ---------- Brand-safety pass (Batch B 2026-05-26) ----------
+    return _run_brand_safety_pass(
+        episode, queue, cfg, script, ws, incident,
+    )
+
+
+def _run_brand_safety_pass(
+    episode: dict,
+    queue: dict,
+    cfg,
+    script: str,
+    ws,
+    incident: dict,
+) -> str | None:
+    """Run brand_safety_review.txt over the (post-critique) script.
+    Emits 02_script/brand_safety_flags.json. Returns None on a clean
+    pass; returns a needs_human reason when the flag count at or
+    above the configured gate_on_severity is > 0 (operator clears
+    via --approve)."""
+    bs_cfg = cfg.brand_safety
+    flag_file = ws / "02_script" / "brand_safety_flags.json"
+
+    if not bs_cfg.get("enabled", True):
+        # Logged-only mode — still write an empty-result file so
+        # downstream inspection has something to look at.
+        flag_file.write_text(json.dumps({
+            "verdict": "skipped",
+            "reason": "brand_safety.enabled=false",
+            "flags": [],
+            "high_severity_count": 0,
+            "low_severity_count": 0,
+        }, indent=2))
+        return None
+
+    # Lazy-load the fact ledger if it exists. The brand-safety prompt
+    # uses it to decide what's safe to state as fact.
+    fact_ledger_path = ws / "01_factcheck" / "verified_facts.json"
+    fact_ledger_json = "[]"
+    if fact_ledger_path.exists():
+        try:
+            fact_ledger_json = fact_ledger_path.read_text()
+        except Exception:
+            pass
+
+    template_path = cfg.prompts_dir / "brand_safety_review.txt"
+    if not template_path.exists():
+        logger.warning("brand_safety_review.txt missing; skipping pass")
+        return None
+    template = template_path.read_text()
+
+    critic = LLM(role="critic")
+    prompt = template.format(
+        incident_name=incident.get("company_name", ""),
+        hero=incident.get("hero", ""),
+        conflict=incident.get("conflict", ""),
+        fact_ledger_json=fact_ledger_json,
+        script=script,
+    )
+    try:
+        result = critic.complete_json(prompt, temperature=0.2, max_tokens=4000)
+    except Exception as e:
+        logger.warning("brand-safety review JSON parse failed: %s", e)
+        flag_file.write_text(json.dumps({
+            "verdict": "error",
+            "error": str(e)[:300],
+            "flags": [],
+            "high_severity_count": 0,
+            "low_severity_count": 0,
+        }, indent=2))
+        return None
+
+    flags = result.get("flags") or []
+    high = sum(1 for f in flags if (f.get("severity") or "").lower() == "high")
+    low = sum(1 for f in flags if (f.get("severity") or "").lower() == "low")
+    result["high_severity_count"] = high
+    result["low_severity_count"] = low
+
+    # Always log a count summary, per Q-B2 (log on every S07 run).
+    logger.info(
+        "S07 brand-safety: verdict=%s flags=%dH/%dL",
+        result.get("verdict", "?"), high, low,
+    )
+    if high > 0 or low > 0:
+        # Log the first few flags so the operator can spot patterns
+        # in the daily log without opening the JSON.
+        for f in flags[:5]:
+            logger.info(
+                "  [%s] %s — %s",
+                f.get("severity", "?"),
+                (f.get("sentence") or "")[:120],
+                (f.get("reasoning") or "")[:140],
+            )
+
+    flag_file.write_text(json.dumps(result, indent=2))
+
+    # Record the counts on the episode so --status can show them.
+    from ..state import update_episode
+    update_episode(
+        queue, episode["id"],
+        safety_flags_count={"high": high, "low": low},
+    )
+
+    # Apply the gate.
+    gate = (bs_cfg.get("gate_on_severity") or "high").lower()
+    if gate == "off":
+        return None
+    if gate == "high" and high > 0:
+        return (
+            f"brand-safety: {high} high-severity flag(s) require review. "
+            f"Inspect 02_script/brand_safety_flags.json then run "
+            f"`--approve {episode['id']}` to clear."
+        )
+    if gate == "low" and (high > 0 or low > 0):
+        return (
+            f"brand-safety: {high}H + {low}L flag(s) require review "
+            f"(gate_on_severity=low). Inspect 02_script/"
+            f"brand_safety_flags.json then run `--approve "
+            f"{episode['id']}` to clear."
+        )
     return None

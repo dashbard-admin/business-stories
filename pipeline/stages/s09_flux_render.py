@@ -608,3 +608,165 @@ def _render_credits_card(*, ws: Path, episode: dict, cfg, flux: Flux,
         logger.info("S09 credits card rendered: %s", chosen)
     else:
         logger.warning("S09 credits card render failed; S12 will fall back to ffmpeg-drawn card")
+
+
+# ----------------------------------------------------------------------
+# Per-beat re-render entry point (Batch B 2026-05-26)
+# ----------------------------------------------------------------------
+
+def rerender_single_beat(
+    episode: dict,
+    beat_id: str,
+    *,
+    from_edited_prompt: bool = False,
+) -> bool:
+    """Re-run FLUX render + VLM judge + Grok fallback for a single
+    beat. Called by hermes_orchestrator's --rerender CLI flow.
+
+    `from_edited_prompt=True` re-reads the beat's
+    `flux_render_request.prompt` fresh from beat_sheet.json on disk
+    so an operator edit takes effect. When False, re-uses whatever
+    prompt was in the in-memory beat record (which is also read
+    from disk, just unmodified) — semantically equivalent here
+    since we don't cache; the flag exists to make the operator's
+    intent explicit.
+
+    Archives the existing render (and any Grok-corrected version)
+    to 03_assets/quarantine/<beat_id>_<timestamp>.png before
+    re-rendering, so nothing gets silently overwritten without a
+    paper trail.
+
+    Returns True on success, False on failure. Raises
+    FileNotFoundError if the workspace or beat isn't found.
+    """
+    from datetime import datetime, timezone
+
+    cfg = load_config()
+    ws = find_episode_workspace(episode["id"])
+    if not ws:
+        raise FileNotFoundError(
+            f"no workspace for episode {episode['id']}"
+        )
+
+    beat_sheet_path = ws / "02_script" / "beat_sheet.json"
+    if not beat_sheet_path.exists():
+        raise FileNotFoundError(
+            f"no beat_sheet.json at {beat_sheet_path}"
+        )
+    beat_sheet = json.loads(beat_sheet_path.read_text())
+    beats = beat_sheet.get("beats", [])
+
+    target = next((b for b in beats if b.get("beat_id") == beat_id), None)
+    if target is None:
+        raise FileNotFoundError(
+            f"beat {beat_id} not found in beat_sheet.json"
+        )
+    if "flux_render_request" not in target:
+        raise FileNotFoundError(
+            f"beat {beat_id} has no flux_render_request "
+            f"(routed to PD asset, not FLUX)"
+        )
+
+    flux_dir = ws / "03_assets" / "flux"
+    grok_dir = ws / "03_assets" / "grok"
+    quarantine_dir = ws / "03_assets" / "quarantine"
+    flux_dir.mkdir(parents=True, exist_ok=True)
+    quarantine_dir.mkdir(parents=True, exist_ok=True)
+
+    # Archive any existing renders.
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    for src_dir, suffix in [(flux_dir, "flux"), (grok_dir, "grok")]:
+        existing = src_dir / f"{beat_id}.png"
+        if existing.exists():
+            archived = quarantine_dir / f"{beat_id}.{suffix}.{ts}.png"
+            existing.rename(archived)
+            logger.info("S09 rerender: archived %s -> %s",
+                        existing.name, archived.name)
+
+    # Build single-beat render request and run the same FLUX +
+    # judge + Grok cycle. To keep this scope tight, we reuse the
+    # existing helpers but inline a minimal version of the per-beat
+    # loop from run() — the loop in run() is iterative across beats
+    # and not currently factorable without a refactor we don't want
+    # to do in Batch B.
+    flux = Flux()
+    fr = target["flux_render_request"]
+    if from_edited_prompt:
+        logger.info("S09 rerender: re-reading prompt from beat_sheet.json "
+                    "for %s (edited-prompt path)", beat_id)
+
+    out_path = flux_dir / f"{beat_id}.png"
+    req = FluxRequest(
+        beat_id=beat_id,
+        prompt=fr["prompt"],
+        negative_prompt=fr.get("negative_prompt", ""),
+        out_path=out_path,
+    )
+    qa_enabled = bool(cfg.image_qa.get("enabled", True))
+    max_attempts = max(1, int(cfg.image_qa.get("max_attempts_per_beat", 2)))
+    strict_borderline = bool(cfg.image_qa.get("strict_borderline", True))
+    vlm: VLM | None = VLM() if qa_enabled else None
+
+    chosen_path: Path | None = None
+    chosen_verdict: ImageVerdict | None = None
+    for attempt in range(1, max_attempts + 1):
+        candidate = flux.render_batch_with_retry(
+            req, num_candidates=1, seed_offset=hash(beat_id) % 10000 + attempt,
+        )
+        if not candidate or not candidate.exists():
+            logger.warning("S09 rerender: FLUX failed attempt %d for %s",
+                           attempt, beat_id)
+            continue
+        if not vlm:
+            chosen_path = candidate
+            break
+        verdict = vlm.critique_image(candidate, fr["prompt"])
+        if verdict:
+            _log_verdict(beat_id, "rerender", attempt, max_attempts, verdict)
+        if verdict and _is_good_enough(verdict, strict_borderline):
+            chosen_path = candidate
+            chosen_verdict = verdict
+            break
+
+    if chosen_path is None:
+        logger.warning("S09 rerender: no acceptable render for %s "
+                       "after %d attempt(s)", beat_id, max_attempts)
+        return False
+
+    # Grok fallback if anatomy/text issues remain.
+    grok = Grok()
+    if grok.available and chosen_verdict:
+        text_triggered, text_triggers = _has_malformed_text(chosen_verdict)
+        anatomy_bad = not chosen_verdict.anatomy_ok
+        triggers: list[str] = list(text_triggers)
+        if anatomy_bad:
+            anat_msg = "anatomy_ok=False"
+            if chosen_verdict.reasoning:
+                anat_msg = f"{anat_msg}: {chosen_verdict.reasoning[:160]}"
+            triggers.insert(0, anat_msg)
+        if text_triggered or anatomy_bad:
+            grok_template_path = cfg.prompts_dir / "grok_text_correction.txt"
+            if grok_template_path.exists():
+                grok_template = grok_template_path.read_text()
+                _correct_text_via_grok(
+                    src=chosen_path, beat_id=beat_id,
+                    flux_prompt=fr["prompt"], verdict=chosen_verdict,
+                    grok=grok, grok_dir=grok_dir,
+                    prompt_template=grok_template, triggers=triggers,
+                )
+
+    # Update the beat record + persist.
+    target["flux_asset_path"] = str(chosen_path.relative_to(ws))
+    if chosen_verdict:
+        target["image_qa"] = {
+            "verdict": chosen_verdict.verdict,
+            "score": chosen_verdict.score,
+            "prompt_match": chosen_verdict.prompt_match,
+            "anatomy_ok": chosen_verdict.anatomy_ok,
+            "artifacts": chosen_verdict.artifacts,
+            "reasoning": chosen_verdict.reasoning,
+            "rerendered_at": ts,
+        }
+    beat_sheet_path.write_text(json.dumps(beat_sheet, indent=2))
+    logger.info("S09 rerender complete: %s", chosen_path.name)
+    return True
