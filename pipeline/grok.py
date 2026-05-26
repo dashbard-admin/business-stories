@@ -65,8 +65,7 @@ class Grok:
         self.base_url: str = (gc.get("base_url") or "").rstrip("/")
         self.endpoint_path: str = gc.get("endpoint_path", "/images/edits")
         self.timeout: int = int(gc.get("timeout_seconds", 180))
-        self.size_primary: str = gc.get("size_primary", "1920x1080")
-        self.size_fallback: str = gc.get("size_fallback", "2048x1152")
+        self.aspect_ratio: str = gc.get("aspect_ratio", "16:9")
         self._mock = cfg.mock_mode
 
     # ------------------------------------------------------------------
@@ -108,12 +107,27 @@ class Grok:
         prompt: str,
         out_path: Path,
     ) -> Path | None:
-        """Send `image_path` + `prompt` to Grok, write the corrected
-        image to `out_path`. Returns out_path on success, None on
-        any failure.
+        """Send `image_path` + `prompt` to xAI's image-edit endpoint,
+        write the corrected image to `out_path`. Returns `out_path`
+        on success, `None` on any failure.
 
-        Tries the primary size first; on 4xx that mentions size,
-        retries once with the fallback size.
+        Request shape per xAI docs:
+            POST /v1/images/edits
+            {
+              "model": "<grok-imagine-image | -quality>",
+              "prompt": "...",
+              "image": { "url": "data:image/png;base64,...",
+                         "type": "image_url" },
+              "n": 1,
+              "aspect_ratio": "16:9"
+            }
+
+        Response:
+            { "data": [ { "url": "https://..." }, ... ] }
+
+        _write_response_image handles both the URL response (xAI's
+        actual return shape) and the OpenAI-style base64 response
+        (in case xAI ever adds it as an option).
         """
         if self._mock:
             return self._mock_correct(image_path, out_path)
@@ -123,57 +137,52 @@ class Grok:
             return None
 
         url = f"{self.base_url}{self.endpoint_path}"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
 
-        for size in (self.size_primary, self.size_fallback):
-            try:
-                with image_path.open("rb") as fh:
-                    files = {"image": (image_path.name, fh, "image/png")}
-                    data = {
-                        "model": self.model,
-                        "prompt": prompt,
-                        "n": 1,
-                        "size": size,
-                        "response_format": "b64_json",
-                    }
-                    r = requests.post(url, headers=headers,
-                                      files=files, data=data,
-                                      timeout=self.timeout)
-            except requests.RequestException as e:
-                logger.warning("grok HTTP error (size=%s) for %s: %s",
-                               size, image_path.name, e)
-                return None
-
-            if r.status_code == 200:
-                if self._write_response_image(r, out_path):
-                    logger.info("grok corrected %s -> %s (size=%s)",
-                                image_path.name, out_path.name, size)
-                    return out_path
-                logger.warning("grok 200 but response body unrecognized "
-                               "for %s (first 200 chars: %s)",
-                               image_path.name, (r.text or "")[:200])
-                return None
-
-            # On 4xx, peek at the body — if it complains about size,
-            # the fallback size loop continues. Otherwise we bail.
-            if 400 <= r.status_code < 500:
-                body_low = (r.text or "").lower()
-                if "size" in body_low or "resolution" in body_low or "dimension" in body_low:
-                    logger.warning("grok %d (size=%s) — trying fallback. "
-                                   "body: %s", r.status_code, size,
-                                   (r.text or "")[:200])
-                    continue
-                logger.warning("grok %d for %s; body: %s",
-                               r.status_code, image_path.name,
-                               (r.text or "")[:300])
-                return None
-
-            # 5xx or weird code — bail.
-            logger.warning("grok %d for %s; body: %s",
-                           r.status_code, image_path.name,
-                           (r.text or "")[:300])
+        try:
+            with image_path.open("rb") as fh:
+                image_b64 = base64.b64encode(fh.read()).decode("ascii")
+        except OSError as e:
+            logger.warning("grok: cannot read %s: %s", image_path, e)
             return None
 
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "image": {
+                "url": f"data:image/png;base64,{image_b64}",
+                "type": "image_url",
+            },
+            "n": 1,
+            "aspect_ratio": self.aspect_ratio,
+        }
+
+        try:
+            r = requests.post(url, headers=headers, json=payload,
+                              timeout=self.timeout)
+        except requests.RequestException as e:
+            logger.warning("grok HTTP error for %s: %s",
+                           image_path.name, e)
+            return None
+
+        if r.status_code == 200:
+            if self._write_response_image(r, out_path):
+                logger.info("grok corrected %s -> %s "
+                            "(model=%s, aspect=%s)",
+                            image_path.name, out_path.name,
+                            self.model, self.aspect_ratio)
+                return out_path
+            logger.warning("grok 200 but response body unrecognized "
+                           "for %s (first 300 chars: %s)",
+                           image_path.name, (r.text or "")[:300])
+            return None
+
+        logger.warning("grok %d for %s; body: %s",
+                       r.status_code, image_path.name,
+                       (r.text or "")[:500])
         return None
 
     # ------------------------------------------------------------------
