@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import yaml
 from pathlib import Path
@@ -359,18 +360,40 @@ _MALFORMED_TEXT_KEYWORDS = (
     "text artifacts", "broken text", "text is unreadable",
     "letters", "lettering", "alphabet", "word salad",
     "garbled writing", "garbled letters", "garbled signage",
-    "garbled lettering", "unintelligible text", " illegible", " illegibility",
+    "garbled lettering", "unintelligible text",
+    " illegible", " illegibility",
+    # Phrases the VLM actually uses for "no text" directive
+    # violations (observed in production):
+    "no text", "no-text", "text directive", "text legibility",
+    "text is present", "text is visible", "text is legible",
+    "text legible", "real text", "real handwritten text",
+    "text violation", "text violations",
 )
+
+
+# Word-boundary regex used by the fallback rule below. Matches the
+# standalone word "text" but NOT embedded occurrences like "texture",
+# "context", or "subtext".
+_TEXT_WORD_RE = re.compile(r"\btext\b", re.IGNORECASE)
 
 
 def _has_malformed_text(verdict: ImageVerdict) -> tuple[bool, list[str]]:
     """Scan the VLM verdict for malformed-text indicators.
 
-    Returns (triggered, matching_phrases). `triggered` is True when
-    at least one keyword from _MALFORMED_TEXT_KEYWORDS appears in
-    either an artifact entry or in verdict.reasoning. The matching
-    phrases (artifacts strings or "reasoning: ...") are returned so
-    they can be logged + stamped into image_qa for audit.
+    Returns (triggered, matching_phrases). `triggered` is True when:
+      (a) any keyword in _MALFORMED_TEXT_KEYWORDS appears as a
+          substring of an artifact entry or of verdict.reasoning, OR
+      (b) the verdict is "borderline" or "reject" AND the standalone
+          word "text" appears anywhere in artifacts/reasoning. Because
+          the writer prompt prepends an explicit "no text" directive
+          to every FLUX render, the VLM only ever mentions "text" in
+          a non-pass verdict to complain that the directive was
+          violated. This is the safety-net rule for cases where the
+          VLM's phrasing doesn't match an explicit keyword (e.g. "Text
+          is present despite prompt's 'no text' directive").
+
+    The matching phrases are returned so they can be logged and
+    stamped into image_qa for audit.
     """
     matches: list[str] = []
     haystack: list[tuple[str, str]] = []
@@ -378,12 +401,24 @@ def _has_malformed_text(verdict: ImageVerdict) -> tuple[bool, list[str]]:
         haystack.append(("artifact", str(a)))
     if verdict.reasoning:
         haystack.append(("reasoning", verdict.reasoning))
+
+    # Rule (a) — explicit keyword hits.
     for source, text in haystack:
         low = text.lower()
         for kw in _MALFORMED_TEXT_KEYWORDS:
             if kw in low:
                 matches.append(f"{source}: {text[:160]}")
-                break  # one match per haystack entry is enough
+                break
+    if matches:
+        return (True, matches)
+
+    # Rule (b) — word-boundary "text" fallback for non-pass verdicts.
+    if (verdict.verdict or "").lower() in ("borderline", "reject"):
+        for source, text in haystack:
+            if _TEXT_WORD_RE.search(text):
+                matches.append(f"{source} [text mentioned]: {text[:160]}")
+                break  # one fallback match is enough
+
     return (bool(matches), matches)
 
 
