@@ -21,13 +21,7 @@ export PIPELINE_CONFIG="${ROOT}/config.yaml"
 
 LOGDIR="${ROOT}/logs"
 mkdir -p "${LOGDIR}"
-
-# Single daily rolling log. Cleaner than one file per invocation
-# (which produces hundreds of tiny files under a 5-minute launchd /
-# cron schedule). pipeline/hermes_orchestrator.py also writes its
-# own structured log at logs/orch.YYYY-MM-DD.log via _setup_logging,
-# so this file captures only the wrapper-level glue + any stray
-# subprocess stderr.
-LOGFILE="${LOGDIR}/run.$(date -u +%Y-%m-%d).log"
+TS="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
+LOGFILE="${LOGDIR}/run.${TS}.log"
 
 python3 -m pipeline.hermes_orchestrator "$@" >>"${LOGFILE}" 2>&1
