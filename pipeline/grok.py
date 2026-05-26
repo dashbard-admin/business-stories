@@ -123,22 +123,34 @@ class Grok:
             return None
 
         url = f"{self.base_url}{self.endpoint_path}"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        # Encode the image once (base64) — the request body is JSON,
+        # not multipart, per xAI's 415 reply: "Expected request with
+        # Content-Type: application/json".
+        try:
+            with image_path.open("rb") as fh:
+                image_b64 = base64.b64encode(fh.read()).decode("ascii")
+        except OSError as e:
+            logger.warning("grok: cannot read %s: %s", image_path, e)
+            return None
+        image_data_uri = f"data:image/png;base64,{image_b64}"
 
         for size in (self.size_primary, self.size_fallback):
+            payload = {
+                "model": self.model,
+                "prompt": prompt,
+                "image": image_data_uri,
+                "n": 1,
+                "size": size,
+                "response_format": "b64_json",
+            }
             try:
-                with image_path.open("rb") as fh:
-                    files = {"image": (image_path.name, fh, "image/png")}
-                    data = {
-                        "model": self.model,
-                        "prompt": prompt,
-                        "n": 1,
-                        "size": size,
-                        "response_format": "b64_json",
-                    }
-                    r = requests.post(url, headers=headers,
-                                      files=files, data=data,
-                                      timeout=self.timeout)
+                r = requests.post(url, headers=headers, json=payload,
+                                  timeout=self.timeout)
             except requests.RequestException as e:
                 logger.warning("grok HTTP error (size=%s) for %s: %s",
                                size, image_path.name, e)
@@ -155,7 +167,9 @@ class Grok:
                 return None
 
             # On 4xx, peek at the body — if it complains about size,
-            # the fallback size loop continues. Otherwise we bail.
+            # the fallback size loop continues. If it complains about
+            # the `image` field shape, retry once with the raw-base64
+            # form instead of the data-URI form. Otherwise bail.
             if 400 <= r.status_code < 500:
                 body_low = (r.text or "").lower()
                 if "size" in body_low or "resolution" in body_low or "dimension" in body_low:
@@ -163,6 +177,34 @@ class Grok:
                                    "body: %s", r.status_code, size,
                                    (r.text or "")[:200])
                     continue
+                # Some endpoints reject the data: URI prefix and want
+                # the raw base64 only. Retry once with the bare b64.
+                if ("image" in body_low and (
+                        "format" in body_low or "invalid" in body_low
+                        or "data" in body_low or "base64" in body_low)
+                        and payload["image"] == image_data_uri):
+                    logger.warning("grok %d — body complains about "
+                                   "image field; retrying with raw "
+                                   "base64 (no data: prefix). body: %s",
+                                   r.status_code, (r.text or "")[:200])
+                    payload["image"] = image_b64
+                    try:
+                        r = requests.post(url, headers=headers,
+                                          json=payload,
+                                          timeout=self.timeout)
+                    except requests.RequestException as e:
+                        logger.warning("grok HTTP error on bare-b64 "
+                                       "retry: %s", e)
+                        return None
+                    if r.status_code == 200:
+                        if self._write_response_image(r, out_path):
+                            logger.info("grok corrected %s -> %s "
+                                        "(bare-b64, size=%s)",
+                                        image_path.name, out_path.name,
+                                        size)
+                            return out_path
+                    # If the bare-b64 retry also fails, fall through
+                    # to the generic 4xx warning below.
                 logger.warning("grok %d for %s; body: %s",
                                r.status_code, image_path.name,
                                (r.text or "")[:300])
