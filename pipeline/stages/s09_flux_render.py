@@ -225,29 +225,36 @@ def run(episode: dict, queue: dict) -> str | None:
         # raw FLUX render and the Grok output are archived to
         # 03_assets/grok/<beat_id>_*.png for visual comparison.
         grok_correction_info: dict | None = None
-        if (grok_prompt_template
-                and grok.available
-                and chosen_verdict
-                and _has_malformed_text(chosen_verdict)):
-            grok_correction_info = _correct_text_via_grok(
-                src=chosen_path,
-                beat_id=beat_id,
-                flux_prompt=fr["prompt"],
-                verdict=chosen_verdict,
-                grok=grok,
-                grok_dir=grok_dir,
-                prompt_template=grok_prompt_template,
-            )
-            if grok_correction_info and grok_correction_info.get("corrected_path"):
-                # Promote the corrected image to be the canonical
-                # chosen path. The original FLUX render lives on at
-                # grok_correction_info["original_archive_path"].
-                chosen_path = Path(grok_correction_info["corrected_path"])
-                logger.info("S09 %s: Grok corrected (artifacts=%s)",
-                            beat_id, grok_correction_info.get("triggering_artifacts"))
-            else:
-                logger.warning("S09 %s: Grok correction attempted but failed; "
-                               "keeping uncorrected FLUX render", beat_id)
+        if grok_prompt_template and grok.available and chosen_verdict:
+            # _has_malformed_text returns a (bool, list) TUPLE. Earlier
+            # versions used the tuple directly in the boolean gate,
+            # which is always truthy in Python (any 2-item tuple is)
+            # — that meant Grok was attempted on every beat with the
+            # only "successful" no-op being _correct_text_via_grok's
+            # internal recheck. We unpack explicitly to make the gate
+            # check the actual bool.
+            triggered, triggers = _has_malformed_text(chosen_verdict)
+            if triggered:
+                grok_correction_info = _correct_text_via_grok(
+                    src=chosen_path,
+                    beat_id=beat_id,
+                    flux_prompt=fr["prompt"],
+                    verdict=chosen_verdict,
+                    grok=grok,
+                    grok_dir=grok_dir,
+                    prompt_template=grok_prompt_template,
+                )
+                if grok_correction_info and grok_correction_info.get("corrected_path"):
+                    # Promote the corrected image to be the canonical
+                    # chosen path. The original FLUX render lives on at
+                    # grok_correction_info["original_archive_path"].
+                    chosen_path = Path(grok_correction_info["corrected_path"])
+                    logger.info("S09 %s: Grok corrected (artifacts=%s)",
+                                beat_id, grok_correction_info.get("triggering_artifacts"))
+                else:
+                    logger.warning("S09 %s: Grok correction attempted but failed; "
+                                   "keeping uncorrected FLUX render. "
+                                   "triggers: %s", beat_id, triggers[:3])
 
         try:
             if out_path.exists():
