@@ -123,8 +123,7 @@ class Config:
             "base_url": "https://api.x.ai/v1",
             "endpoint_path": "/images/edits",
             "timeout_seconds": 180,
-            "size_primary": "1920x1080",
-            "size_fallback": "2048x1152",
+            "aspect_ratio": "16:9",
         }
         return {**defaults, **(self.raw.get("grok") or {})}
 

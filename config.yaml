@@ -200,10 +200,16 @@ grok:
                                         # adjust if xAI's image-edit
                                         # endpoint lives elsewhere.
   timeout_seconds: 180
-  # Size requested from Grok. xAI accepts OpenAI-compatible "WIDTHxHEIGHT".
-  # Falls back to 2K 16:9 (2048x1152) if 1920x1080 is rejected.
-  size_primary: "1920x1080"
-  size_fallback: "2048x1152"
+  # xAI's /v1/images/edits uses aspect_ratio strings ("16:9", "1:1",
+  # "2:1", "9:16") rather than OpenAI's "WIDTHxHEIGHT" format. The
+  # output resolution is decided by xAI's image model itself. For
+  # this pipeline 16:9 matches the FLUX-rendered 1920x1080 panels.
+  aspect_ratio: "16:9"
+  # Two public Grok image-edit models. "quality" is recommended by
+  # xAI for the highest fidelity; the default model is faster but
+  # slightly less detailed. Override grok.model above if you want
+  # quality:
+  #   model: "grok-imagine-image-quality"
   # Operator-editable prompt template lives at
   # pipeline/prompts/grok_text_correction.txt. The {flux_prompt}
   # placeholder is replaced with the exact prompt FLUX rendered from.
