@@ -215,6 +215,42 @@ class Config:
         return {**defaults, **(self.raw.get("generic_stash") or {})}
 
     @property
+    def sfx_library(self) -> dict[str, Any]:
+        """Local SFX library (Batch C 2026-05-26). Operator-curated
+        license-clean SFX clips matched by cue at S11 Phase 2.
+        Disabled by default until the operator populates the manifest."""
+        defaults = {
+            "enabled": False,
+            "path": str(self.assets_dir / "sfx_library"),
+            "manifest": str(self.assets_dir / "sfx_library" / "manifest.json"),
+            "default_gain_db": -18.0,
+            "crossfade_ms": 50,
+        }
+        raw = self.raw.get("sfx_library") or {}
+        merged = {**defaults, **raw}
+        merged["path"] = self._resolve(str(merged["path"]))
+        merged["manifest"] = self._resolve(str(merged["manifest"]))
+        return merged
+
+    @property
+    def callouts(self) -> dict[str, Any]:
+        """On-screen text callouts (Batch C 2026-05-26). The writer
+        LLM emits `[CALLOUT: "TEXT"]` markers in the script; S08
+        parses them into per-beat lists; S12 composites them as
+        Pillow text overlays on the beat's image."""
+        defaults = {
+            "enabled": True,
+            "max_per_beat": 1,
+            "font_size_pct": 0.10,
+            "color": "#FFE600",
+            "stroke_color": "#000000",
+            "stroke_width": 6,
+            "hold_seconds": 2.5,
+            "fade_ms": 200,
+        }
+        return {**defaults, **(self.raw.get("callouts") or {})}
+
+    @property
     def stock_sources(self) -> dict[str, Any]:
         return self.raw.get("stock_sources") or {"enabled": False}
 

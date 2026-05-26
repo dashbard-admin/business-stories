@@ -319,6 +319,78 @@ asset_hunt:
   # visual style anyway. Set true to restore the full PD-hunt path.
   enabled: false
 
+  # Narrow PD path (Batch C 2026-05-26). When asset_hunt.enabled is
+  # ALSO true, this list restricts PD routing to only the named
+  # visual_intent values. The default is the two intents where real
+  # photos genuinely add value without breaking the comic style
+  # (founder Wikipedia portraits, period newspaper headlines). All
+  # other visual_intents still route through FLUX.
+  #
+  # When asset_hunt.enabled is false (current default), this list
+  # is ignored. The wiring is in place so flipping enabled: true +
+  # leaving enabled_visual_intents at default activates the narrow
+  # path without a code change.
+  enabled_visual_intents:
+    - founder_portrait
+    - document_or_headline
+
+sfx_library:
+  # SFX bed under voice (Batch C 2026-05-26). S11 Phase 2 looks up
+  # short SFX clips by cue (from S08's per-beat sfx_cue field) and
+  # mixes them at beat-start, ducked under voice. Operator must
+  # source license-clean clips and populate assets/sfx_library/.
+  #
+  # Layout:
+  #   ${root}/assets/sfx_library/
+  #     ├── manifest.json
+  #     └── *.wav / *.mp3
+  #
+  # Each manifest entry shape:
+  #   {"file": "typewriter_01.wav",
+  #    "cue": "typewriter",
+  #    "intensity": "sharp",
+  #    "license": "CC0 | CC-BY | freesound | Pixabay | unknown",
+  #    "attribution": "Author Name — Sound Title",
+  #    "source_url": "https://...",
+  #    "duration_seconds": 0.9}
+  #
+  # Run `python -m pipeline.tools.scan_sfx_library` after dropping
+  # audio files in to backfill duration_seconds via ffprobe.
+  #
+  # Starts disabled — flip to true after the operator has dropped
+  # ≥1 file per cue into assets/sfx_library/. With enabled=false
+  # S11 Phase 2 is a no-op and the audio mix is identical to pre-
+  # Batch-C.
+  enabled: false
+  path: "${root}/assets/sfx_library"
+  manifest: "${root}/assets/sfx_library/manifest.json"
+  default_gain_db: -18.0          # SFX level vs. voice (-18 dB
+                                  # = clearly audible but distinctly
+                                  # below voice; the operator can
+                                  # override per-track via the
+                                  # manifest's gain_db_hint field)
+  crossfade_ms: 50                # short fade-in/out at SFX edges
+                                  # so the bed doesn't click
+
+callouts:
+  # On-screen text callouts (Batch C 2026-05-26). The writer LLM
+  # emits inline [CALLOUT: "$9 BILLION"] markers after high-impact
+  # concrete-number sentences. S08 parses these into a per-beat
+  # `callouts` list. S12 composites the bracketed text as a
+  # high-contrast text overlay (yellow body + black stroke, same
+  # styling as the title card).
+  enabled: true
+  max_per_beat: 1                 # Q-C2 confirmed: cap at 1,
+                                  # configurable. Raise carefully —
+                                  # spamming dilutes the effect.
+  font_size_pct: 0.10             # frac of frame height (1080 *
+                                  # 0.10 = 108 px)
+  color: "#FFE600"                # bright yellow
+  stroke_color: "#000000"
+  stroke_width: 6
+  hold_seconds: 2.5
+  fade_ms: 200
+
 generic_stash:
   enabled: true
   threshold: 0.18

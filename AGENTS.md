@@ -301,6 +301,9 @@ SearXNG search + plain `requests` fetch.
 ### 5.12 `wikimedia.py`
 Commons MediaWiki API client. S5 uses this for license-clean image hits instead of relying on SearXNG's flaky `site:commons.wikimedia.org` routing. Returns image URLs with structured `extmetadata` (license, author, source) so the caller doesn't have to scrape.
 
+### 5.13b `sfx_library.py` *(added Batch C 2026-05-27)*
+Operator-curated SFX library. `SFXLibrary().pick_cue(cue, beat_id, max_duration_seconds)` returns an `SFXPick(path, cue, duration_seconds, gain_db_hint)` matching the named cue from the catalog (`typewriter, keyboard, phone_ring, applause, door_slam, traffic_hum, market_bell, newsprint, clock_tick`). Deterministic per `(cue, beat_id)`. Disabled by default; flip `cfg.sfx_library.enabled` to true after dropping license-clean clips into `assets/sfx_library/` and running `python -m pipeline.tools.scan_sfx_library` to backfill durations. License/attribution fields match the music manifest schema.
+
 ### 5.13 `music_library.py`
 Replaces the maritime project's MusicGen / Stable Audio Open generators. `MusicLibrary().pick_bed(topic_record, narrator_id, target_seconds)` runs a token-overlap scorer between topic keywords and per-track `mood + instruments + tags`, returns an ordered list of `(track_path, gain_db_hint)` tuples whose total duration ≥ target. S11 concatenates with crossfade. Operator authors `assets/music_library/manifest.json` by hand (see `pipeline/tools/scan_music_library.py` for the skeleton). *(added Batch A 2026-05-26)* `MusicLibrary.license_report(file_names)` returns per-track `{license, attribution, source_url}` entries that S12 emits to `06_metadata/license_attributions.txt` for paste into the YouTube description.
 
@@ -414,20 +417,23 @@ Also renders `title.png` and `credits.png` for S12 to pick up.
 Per-narrator voice render. Pronunciation overrides at `pipeline/lexicon/pronunciation_overrides.yaml` (Bezos, Theranos, Zuckerberg, Wirecard, EBITDA, IPO, etc.). Output: per-beat WAV chunks + `voice_full.wav`.
 
 ### S11 — Audio Post (`s11_audio_post.py`)
-Music-library only — no MusicGen, no SFX synthesis.
+Voice + music bed + SFX *(SFX phase added Batch C 2026-05-27)*.
 - Voice `dynaudnorm` pre-pass (configurable).
 - `music_library.pick_bed()` picks N tracks ≥ voice duration.
 - ffmpeg concat with 4s crossfade between tracks.
-- Sidechain-duck under voice.
+- **SFX Phase 2:** for each beat with a non-`silence` `sfx_cue`, `sfx_library.pick_cue()` returns a matching clip. `ffmpeg_builder.render_sfx_track()` pre-renders an `sfx_track.wav` of voice duration with all SFX placed at the beat-start offsets (beat-anchored per Q-C1; reads `voice_timing.json` for exact starts, falls back to cumulative `estimated_seconds`). Gain (default −18dB) is baked in.
+- Sidechain-duck music under voice. SFX rides on top of the mix at the configured gain (no ducking).
 - Loudnorm to −14 LUFS.
-- Output: `04_audio/final_mix.wav` + `mix_manifest.json`.
+- Output: `04_audio/final_mix.wav` + `mix_manifest.json` (now lists both `tracks_used` and `sfx_used`).
 
 ### S12 — Video Assembly (`s12_video_assembly.py`)
 - Title card: FLUX-rendered `title.png` background, episode title composited via Pillow (yellow body, black stroke, random-corner placement, deterministic by episode id).
 - Per-beat clip: Ken Burns motion over the beat's image, fade in/out (`fade_in_seconds`/`fade_out_seconds`).
-- Concat all clips, mux voice + music + SRT + VTT.
+- **Callout overlays *(added Batch C 2026-05-27)*:** when a beat has a non-empty `callouts` list (populated by S08 from inline `[CALLOUT: "..."]` markers in the script), `ffmpeg_builder.composite_callouts_onto_clip()` renders each callout as a Pillow text PNG (yellow + black stroke, same styling as the title card), then overlays it on the clip with timed visibility + fade in/out, anchored at the beat start (Q-C1: beat-anchored). Max callouts per beat configurable via `callouts.max_per_beat` (default 1).
+- Concat all clips, mux voice + music + SFX + SRT + VTT.
 - Closing source-attribution card uses the FLUX-rendered `credits.png` as background.
-- Output: `05_video/final.mp4`.
+- **License attribution file *(added Batch C 2026-05-27)*:** writes `06_metadata/license_attributions.txt` combining music + SFX licence/attribution lines for paste into the YouTube description.
+- Output: `05_video/final.mp4` (or `final_preview.mp4` when `preview_mode`).
 
 ---
 
@@ -647,4 +653,4 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-26 — Batch B landed (preview mode, S08 gate, per-beat re-render, brand-safety review).*
+*This file last updated: 2026-05-27 — Batch C landed (SFX layer, narrow PD path wired+disabled, on-screen callouts, license attribution emission).*

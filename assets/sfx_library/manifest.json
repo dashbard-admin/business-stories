@@ -1,0 +1,176 @@
+{
+  "_comment": "Starter SFX manifest. Each entry is a stub the operator fills in: drop the matching .wav/.mp3 file at the `file` path (or rename `file` to match what you have), confirm the cue, and set license + attribution + source_url. After dropping files in, run `python -m pipeline.tools.scan_sfx_library` to backfill duration_seconds via ffprobe. Sourcing recommendations: freesound.org (CC0 + CC-BY), Pixabay Audio (Pixabay License, no attribution required), YouTube Audio Library (royalty-free). For each cue you only need ONE clip to start; the picker will use it for every matching beat. Add 2-4 variants per cue later for variety. Cues come from S08's sfx_cue enum: typewriter, keyboard, phone_ring, applause, door_slam, traffic_hum, market_bell, newsprint, clock_tick, silence (silence is intentional no-op, no file needed).",
+
+  "sounds": [
+    {
+      "file": "typewriter_01.wav",
+      "cue": "typewriter",
+      "intensity": "sharp",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org search 'typewriter single key'; CC0 preferred"
+    },
+    {
+      "file": "typewriter_02.wav",
+      "cue": "typewriter",
+      "intensity": "medium",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org search 'typewriter keys rapid'; pick a 2-4s clip"
+    },
+    {
+      "file": "keyboard_01.wav",
+      "cue": "keyboard",
+      "intensity": "soft",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'mechanical keyboard typing' OR Pixabay 'keyboard ambient'"
+    },
+    {
+      "file": "phone_ring_office_01.wav",
+      "cue": "phone_ring",
+      "intensity": "medium",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org '1980s desk phone ring two rings' OR YouTube Audio Library"
+    },
+    {
+      "file": "phone_ring_cell_01.wav",
+      "cue": "phone_ring",
+      "intensity": "soft",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'cell phone vibration desk'"
+    },
+    {
+      "file": "applause_boardroom_01.wav",
+      "cue": "applause",
+      "intensity": "soft",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'polite applause small group'"
+    },
+    {
+      "file": "applause_auditorium_01.wav",
+      "cue": "applause",
+      "intensity": "medium",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'auditorium applause 100 people warm'"
+    },
+    {
+      "file": "door_slam_wood_01.wav",
+      "cue": "door_slam",
+      "intensity": "sharp",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'heavy wooden office door slam' OR Pixabay"
+    },
+    {
+      "file": "door_slam_glass_01.wav",
+      "cue": "door_slam",
+      "intensity": "medium",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'glass door close brief reverb'"
+    },
+    {
+      "file": "traffic_hum_city_01.wav",
+      "cue": "traffic_hum",
+      "intensity": "soft",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'city night traffic distant low rumble'; want 4-8s loopable bed"
+    },
+    {
+      "file": "traffic_hum_midtown_01.wav",
+      "cue": "traffic_hum",
+      "intensity": "medium",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'midtown manhattan ambient day'"
+    },
+    {
+      "file": "market_bell_nyse_01.wav",
+      "cue": "market_bell",
+      "intensity": "sharp",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'NYSE bell strike dry' OR 'trading floor opening bell'"
+    },
+    {
+      "file": "market_bell_floor_01.wav",
+      "cue": "market_bell",
+      "intensity": "medium",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'trading floor bell crowd murmur'"
+    },
+    {
+      "file": "newsprint_fold_01.wav",
+      "cue": "newsprint",
+      "intensity": "soft",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'newspaper fold paper rustle'"
+    },
+    {
+      "file": "newsprint_turn_01.wav",
+      "cue": "newsprint",
+      "intensity": "soft",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'newsprint page turn dry'"
+    },
+    {
+      "file": "clock_tick_wall_01.wav",
+      "cue": "clock_tick",
+      "intensity": "soft",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'old wall clock single tick mechanism'"
+    },
+    {
+      "file": "clock_tick_boardroom_01.wav",
+      "cue": "clock_tick",
+      "intensity": "soft",
+      "license": "unknown",
+      "attribution": "",
+      "source_url": "",
+      "duration_seconds": null,
+      "_source_hint": "freesound.org 'boardroom wall clock 4 seconds slow tick'"
+    }
+  ]
+}

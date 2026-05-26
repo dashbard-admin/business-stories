@@ -33,10 +33,13 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 from ..config import load_config
 from ..ffmpeg_builder import (
+    composite_callouts_onto_clip,
     concat_clips,
     get_duration_seconds,
     ken_burns_clip,
 )
+from ..music_library import MusicLibrary
+from ..sfx_library import SFXLibrary
 from ..state import find_episode_workspace
 
 logger = logging.getLogger("hermes.stage.s12")
@@ -170,6 +173,31 @@ def run(episode: dict, queue: dict) -> str | None:
             )
         except Exception as e:
             return f"ken burns render failed for {beat_id}: {e}"
+
+        # ----- callout overlays (Batch C 2026-05-26) -----
+        # When config.callouts.enabled and the beat has a non-empty
+        # `callouts` list (populated by S08 from the writer's inline
+        # [CALLOUT: ...] markers), composite the text over the clip.
+        # Falls back to the raw ken_burns clip on overlay failure.
+        cs = b.get("callouts") or []
+        co_cfg = cfg.callouts
+        if cs and bool(co_cfg.get("enabled", True)):
+            cap = int(co_cfg.get("max_per_beat", 1))
+            cs = cs[:cap]
+            overlay_path = clips_dir / f"{beat_id}_callout.mp4"
+            ok = composite_callouts_onto_clip(
+                clip_path, overlay_path, cs,
+                callout_cfg=co_cfg,
+            )
+            if ok:
+                # Replace the raw clip path with the overlayed version
+                # so concat picks it up.
+                clip_paths.append(overlay_path)
+                continue
+            else:
+                logger.warning("S12 callout compositing failed for %s; "
+                               "using raw clip", beat_id)
+
         clip_paths.append(clip_path)
 
     # ----- optional closing source-attribution card -----
@@ -229,6 +257,15 @@ def run(episode: dict, queue: dict) -> str | None:
         (ws / "05_video" / "captions.vtt").write_text(vtt)
     except Exception as e:
         logger.warning("caption build failed (non-fatal): %s", e)
+
+    # ----- license attribution file (Batch C 2026-05-27) -----
+    # Combined music + SFX attribution lines for paste into the
+    # YouTube description box. Reads mix_manifest.json (S11) and
+    # asks each library for the licence/attribution per file.
+    try:
+        _emit_license_attribution_file(ws)
+    except Exception as e:
+        logger.warning("license attribution emit failed (non-fatal): %s", e)
 
     try:
         final_dur = get_duration_seconds(final_mp4)
@@ -720,3 +757,66 @@ def _ts_srt(seconds: float) -> str:
 
 def _ts_vtt(seconds: float) -> str:
     return _ts_srt(seconds).replace(",", ".")
+
+
+def _emit_license_attribution_file(ws) -> None:
+    """Build the operator-pasteable attribution block for the YouTube
+    description, from mix_manifest.json + the music/SFX library
+    manifests. Output: 06_metadata/license_attributions.txt.
+
+    Added Batch C 2026-05-27 (music ledger landed in Batch A, SFX
+    library landed earlier in this batch).
+    """
+    mix_path = ws / "04_audio" / "mix_manifest.json"
+    if not mix_path.exists():
+        return
+    mix = json.loads(mix_path.read_text())
+
+    music_files = [t.get("file") for t in (mix.get("tracks_used") or [])
+                   if t.get("file")]
+    sfx_files = [s.get("file") for s in (mix.get("sfx_used") or [])
+                 if s.get("file")]
+
+    out_lines: list[str] = ["Music & SFX attributions", "=" * 60, ""]
+
+    if music_files:
+        out_lines.append("Music bed:")
+        report = MusicLibrary().license_report(music_files)
+        for r in report:
+            lic = r.get("license") or "unknown"
+            attr = r.get("attribution") or ""
+            url = r.get("source_url") or ""
+            line = f"  - {r.get('file')}: {lic}"
+            if attr:
+                line += f" — {attr}"
+            if url:
+                line += f" ({url})"
+            out_lines.append(line)
+            if r.get("warning"):
+                out_lines.append(f"      ⚠ {r['warning']}")
+        out_lines.append("")
+
+    if sfx_files:
+        out_lines.append("Sound effects:")
+        report = SFXLibrary().license_report(sfx_files)
+        for r in report:
+            lic = r.get("license") or "unknown"
+            attr = r.get("attribution") or ""
+            url = r.get("source_url") or ""
+            line = f"  - {r.get('file')} [{r.get('cue', '?')}]: {lic}"
+            if attr:
+                line += f" — {attr}"
+            if url:
+                line += f" ({url})"
+            out_lines.append(line)
+            if r.get("warning"):
+                out_lines.append(f"      ⚠ {r['warning']}")
+        out_lines.append("")
+
+    out_lines.append(
+        "Tracks marked `unknown` need operator triage before publish."
+    )
+
+    md_dir = ws / "06_metadata"
+    md_dir.mkdir(parents=True, exist_ok=True)
+    (md_dir / "license_attributions.txt").write_text("\n".join(out_lines))

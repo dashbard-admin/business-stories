@@ -55,6 +55,38 @@ def _estimate_seconds(text: str) -> float:
     return (len(text.split()) / WPM) * 60.0
 
 
+# [CALLOUT: "text"] marker parser (Batch C 2026-05-26).
+# Matches both straight-quoted and curly-quoted forms; case-insensitive
+# on "CALLOUT". Any whitespace around the colon is tolerated.
+_CALLOUT_RE = re.compile(
+    r"\[\s*CALLOUT\s*:\s*[\"“‘]?([^\"”’\]]+)[\"”’]?\s*\]",
+    re.IGNORECASE,
+)
+
+
+def _extract_callouts(text: str, max_per_beat: int) -> tuple[str, list[dict]]:
+    """Strip `[CALLOUT: "TEXT"]` markers from `text` and return
+    (cleaned_text, callouts_list). Each callout dict has:
+      - text: the bracketed string (uppercase-trimmed)
+      - offset_seconds: 0.0 for v1 (beat-anchored)
+    Caps at `max_per_beat`; extras stripped from text but dropped
+    from the list."""
+    matches = list(_CALLOUT_RE.finditer(text))
+    if not matches:
+        return text, []
+    callouts: list[dict] = []
+    for m in matches[:max_per_beat]:
+        raw = m.group(1).strip().strip('"').strip("'")
+        callouts.append({"text": raw, "offset_seconds": 0.0})
+    # Always strip ALL CALLOUT markers from the script_text so
+    # Kokoro doesn't read them aloud — even the ones we dropped
+    # because they exceeded max_per_beat.
+    cleaned = _CALLOUT_RE.sub("", text)
+    # Collapse the empty whitespace the strip leaves behind.
+    cleaned = re.sub(r"[ \t]+", " ", cleaned).strip()
+    return cleaned, callouts
+
+
 def run(episode: dict, queue: dict) -> str | None:
     cfg = load_config()
     llm = LLM(role="writer")
@@ -127,6 +159,33 @@ def run(episode: dict, queue: dict) -> str | None:
         if num is not None and num in beat_texts:
             b["script_text"] = beat_texts[num]
 
+    # ----- CALLOUT markers (Batch C 2026-05-26) -----
+    # The writer may emit inline `[CALLOUT: "$9 BILLION"]` markers
+    # after high-impact concrete-number sentences. Parse them into
+    # a per-beat list `callouts: [{text, offset_seconds}]`, capped
+    # at config.callouts.max_per_beat. The markers are stripped from
+    # script_text so Kokoro doesn't try to read them aloud. S12
+    # composites the bracketed text as a Pillow overlay on the
+    # beat's clip at offset_seconds from beat start (Q-C1: beat-
+    # anchored). Offset for v1 is always 0.0 — voice-anchored is
+    # a future polish that needs S10 word-level timing.
+    callouts_cfg = cfg.callouts
+    callouts_max = int(callouts_cfg.get("max_per_beat", 1))
+    callouts_enabled = bool(callouts_cfg.get("enabled", True))
+    callout_total = 0
+    for b in beats:
+        text = b.get("script_text", "") or ""
+        callouts: list[dict] = []
+        if callouts_enabled:
+            stripped, callouts = _extract_callouts(text, callouts_max)
+            if callouts:
+                b["script_text"] = stripped
+                b["callouts"] = callouts
+                callout_total += len(callouts)
+    if callouts_enabled and callout_total:
+        logger.info("S08 callouts: parsed %d markers across beats",
+                    callout_total)
+
     for b in beats:
         b.setdefault("estimated_seconds", _estimate_seconds(b.get("script_text", "")))
 
@@ -171,10 +230,31 @@ def run(episode: dict, queue: dict) -> str | None:
     USE_IMAGE_REFERENCE = bool(iqa.get("pd_image_reference_enabled", False))
     asset_use_count: dict[int, int] = {}
 
+    # Narrow PD path (Batch C 2026-05-26). When config asset_hunt has
+    # `enabled_visual_intents` set to a non-empty list, only beats whose
+    # visual_intent is in that set are eligible for PD routing. The
+    # default list (founder_portrait, document_or_headline) targets
+    # the two intents where real photos add value without breaking
+    # the comic style. Wired but only meaningful when asset_hunt
+    # master switch is also true (it's false by default, so this list
+    # has no observable effect until both flip on).
+    pd_intent_filter = set(
+        (cfg.raw.get("asset_hunt") or {}).get("enabled_visual_intents") or []
+    )
+    if pd_intent_filter:
+        logger.info("S08 narrow-PD filter: %s", sorted(pd_intent_filter))
+
+    def _pd_eligible_beat(b: dict) -> bool:
+        if not pd_intent_filter:
+            return True
+        return (b.get("visual_intent") or "") in pd_intent_filter
+
     if sims is not None and len(pd_assets):
         import numpy as np
         # Pass 1: direct PD use
         for bi, b in enumerate(beats):
+            if not _pd_eligible_beat(b):
+                continue
             row = sims[bi].copy()
             for ai, count in asset_use_count.items():
                 if count >= MAX_REUSES_PER_ASSET:
@@ -195,6 +275,8 @@ def run(episode: dict, queue: dict) -> str | None:
         # Pass 2: loose-reference (text grounding into FLUX prompt)
         for bi, b in enumerate(beats):
             if "pd_asset_id" in b:
+                continue
+            if not _pd_eligible_beat(b):
                 continue
             row = sims[bi].copy()
             for ai in stash_indices:

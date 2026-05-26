@@ -33,8 +33,10 @@ from ..ffmpeg_builder import (
     audio_post_mix,
     concat_music_with_crossfade,
     get_duration_seconds,
+    render_sfx_track,
 )
 from ..music_library import MusicLibrary
+from ..sfx_library import SFXLibrary
 from ..state import find_episode_workspace
 
 logger = logging.getLogger("hermes.stage.s11")
@@ -98,6 +100,12 @@ def run(episode: dict, queue: dict) -> str | None:
     else:
         logger.info("S11: no tracks picked (mock mode, empty library, or no match) — voice-only mix")
 
+    # ----- Phase 2: SFX track (Batch C 2026-05-26) -----
+    sfx_wav, sfx_picks = _build_sfx_track(
+        ws=ws, episode=episode, cfg=cfg,
+        voice_seconds=voice_seconds, music_dir=music_dir,
+    )
+
     spec = AudioMixSpec(
         voice_wav=voice_path,
         music_wavs=music_wavs,
@@ -116,6 +124,8 @@ def run(episode: dict, queue: dict) -> str | None:
         voice_dynaudnorm_gauss=int(ml_cfg.get("voice_dynaudnorm_gauss", 11)),
         voice_dynaudnorm_max_gain=float(ml_cfg.get("voice_dynaudnorm_max_gain", 15.0)),
         music_start_offset_seconds=float(ml_cfg.get("music_start_offset_seconds", 20.0)),
+        sfx_wav=sfx_wav,
+        sfx_gain_db=0.0,   # gain is baked into the rendered sfx_track.wav
     )
 
     try:
@@ -149,14 +159,116 @@ def run(episode: dict, queue: dict) -> str | None:
             }
             for p in picks
         ],
+        "sfx_used": [
+            {
+                "file": sp["file"],
+                "cue": sp["cue"],
+                "start_seconds": sp["start_seconds"],
+                "gain_db": sp["gain_db"],
+            }
+            for sp in sfx_picks
+        ],
         "music_start_offset_seconds": spec.music_start_offset_seconds,
         "lufs_target": spec.lufs_target,
         "music_gain_db": spec.music_gain_db,
     }
     (ws / "04_audio" / "mix_manifest.json").write_text(json.dumps(mix_manifest, indent=2))
-    logger.info("S11 complete: final_mix.wav (%d music tracks, voice-only=%s)",
-                len(picks), not music_wavs)
+    logger.info("S11 complete: final_mix.wav (%d music tracks, %d SFX cues, "
+                "voice-only=%s)",
+                len(picks), len(sfx_picks), not music_wavs)
     return None
+
+
+# ----------------------------------------------------------------------
+# S11 Phase 2: SFX track (Batch C 2026-05-26)
+# ----------------------------------------------------------------------
+
+def _build_sfx_track(
+    *,
+    ws,
+    episode: dict,
+    cfg,
+    voice_seconds: float,
+    music_dir,
+) -> tuple[Path | None, list[dict]]:
+    """Build sfx_track.wav with all SFX cues placed at their beat-start
+    offsets, gain pre-applied. Returns (path, sfx_picks) where path
+    is None when SFX is disabled / no matches / no library.
+
+    Per Q-C1 (confirmed): beat-anchored offsets. We read
+    voice_timing.json (emitted by S10) for accurate beat-start
+    timestamps. If voice_timing.json is missing, we fall back to
+    cumulative estimated_seconds from beat_sheet.json.
+    """
+    sfx_cfg = cfg.sfx_library
+    if not sfx_cfg.get("enabled", False):
+        return None, []
+
+    sfx_lib = SFXLibrary()
+
+    # Read beat sheet + voice timing.
+    beat_sheet_path = ws / "02_script" / "beat_sheet.json"
+    if not beat_sheet_path.exists():
+        logger.info("S11 SFX: no beat_sheet.json; skipping SFX")
+        return None, []
+    beat_sheet = json.loads(beat_sheet_path.read_text())
+    beats = beat_sheet.get("beats", [])
+
+    voice_timing_path = ws / "04_audio" / "voice_timing.json"
+    starts_by_id: dict[str, float] = {}
+    if voice_timing_path.exists():
+        try:
+            vt = json.loads(voice_timing_path.read_text())
+            for b in vt.get("beats", []):
+                bid = b.get("beat_id", "")
+                if bid:
+                    starts_by_id[bid] = float(b.get("start_seconds", 0.0))
+        except Exception as e:
+            logger.warning("voice_timing.json unreadable: %s", e)
+
+    # Build the cue list.
+    cues: list[dict] = []
+    sfx_picks_meta: list[dict] = []
+    cumulative = 0.0
+    for b in beats:
+        bid = b.get("beat_id", "")
+        cue = (b.get("sfx_cue") or "").strip().lower()
+        # Beat start: prefer voice_timing (exact); else cumulative
+        # estimated_seconds (approximate).
+        start = starts_by_id.get(bid, cumulative)
+        cumulative += float(b.get("estimated_seconds", 0.0))
+
+        if not cue or cue == "silence":
+            continue
+        pick = sfx_lib.pick_cue(cue, beat_id=bid)
+        if pick is None:
+            continue
+        cues.append({
+            "path": pick.path,
+            "start_seconds": start,
+            "gain_db": pick.gain_db_hint,
+        })
+        sfx_picks_meta.append({
+            "file": pick.path.name,
+            "cue": pick.cue,
+            "start_seconds": round(start, 3),
+            "gain_db": pick.gain_db_hint,
+        })
+
+    if not cues:
+        logger.info("S11 SFX: no matching cues found in library; skipping")
+        return None, []
+
+    sfx_path = music_dir / "sfx_track.wav"
+    ok = render_sfx_track(
+        cues, sfx_path,
+        total_seconds=voice_seconds,
+    )
+    if not ok:
+        logger.warning("S11 SFX: render_sfx_track failed; mixing without SFX")
+        return None, []
+    logger.info("S11 SFX: %d cues placed in sfx_track.wav", len(cues))
+    return sfx_path, sfx_picks_meta
 
 
 def _episode_keywords(incident: dict) -> list[str]:
