@@ -159,11 +159,50 @@ def run(episode: dict, queue: dict) -> str | None:
                 _persist()
                 continue
 
-        # Render-and-judge loop
+        # Render-and-judge loop, with attempt-level checkpointing.
+        #
+        # `attempts_log` is the persisted history of completed
+        # attempts for THIS beat. Each entry is
+        #   {"attempt": int, "seed": int, "file": str (basename),
+        #    "verdict": dict | None}
+        # written to disk AFTER the per-attempt VLM verdict but
+        # BEFORE the next attempt starts. Survives any kill — next
+        # invocation re-hydrates the attempts list and resumes from
+        # `len(attempts_log)`, instead of re-rendering attempt 0.
+        attempts_log: list[dict] = list(b.get("attempts_log") or [])
+        already_attempted = len(attempts_log)
         attempts: list[tuple[Path, ImageVerdict | None, int]] = []
         passing: tuple[Path, ImageVerdict | None, int] | None = None
 
-        for attempt in range(max_attempts):
+        for record in attempts_log:
+            p = flux_dir / record.get("file", "")
+            if not p.exists() or p.stat().st_size < 1000:
+                # Checkpointed image was cleaned up between runs;
+                # treat the attempt as if it never happened.
+                continue
+            seed = int(record.get("seed") or 0)
+            v_dict = record.get("verdict") or None
+            verdict_obj = _verdict_from_dict(v_dict) if v_dict else None
+            attempts.append((p, verdict_obj, seed))
+            if verdict_obj is None:
+                # Past run accepted this without judgment (VLM was
+                # unavailable). Keep it as the passing candidate.
+                passing = (p, None, seed)
+                break
+            if _is_good_enough(verdict_obj, strict_borderline):
+                passing = (p, verdict_obj, seed)
+                break
+
+        if already_attempted:
+            logger.info(
+                "S09 %s: resuming with %d checkpointed attempt(s)%s",
+                beat_id, already_attempted,
+                " (already passing)" if passing else "",
+            )
+
+        for attempt in range(already_attempted, max_attempts):
+            if passing is not None:
+                break
             seed_offset = attempt * 1000
             seed_used = compute_seed(fr["prompt"], seed_offset=seed_offset)
             attempt_target = flux_dir / f"{beat_id}_a{attempt}.png"
@@ -180,10 +219,35 @@ def run(episode: dict, queue: dict) -> str | None:
             )
             if not chosen or not chosen.exists():
                 logger.warning("S09 %s render attempt %d failed", beat_id, attempt + 1)
+                # Still record the failed attempt so a kill mid-loop
+                # doesn't cause infinite re-rendering of the same
+                # failing seed on the next invocation.
+                attempts_log.append({
+                    "attempt": attempt,
+                    "seed": seed_used,
+                    "file": None,
+                    "verdict": None,
+                    "result": "render_failed",
+                })
+                b["attempts_log"] = attempts_log
+                _persist()
                 continue
 
             verdict = vlm.critique_image(chosen, fr["prompt"]) if vlm else None
             attempts.append((chosen, verdict, seed_used))
+
+            # Checkpoint the attempt to disk BEFORE deciding whether
+            # to retry. If a kill happens between this verdict and
+            # the next render starting, the next invocation finds
+            # this attempt in attempts_log and resumes.
+            attempts_log.append({
+                "attempt": attempt,
+                "seed": seed_used,
+                "file": chosen.name,
+                "verdict": verdict.to_dict() if verdict else None,
+            })
+            b["attempts_log"] = attempts_log
+            _persist()
 
             if verdict is None:
                 passing = (chosen, None, seed_used)
@@ -316,6 +380,25 @@ _MALFORMED_TEXT_KEYWORDS = (
     "garbled writing", "garbled letters", "garbled signage",
     "garbled lettering", "unintelligible text",
 )
+
+
+def _verdict_from_dict(d: dict) -> ImageVerdict | None:
+    """Re-hydrate an ImageVerdict from a persisted dict in
+    attempts_log. Returns None if the dict shape is broken — the
+    caller then treats the attempt as 'unjudged'."""
+    if not isinstance(d, dict):
+        return None
+    try:
+        return ImageVerdict(
+            score=int(d.get("score", 5)),
+            prompt_match=int(d.get("prompt_match", 5)),
+            anatomy_ok=bool(d.get("anatomy_ok", True)),
+            artifacts=[str(a) for a in (d.get("artifacts") or [])],
+            verdict=str(d.get("verdict", "unjudged")).lower(),
+            reasoning=str(d.get("reasoning", "")),
+        )
+    except (ValueError, TypeError):
+        return None
 
 
 def _has_malformed_text(verdict: ImageVerdict) -> tuple[bool, list[str]]:
