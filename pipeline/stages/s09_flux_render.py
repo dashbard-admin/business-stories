@@ -136,6 +136,8 @@ def run(episode: dict, queue: dict) -> str | None:
 
         if has_image and not existing_qa and vlm:
             verdict = vlm.critique_image(out_path, fr["prompt"])
+            if verdict:
+                _log_verdict(beat_id, "existing", 0, 0, verdict)
             if verdict and _is_good_enough(verdict, strict_borderline):
                 b["flux_asset_path"] = str(out_path.relative_to(ws))
                 b["image_qa"] = {
@@ -143,8 +145,6 @@ def run(episode: dict, queue: dict) -> str | None:
                     "attempts": 0,
                     "seed": compute_seed(fr["prompt"], seed_offset=0),
                 }
-                logger.info("S09 %s existing image QA: %s (score=%d match=%d)",
-                            beat_id, verdict.verdict, verdict.score, verdict.prompt_match)
                 _persist()
                 continue
             if verdict:
@@ -189,9 +189,7 @@ def run(episode: dict, queue: dict) -> str | None:
                 passing = (chosen, None, seed_used)
                 break
 
-            logger.info("S09 %s a%d (seed=%d): verdict=%s score=%d match=%d",
-                        beat_id, attempt + 1, seed_used, verdict.verdict,
-                        verdict.score, verdict.prompt_match)
+            _log_verdict(beat_id, "a", attempt + 1, seed_used, verdict)
 
             if _is_good_enough(verdict, strict_borderline):
                 passing = (chosen, verdict, seed_used)
@@ -303,6 +301,46 @@ def run(episode: dict, queue: dict) -> str | None:
     if failed > 0 and failed > rendered * 0.1:
         return f"FLUX rendering failed for {failed}/{rendered + failed} beats"
     return None
+
+
+# ---------------- VLM verdict logging ----------------
+
+def _log_verdict(
+    beat_id: str,
+    label: str,
+    attempt_num: int,
+    seed: int,
+    verdict: ImageVerdict,
+) -> None:
+    """Emit the VLM's full assessment of one image attempt.
+
+    Three lines per attempt:
+      - one-line summary  (verdict + score + match + anatomy)
+      - artifacts list    (only if non-empty)
+      - reasoning prose   (only if non-empty)
+
+    `label` distinguishes call sites in the log:
+      - "a"        — per-attempt render in the main loop
+      - "existing" — VLM judging an on-disk image without re-rendering
+
+    Splitting onto three lines makes grep-by-purpose trivial:
+        grep "artifacts:"   logs/orch.YYYY-MM-DD.log
+        grep "reasoning:"   logs/orch.YYYY-MM-DD.log
+    and keeps the summary line short enough to scan in a tail.
+    """
+    if label == "a":
+        head = f"S09 {beat_id} a{attempt_num} (seed={seed})"
+    else:
+        head = f"S09 {beat_id} {label}"
+    logger.info(
+        "%s: verdict=%s score=%d match=%d anatomy=%s",
+        head, verdict.verdict, verdict.score, verdict.prompt_match,
+        "ok" if verdict.anatomy_ok else "BAD",
+    )
+    if verdict.artifacts:
+        logger.info("%s artifacts: %s", head, verdict.artifacts)
+    if verdict.reasoning:
+        logger.info("%s reasoning: %s", head, verdict.reasoning)
 
 
 # ---------------- Grok text-correction helpers ----------------
