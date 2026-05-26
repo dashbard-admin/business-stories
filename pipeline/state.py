@@ -165,6 +165,55 @@ def enqueue_episodes(n: int) -> list[str]:
     return new_ids
 
 
+def enqueue_manual_episode(
+    incident: dict[str, Any],
+    *,
+    archetype: str | None = None,
+    narrator: str | None = None,
+    visual_style: str | None = None,
+    skip_validation: bool = False,
+) -> str:
+    """Add ONE episode record with the incident pre-filled by the
+    operator (not the LLM). S01 detects `incident_origin == "manual"`
+    on the record and short-circuits the LLM pick — it still runs
+    A/N/V assignment (unless any of the three is pinned here) and
+    optionally the demand-validation gate (skipped iff
+    skip_validation=True).
+
+    Returns the new episode ID.
+
+    The caller (the orchestrator CLI) is responsible for schema-
+    validating `incident` before reaching here. This function only
+    enforces that company_name is non-empty so the queue stays
+    consistent.
+    """
+    name = (incident.get("company_name") or "").strip()
+    if not name:
+        raise ValueError("manual incident: company_name is required")
+
+    queue = load_queue()
+    existing = {e["id"] for e in queue["episodes"]}
+    idx = 1
+    while f"EP_{idx:03d}" in existing:
+        idx += 1
+    eid = f"EP_{idx:03d}"
+
+    rec = new_episode_record(eid)
+    rec["incident"] = dict(incident)
+    rec["incident_origin"] = "manual"
+    rec["skip_validation"] = bool(skip_validation)
+    if archetype:
+        rec["archetype_pin"] = archetype
+    if narrator:
+        rec["narrator_pin"] = narrator
+    if visual_style:
+        rec["visual_style_pin"] = visual_style
+
+    queue["episodes"].append(rec)
+    save_queue(queue)
+    return eid
+
+
 def next_pending_episode(queue: dict[str, Any]) -> tuple[dict[str, Any], str] | None:
     """Find next episode with a runnable stage. Returns (episode, stage_id) or None."""
     for ep in queue["episodes"]:

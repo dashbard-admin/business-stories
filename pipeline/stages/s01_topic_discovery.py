@@ -44,7 +44,6 @@ logger = logging.getLogger("hermes.stage.s01")
 
 def run(episode: dict, queue: dict) -> str | None:
     cfg = load_config()
-    llm = LLM(role="writer")
     browser = Browser()
     tv_cfg = cfg.topic_validation
 
@@ -52,6 +51,16 @@ def run(episode: dict, queue: dict) -> str | None:
     current_year = datetime.now(timezone.utc).year
     max_year = current_year - 5  # business stories cool off faster than disasters
 
+    # Operator-injected topic short-circuit. When `--inject-topic` was
+    # used to queue this episode, S01 skips the LLM call and the
+    # rolling-window rotation hints entirely. We still run dedup, the
+    # country normaliser, and (unless --no-validate was given) the
+    # SearXNG saturation gate — those are about catching mistakes, not
+    # about picking the topic.
+    if episode.get("incident_origin") == "manual":
+        return _run_manual(episode, queue, browser, tv_cfg, used)
+
+    llm = LLM(role="writer")
     template = (cfg.prompts_dir / "topic_discovery.txt").read_text()
 
     max_retries = cfg.orchestrator["max_topic_discovery_retries"]
@@ -186,15 +195,112 @@ def run(episode: dict, queue: dict) -> str | None:
         seed=hash(incident["company_name"]) & 0xffff,
     )
 
+    _finalise_pick(episode, queue, incident, assignment, last_signals,
+                   origin="llm")
+    return None
+
+
+# ----------------------------------------------------------------------
+# Manual-injection path (operator pre-filled the incident via
+# `hermes-orchestrator --inject-topic <file.json>`)
+# ----------------------------------------------------------------------
+
+def _run_manual(
+    episode: dict,
+    queue: dict,
+    browser: Browser,
+    tv_cfg: dict,
+    used: set[str],
+) -> str | None:
+    """Handle an operator-injected episode. The incident JSON has
+    already been schema-validated at inject time; this function still
+    runs the cheap dedup + country-normalisation gates, optionally
+    runs the SearXNG demand validation (skipped iff
+    episode.skip_validation is True), and picks A/N/V — honoring any
+    `archetype_pin` / `narrator_pin` / `visual_style_pin` set on the
+    episode record.
+    """
+    incident = dict(episode.get("incident") or {})
+    name = (incident.get("company_name") or "").strip()
+    if not name:
+        return "manual injection: company_name missing on episode record"
+
+    # Re-run dedup. The operator might have queued the same topic
+    # twice across runs without realising, or used_topics may have
+    # picked it up via the auto-pilot in the meantime. Better to
+    # fail loudly here than render a duplicate.
+    if topic_already_used(name):
+        return (
+            f"manual injection: {name!r} already in used_topics.json — "
+            f"clear it manually if you intend to re-cover this topic"
+        )
+
+    # Normalise country so the rolling-window non-US accounting
+    # treats it the same as auto picks.
+    incident["hq_country"] = _normalise_country(incident.get("hq_country"))
+
+    signals: dict = {}
+    if not episode.get("skip_validation"):
+        verdict = validate_candidate(incident, tv_cfg, browser)
+        signals = verdict.signals
+        if not verdict.ok:
+            return (
+                f"manual injection demand-gate failed: {verdict.reason}. "
+                f"Re-run with --no-validate if you want to render this "
+                f"topic anyway."
+            )
+        incident["validation_signals"] = verdict.signals
+    else:
+        incident["validation_signals"] = {"skipped": True,
+                                          "reason": "--no-validate"}
+
+    rolling = queue.get("rolling_window") or {}
+    base = pick_assignment(
+        rolling,
+        seed=hash(incident["company_name"]) & 0xffff,
+    )
+    # Honor per-episode pins. The CLI strips these from `incident` and
+    # parks them on the episode record so they don't pollute the
+    # incident-shape that downstream stages read.
+    arch = episode.get("archetype_pin") or base.archetype
+    narr = episode.get("narrator_pin") or base.narrator
+    vis = episode.get("visual_style_pin") or base.visual_style
+
+    from ..constraints import Assignment   # local import to keep top
+    assignment = Assignment(archetype=arch, narrator=narr, visual_style=vis)
+
+    _finalise_pick(episode, queue, incident, assignment, signals,
+                   origin="manual")
+    return None
+
+
+# ----------------------------------------------------------------------
+# Shared post-acceptance bookkeeping (LLM and manual paths)
+# ----------------------------------------------------------------------
+
+def _finalise_pick(
+    episode: dict,
+    queue: dict,
+    incident: dict,
+    assignment,
+    signals: dict,
+    *,
+    origin: str,
+) -> None:
+    """Persist incident.json + assignment.json, update the queue
+    record, push the rolling-window state, and add the topic to the
+    used-topics set. Called by both run() (LLM path) and
+    _run_manual()."""
     slug = _slugify(incident["company_name"])
     logger.info(
-        "selected: %s [%s] (year=%s, story=%s, hero=%s, "
+        "selected [%s]: %s [%s] (year=%s, story=%s, hero=%s, "
         "archetype=%s, narrator=%s, style=%s, signals=%s)",
+        origin,
         incident["company_name"], incident.get("hq_country", "??"),
         incident.get("year_anchor"), incident.get("story_kind"),
         (incident.get("hero") or "")[:60],
         assignment.archetype, assignment.narrator, assignment.visual_style,
-        last_signals,
+        signals,
     )
 
     ws = episode_workspace(episode["id"], slug)
@@ -206,6 +312,7 @@ def run(episode: dict, queue: dict) -> str | None:
             "archetype": assignment.archetype,
             "narrator": assignment.narrator,
             "visual_style": assignment.visual_style,
+            "origin": origin,
         }, indent=2)
     )
 
@@ -231,7 +338,6 @@ def run(episode: dict, queue: dict) -> str | None:
     )
 
     add_used_topic(incident["company_name"])
-    return None
 
 
 # ----------------------------------------------------------------------

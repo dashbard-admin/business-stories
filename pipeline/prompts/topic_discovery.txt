@@ -45,7 +45,7 @@ an existing audience signal:
 - The topic should NOT already be saturated to death. A few dozen
   competing videos is healthy demand. Hundreds means the niche is
   closed off to new entrants. The external system also rejects any
-  topic returning more than 50 distinct video URLs. So: well-known
+  topic returning more than 100 distinct video URLs. So: well-known
   enough that people search for it, but not so picked-over that the
   top results are all 100k-view explainers from 2019.
 - Prefer companies/founders with RECENT NEWS ACTIVITY where

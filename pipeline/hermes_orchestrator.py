@@ -23,6 +23,7 @@ import traceback
 from .config import load_config
 from .state import (
     enqueue_episodes,
+    enqueue_manual_episode,
     file_lock,
     load_queue,
     mark_stage_done,
@@ -163,6 +164,26 @@ def cli() -> int:
     parser = argparse.ArgumentParser(prog="hermes-orchestrator")
     parser.add_argument("--enqueue", type=int, metavar="N",
                         help="add N empty episode records to the queue and exit")
+    parser.add_argument(
+        "--inject-topic", metavar="FILE",
+        help=(
+            "queue ONE episode with a manually-authored incident JSON. "
+            "Bypasses the writer LLM and the rolling-window rotation "
+            "hints. Optional pins for archetype/narrator/visual_style "
+            "can live in the JSON; otherwise S01 picks them via the "
+            "cooldown engine. The demand-validation gate still runs "
+            "unless --no-validate is also given."
+        ),
+    )
+    parser.add_argument(
+        "--no-validate", action="store_true",
+        help=(
+            "with --inject-topic: skip the SearXNG demand-validation "
+            "gate. Use when you genuinely want to cover a niche topic "
+            "below the min_youtube_results floor (a personal-interest "
+            "story the channel cares about regardless of search demand)."
+        ),
+    )
     parser.add_argument("--status", action="store_true",
                         help="print queue status and exit")
     parser.add_argument("-v", "--verbose", action="count", default=0)
@@ -175,16 +196,110 @@ def cli() -> int:
         print(f"enqueued {len(ids)}: {', '.join(ids)}")
         return 0
 
+    if args.inject_topic:
+        return _inject_topic_cmd(args.inject_topic, skip_validation=args.no_validate)
+
     if args.status:
         q = load_queue()
         for ep in q["episodes"]:
             inc = (ep.get("incident") or {}).get("company_name", "<no topic>")
+            origin = " (manual)" if ep.get("incident_origin") == "manual" else ""
             blocked = "BLOCKED" if ep.get("blockers") else ""
             print(f"{ep['id']:8s}  stage={ep['current_stage']:4s}  "
-                  f"{blocked:7s}  {inc}")
+                  f"{blocked:7s}  {inc}{origin}")
         return 0
 
     return run_one_invocation()
+
+
+# ----------------------------------------------------------------------
+# Manual-topic injection (Option B from the design doc)
+# ----------------------------------------------------------------------
+
+# The schema fields the operator must supply in the injection JSON.
+# These match what S02-S12 actually read off `incident` downstream —
+# if any are missing, later stages would crash with a KeyError or
+# produce nonsense (e.g. blank year_anchor breaks the recency hints
+# in the script-generation prompt). Better to fail loudly at inject
+# time than ten stages later.
+_MANUAL_REQUIRED_FIELDS = (
+    "company_name",
+    "founder_or_protagonist",
+    "year_anchor",
+    "story_kind",
+    "hq_country",
+    "hero",
+    "conflict",
+)
+
+# Optional pins. If present in the JSON they go onto the episode
+# record as `archetype_pin` / `narrator_pin` / `visual_style_pin` and
+# S01 honors them; otherwise S01 picks via the cooldown engine.
+_MANUAL_OPTIONAL_PINS = ("archetype", "narrator", "visual_style")
+
+
+def _inject_topic_cmd(path_str: str, *, skip_validation: bool) -> int:
+    """CLI entry point for --inject-topic. Reads + validates the JSON,
+    then enqueues a manual episode. Prints the new episode ID and the
+    next stage that will run."""
+    import json
+    from pathlib import Path
+
+    path = Path(path_str).expanduser().resolve()
+    if not path.exists():
+        print(f"--inject-topic: file not found: {path}", file=sys.stderr)
+        return 2
+
+    try:
+        raw = json.loads(path.read_text())
+    except json.JSONDecodeError as e:
+        print(f"--inject-topic: JSON parse error: {e}", file=sys.stderr)
+        return 2
+
+    if not isinstance(raw, dict):
+        print("--inject-topic: top-level JSON must be an object", file=sys.stderr)
+        return 2
+
+    # Split incident fields from pin fields so we don't pollute the
+    # incident dict with assignment metadata.
+    pins = {k: raw.pop(k) for k in _MANUAL_OPTIONAL_PINS if k in raw}
+
+    missing = [f for f in _MANUAL_REQUIRED_FIELDS if not raw.get(f)]
+    if missing:
+        print(
+            "--inject-topic: missing required field(s): "
+            + ", ".join(missing)
+            + ". Required: " + ", ".join(_MANUAL_REQUIRED_FIELDS),
+            file=sys.stderr,
+        )
+        return 2
+
+    if not isinstance(raw.get("year_anchor"), int):
+        print("--inject-topic: year_anchor must be an integer", file=sys.stderr)
+        return 2
+
+    try:
+        eid = enqueue_manual_episode(
+            incident=raw,
+            archetype=pins.get("archetype"),
+            narrator=pins.get("narrator"),
+            visual_style=pins.get("visual_style"),
+            skip_validation=skip_validation,
+        )
+    except ValueError as e:
+        print(f"--inject-topic: {e}", file=sys.stderr)
+        return 2
+
+    pin_str = ""
+    if pins:
+        pin_str = " pins=" + ",".join(f"{k}={v}" for k, v in pins.items())
+    val_str = " (validation skipped)" if skip_validation else ""
+    print(
+        f"injected {eid}: {raw['company_name']} "
+        f"[{raw.get('hq_country', '??')}, {raw.get('year_anchor')}, "
+        f"{raw.get('story_kind')}]{pin_str}{val_str}"
+    )
+    return 0
 
 
 if __name__ == "__main__":

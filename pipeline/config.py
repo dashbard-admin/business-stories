@@ -139,7 +139,7 @@ class Config:
         defaults = {
             "enabled": True,
             "min_youtube_results": 3,
-            "max_youtube_results": 50,
+            "max_youtube_results": 100,
             "prefer_decline_stories": True,
             "non_us_ratio": 0.33,
             "non_us_ratio_lookback": 6,
