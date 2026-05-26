@@ -65,6 +65,7 @@ class Grok:
         self.base_url: str = (gc.get("base_url") or "").rstrip("/")
         self.endpoint_path: str = gc.get("endpoint_path", "/images/edits")
         self.timeout: int = int(gc.get("timeout_seconds", 180))
+        self.resolution: str = gc.get("resolution", "2k")
         self.aspect_ratio: str = gc.get("aspect_ratio", "16:9")
         self._mock = cfg.mock_mode
 
@@ -101,38 +102,43 @@ class Grok:
 
     # ------------------------------------------------------------------
 
-    def correct_image(
+    def regenerate_from_prompt(
         self,
-        image_path: Path,
         prompt: str,
         out_path: Path,
     ) -> Path | None:
-        """Send `image_path` + `prompt` to xAI's image-edit endpoint,
-        write the corrected image to `out_path`. Returns `out_path`
-        on success, `None` on any failure.
+        """Ask Grok to generate an image from `prompt` and write the
+        result to `out_path`. Returns `out_path` on success, `None`
+        on any failure.
+
+        We send only the prompt — no reference image, no editing
+        directives. Grok produces a fresh image based on the same
+        FLUX-generated prompt that the orchestrator originally
+        rendered. The expectation is that Grok renders text more
+        reliably than FLUX, so beats with malformed text in the
+        FLUX output get a clean regeneration.
 
         Request shape per xAI docs:
-            POST /v1/images/edits
+            POST /v1/images/generations
             {
               "model": "<grok-imagine-image | -quality>",
               "prompt": "...",
-              "image": { "url": "data:image/png;base64,...",
-                         "type": "image_url" },
-              "n": 1,
-              "aspect_ratio": "16:9"
+              "resolution": "2k",
+              "aspect_ratio": "16:9",
+              "n": 1
             }
 
         Response:
             { "data": [ { "url": "https://..." }, ... ] }
 
         _write_response_image handles both the URL response (xAI's
-        actual return shape) and the OpenAI-style base64 response
+        actual return shape) and an OpenAI-style base64 response
         (in case xAI ever adds it as an option).
         """
         if self._mock:
-            return self._mock_correct(image_path, out_path)
+            return self._mock_correct(out_path)
         if not self.available:
-            logger.warning("grok unavailable (%s); skipping correction",
+            logger.warning("grok unavailable (%s); skipping regeneration",
                            self.unavailability_reason())
             return None
 
@@ -142,46 +148,35 @@ class Grok:
             "Content-Type": "application/json",
         }
 
-        try:
-            with image_path.open("rb") as fh:
-                image_b64 = base64.b64encode(fh.read()).decode("ascii")
-        except OSError as e:
-            logger.warning("grok: cannot read %s: %s", image_path, e)
-            return None
-
         payload = {
             "model": self.model,
             "prompt": prompt,
-            "image": {
-                "url": f"data:image/png;base64,{image_b64}",
-                "type": "image_url",
-            },
-            "n": 1,
+            "resolution": self.resolution,
             "aspect_ratio": self.aspect_ratio,
+            "n": 1,
         }
 
         try:
             r = requests.post(url, headers=headers, json=payload,
                               timeout=self.timeout)
         except requests.RequestException as e:
-            logger.warning("grok HTTP error for %s: %s",
-                           image_path.name, e)
+            logger.warning("grok HTTP error -> %s: %s", out_path.name, e)
             return None
 
         if r.status_code == 200:
             if self._write_response_image(r, out_path):
-                logger.info("grok corrected %s -> %s "
-                            "(model=%s, aspect=%s)",
-                            image_path.name, out_path.name,
-                            self.model, self.aspect_ratio)
+                logger.info("grok regenerated -> %s "
+                            "(model=%s, resolution=%s, aspect=%s)",
+                            out_path.name, self.model,
+                            self.resolution, self.aspect_ratio)
                 return out_path
             logger.warning("grok 200 but response body unrecognized "
                            "for %s (first 300 chars: %s)",
-                           image_path.name, (r.text or "")[:300])
+                           out_path.name, (r.text or "")[:300])
             return None
 
         logger.warning("grok %d for %s; body: %s",
-                       r.status_code, image_path.name,
+                       r.status_code, out_path.name,
                        (r.text or "")[:500])
         return None
 
@@ -221,24 +216,22 @@ class Grok:
                 return False
         return False
 
-    def _mock_correct(self, src: Path, out: Path) -> Path | None:
-        """Mock-mode 'correction' — copy the source pixels into out
-        and tint the borders slightly so a human inspecting the
-        output can tell which file went through the (mock) Grok pass.
+    def _mock_correct(self, out: Path) -> Path | None:
+        """Mock-mode regeneration — render a solid colour panel with a
+        green border so a human inspecting the output can tell which
+        file went through the (mock) Grok pass.
         """
         try:
             from PIL import Image, ImageDraw
-            with Image.open(src) as bg:
-                img = bg.convert("RGB").copy()
+            img = Image.new("RGB", (1920, 1080), (30, 60, 120))
             d = ImageDraw.Draw(img)
-            # 6-px green border to flag mock-Grok output visually
             d.rectangle([0, 0, img.width - 1, img.height - 1],
                         outline=(40, 200, 80), width=6)
             out.parent.mkdir(parents=True, exist_ok=True)
             img.save(out, "PNG")
             return out
         except Exception as e:
-            logger.warning("grok mock correction failed: %s", e)
+            logger.warning("grok mock regeneration failed: %s", e)
             return None
 
 
