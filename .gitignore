@@ -19,10 +19,22 @@ assets/music_library/*.flac
 assets/music_library/*.aiff
 assets/music_library/*.ogg
 assets/music_library/*.m4a
+assets/sfx_library/*.wav
+assets/sfx_library/*.mp3
+assets/sfx_library/*.flac
+assets/sfx_library/*.aiff
+assets/sfx_library/*.ogg
+assets/sfx_library/*.m4a
 assets/generic_stock/*.png
 assets/generic_stock/*.jpg
 assets/generic_stock/*.jpeg
 assets/generic_stock/*.webp
+# Operator channel branding — the binary itself is not in the code
+# repo. README.txt remains tracked so the slot exists.
+assets/branding/*.png
+assets/branding/*.jpg
+assets/branding/*.jpeg
+assets/branding/*.webp
 
 # Secrets — keep API keys out of git. .env at the project root is
 # loaded into os.environ at package import time. Copy .env.example

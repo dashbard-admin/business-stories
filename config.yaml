@@ -40,10 +40,18 @@ models:
 
 production:
   target_episodes_per_week: 2
-  target_duration_seconds: 750      # 12.5 min midpoint (10-15 min target)
-  duration_tolerance_seconds: 150
-  target_words: 2000
-  word_count_tolerance: 200
+  target_duration_seconds: 1100     # 18.3 min midpoint (15-22 min target)
+                                    # (bumped 2026-05-26 — Batch A. YouTube
+                                    # algo since mid-2024 rewards longer
+                                    # videos: more mid-roll ad slots and
+                                    # stronger session-watch-time signal.
+                                    # Modern MBA / Business Casual / Cold
+                                    # Fusion all pivoted to 18-25 min in
+                                    # 2024-25.)
+  duration_tolerance_seconds: 210   # +/- 3.5 min around the 18.3-min mid
+  target_words: 2300                # 120wpm × 18 min ≈ 2160 spoken words;
+                                    # +160 buffer for SFX/music pauses.
+  word_count_tolerance: 250
   wpm_effective: 120                # Anchored to script_generate.txt
                                     # which schedules Act 0-5 hook
                                     # cadence at 120 wpm. Changing this
@@ -99,13 +107,20 @@ production:
 quality_gates:
   min_verified_facts: 5
   min_pd_assets: 3
-  min_total_beats: 50
-  max_total_beats: 70
+  # Beat-count window — bumped 2026-05-26 (Batch A) to match the
+  # 18-min target length. The 7-act template distributes beats as:
+  # Act 0 1-2 / Act 1 12 / Act 2 11 / Act 3 16 / Act 3.5 9 /
+  # Act 4 12 / Act 5 5-6 → ~70 mid, up to ~95 for longer scripts.
+  min_total_beats: 65
+  max_total_beats: 95
   min_sources: 8
   max_sources: 50                  # hard cap for S2 inventory size
   min_tier1_sources: 1              # ≥1 primary-source filing / Wikipedia anchor
-  min_script_words: 1900            # 2000 ± ~15%
-  max_script_words: 2600
+  # Script-word window — bumped 2026-05-26 (Batch A) for 18-min target.
+  # 120wpm × 18min ≈ 2160 spoken; we widen to 1900-2700 to allow
+  # natural variance across narrators and story_kinds.
+  min_script_words: 1900
+  max_script_words: 2700
   audio_lufs_target: -14
   audio_lufs_min: -15
   audio_lufs_max: -13
@@ -121,6 +136,88 @@ orchestrator:
   stale_lock_hours: 6
   max_topic_discovery_retries: 5
   per_invocation_max_runtime_seconds: 5400   # 90 min cap per cron run
+
+  # In-flight gate after S08 (Batch B 2026-05-26). When true, S08
+  # completes the beat-sheet write to disk then marks the stage
+  # `needs_human` with a summary table. Operator reviews
+  # 02_script/beat_sheet.json (and the beat distribution by
+  # visual_intent) and runs:
+  #   python -m pipeline.hermes_orchestrator --approve <ep_id>
+  # to clear the gate and advance to S09. Useful for the first few
+  # episodes to build operator intuition for the beat-distribution
+  # quality; flip back to false once trust is established (the
+  # auto-pilot is the value).
+  gate_at_S08: false
+
+visual_brand_safety:
+  # Post-S09 VLM pass (Batch F 2026-05-28). For every rendered beat,
+  # the VLM is asked whether the panel is brand-safe and topic-
+  # coherent for the company / era / story_kind. Catches the things
+  # the per-image critique misses:
+  #   - hacking-coded panels in non-crime stories (the Pets.com
+  #     review video had a "REDIRECTING..." panel with a noir figure
+  #     that read as hacker imagery — Pets.com was NOT a crime story
+  #     and that visual could trigger YPP monetization review)
+  #   - era anachronisms (1940s noir detective in a 1999 dot-com bust)
+  #   - misrepresented-topic visuals
+  #   - generic panels with zero recognisable company iconography
+  #
+  # High-severity flags gate the stage (needs_human); operator
+  # reviews 03_assets/visual_brand_safety_flags.json then either
+  # --rerender the specific beats or --approve to ship as-is.
+  enabled: true
+  gate_on_severity: high          # "high" | "low" | "off"
+  sample_every_n: 2               # check every Nth beat to bound
+                                  # VLM cost (60-95 beat episodes
+                                  # × 1 VLM call each adds up). With
+                                  # 2, we sample ~half the beats —
+                                  # enough to catch systemic issues
+                                  # (a recurring noir character, an
+                                  # era-mismatched style) without
+                                  # 95 sequential VLM round-trips.
+
+brand_safety:
+  # Defamation-risk review pass added Batch B 2026-05-26. Runs as
+  # the tail of S07 critique. The brand_safety_review.txt prompt
+  # produces 02_script/brand_safety_flags.json with structured
+  # flags. Each flag has severity ∈ {high, low}; high-severity
+  # flags trigger a `needs_human` gate so the operator can review
+  # before S08 runs.
+  enabled: true
+  gate_on_severity: high     # "high" | "low" | "off". When "high",
+                              # any high-severity flag marks S07 as
+                              # needs_human. When "low", any flag at
+                              # all blocks. When "off", flags are
+                              # logged-only.
+  # An operator who has reviewed and intentionally approved a
+  # high-severity flag can clear the gate the same way the S08 gate
+  # is cleared:
+  #   python -m pipeline.hermes_orchestrator --approve <ep_id>
+
+youtube_analytics:
+  # Performance feedback loop (Batch E 2026-05-27). Out-of-band S14
+  # stage pulls per-episode metrics from the YouTube Data + Analytics
+  # APIs and writes them back so future S1/S6/S8 prompts learn from
+  # what worked. Manual trigger only (Q-E1 confirmed):
+  #   python -m pipeline.hermes_orchestrator --analyse-performance
+  #
+  # Setup (one-time):
+  #   1. Enable YouTube Data API v3 + YouTube Analytics API in
+  #      a Google Cloud project. Create OAuth 2.0 Client ID for
+  #      Desktop app.
+  #   2. Put credentials in .env:
+  #        YOUTUBE_OAUTH_CLIENT_ID=...
+  #        YOUTUBE_OAUTH_CLIENT_SECRET=...
+  #   3. Run `python -m pipeline.hermes_orchestrator --authorize-youtube`.
+  #   4. Install optional deps: `pip install -e '.[youtube]'`
+  enabled: false                  # flip to true once OAuth is set up
+                                  # AND at least 3-5 episodes have been
+                                  # published with --set-video-id
+  channel_id: ""                  # leave blank; "channel==MINE" works
+  summary_window: 20              # last N episodes considered when
+                                  # building the prompt-injection
+                                  # summary (Q-E2: pattern + up to 3
+                                  # concrete example episode IDs)
 
 topic_validation:
   # S01 pre-commit demand check. Before persisting a topic the
@@ -147,11 +244,20 @@ topic_validation:
   # hard hint in the prompt and a post-validation country check.
   enabled: true
   min_youtube_results: 3            # below = topic too obscure
-  max_youtube_results: 50           # above = topic too saturated
+  max_youtube_results: 100          # above = topic too saturated
   prefer_decline_stories: true      # bias prompt toward failure arcs
   non_us_ratio: 0.33                # 1-in-3 episodes non-US
   non_us_ratio_lookback: 6          # measured over the last N picks
   trending_news_lookback_days: 30   # advisory; logged in signals dict
+
+  # Incumbent-trap filter (Batch F 2026-05-27). When true, S01
+  # hard-rejects topics whose company_name / founder / one_line_pitch
+  # matches the over-covered-on-YouTube list in pipeline/trends.py.
+  # Theranos, Enron, WeWork, FTX, Pets.com etc. have hundreds of
+  # competing docs with millions of views combined — adding doc #51
+  # fights for impressions against incumbents the algo already
+  # trusts. Off-channel niches grow 5-10x faster.
+  reject_incumbent_traps: true
 
 upload:
   mode: "manual"                    # "manual" only — no automatic upload in this pipeline
@@ -166,6 +272,56 @@ search:
   user_agent: "BusinessStoriesPipeline/0.1 (+research)"
   request_timeout_seconds: 30
 
+tts:
+  # TTS backend dispatcher (Batch D 2026-05-27). The orchestrator
+  # picks one of: kokoro (default, free, local) or elevenlabs
+  # (paid, perceived-quality step change). The factory in tts.py
+  # falls back to Kokoro on any ElevenLabs init failure (missing
+  # API key, etc.) so flipping `backend: elevenlabs` is safe to try.
+  backend: kokoro                  # kokoro | elevenlabs
+
+  elevenlabs:
+    # When backend==elevenlabs, this block is active. Keep
+    # enabled: false until you've put ELEVENLABS_API_KEY in .env
+    # and confirmed the voice quality on a preview-mode episode.
+    enabled: false
+    model_id: eleven_multilingual_v2   # eleven_multilingual_v2
+                                       # | eleven_turbo_v2_5
+                                       # | eleven_monolingual_v1
+    voice_id: "pNInz6obpgDQGcFmaJgB"   # "Adam" preset; fine default
+    # Per-narrator voice override map. Keys are narrator IDs from
+    # narrators.yaml; values are ElevenLabs voice_ids. Pin per
+    # narrator if you want N1/N2/N3/N4 to be different voices.
+    voice_id_map: {}                   # {N1: "voice_id_1", ...}
+
+asr:
+  # ASR backend for Shorts subtitles (Batch D 2026-05-27).
+  # whisper.cpp is the recommended choice — free, local, accurate
+  # at base.en model size. If the binary isn't on PATH, Shorts get
+  # generated without subtitles (the cut still happens).
+  backend: whisper_cpp
+  binary: whisper-cli                   # binary name on PATH
+  model: base.en                        # base.en | small.en | medium.en
+  model_path: ""                        # absolute path override for
+                                        # the .bin model file; empty =
+                                        # let whisper.cpp resolve
+
+packaging:
+  # S13 packaging settings (Batch D 2026-05-27).
+  titles_count: 10                      # title variants per episode
+  thumbnails_enabled: true
+  shorts_enabled: true
+  shorts_count: 3                       # vertical clips per episode
+  shorts_target_seconds: 30.0
+  shorts_burn_subtitles: true           # Q-D1: hard-burn subtitles,
+                                        # knob-able (set false to keep
+                                        # raw vertical cuts).
+  show_channel_logo: true               # Q-D2: composite channel logo
+                                        # in thumbnail corner. Logo
+                                        # asset at
+                                        # assets/branding/channel_mark.png
+                                        # Knob-able (false = no logo).
+
 music_library:
   # S11 audio post uses a curated local library — no MusicGen,
   # no Stable Audio Open, no synthesized music or SFX.
@@ -175,31 +331,43 @@ music_library:
   #     ├── manifest.json           # per-track metadata
   #     └── *.wav / *.mp3 / *.flac
   #
-  # Each manifest entry shape:
+  # Each manifest entry shape (license fields added 2026-05-26 Batch A):
   #   {"file": "ambient_rise_01.wav",
   #    "mood": ["hopeful","rising","determined"],
   #    "tempo": "slow|mid|fast",
   #    "instruments": ["piano","strings","synth_pad"],
   #    "tags": ["origin","founder","underdog"],
   #    "duration_seconds": 312,
-  #    "suits_narrators": ["N1","N3"]   # optional pin
+  #    "suits_narrators": ["N1","N3"],   # optional pin
+  #    "license": "CC0 | CC-BY | YouTube-Audio-Library | Pixabay | Epidemic-Sound | royalty-free | unknown",
+  #    "attribution": "Composer Name — Track Title",  # required for CC-BY
+  #    "source_url": "https://..."                    # where the file came from
   #   }
+  # The license metadata is emitted by S12 into the per-episode
+  # 06_metadata/license_attributions.txt for paste into the YouTube
+  # description box. Missing license = unknown = warning logged but
+  # the track is still pickable.
   enabled: true
   path: "${root}/assets/music_library"
   manifest: "${root}/assets/music_library/manifest.json"
   crossfade_seconds: 4
-  music_gain_db: -28.0              # bed level under voice
+  music_gain_db: -31.0              # bed level under voice
   music_start_offset_seconds: 30.0  # Anchored to the new 6-act template:
                                     # Act 0 (the hook) runs 0:00-0:30 dry,
                                     # then the music bed swells in with
                                     # Act 1 ("set the era..."). Pushing
                                     # this earlier puts music UNDER the
                                     # hook delivery — bad for retention.
-  # Voice level normalization (ported from maritime, voice-only)
+  # Voice level normalization (ported from maritime, voice-only).
+  # Batch F 2026-05-27: voice_dynaudnorm_max_gain dropped from 15→9.
+  # The aggressive 15 dB ceiling was flattening voice dynamics across
+  # beats — every sentence sounded equally important, killing emotional
+  # contour. 9 preserves natural speech dynamics while still smoothing
+  # Kokoro's level inconsistencies.
   voice_dynaudnorm_enabled: true
   voice_dynaudnorm_framelen_ms: 200
   voice_dynaudnorm_gauss: 11
-  voice_dynaudnorm_max_gain: 15.0
+  voice_dynaudnorm_max_gain: 9.0
 
 grok:
   # xAI Grok image-correction pass (S09 sub-phase). When a FLUX render
@@ -266,6 +434,78 @@ asset_hunt:
   # comic-book-styled episodes where PD photo assets don't fit the
   # visual style anyway. Set true to restore the full PD-hunt path.
   enabled: false
+
+  # Narrow PD path (Batch C 2026-05-26). When asset_hunt.enabled is
+  # ALSO true, this list restricts PD routing to only the named
+  # visual_intent values. The default is the two intents where real
+  # photos genuinely add value without breaking the comic style
+  # (founder Wikipedia portraits, period newspaper headlines). All
+  # other visual_intents still route through FLUX.
+  #
+  # When asset_hunt.enabled is false (current default), this list
+  # is ignored. The wiring is in place so flipping enabled: true +
+  # leaving enabled_visual_intents at default activates the narrow
+  # path without a code change.
+  enabled_visual_intents:
+    - founder_portrait
+    - document_or_headline
+
+sfx_library:
+  # SFX bed under voice (Batch C 2026-05-26). S11 Phase 2 looks up
+  # short SFX clips by cue (from S08's per-beat sfx_cue field) and
+  # mixes them at beat-start, ducked under voice. Operator must
+  # source license-clean clips and populate assets/sfx_library/.
+  #
+  # Layout:
+  #   ${root}/assets/sfx_library/
+  #     ├── manifest.json
+  #     └── *.wav / *.mp3
+  #
+  # Each manifest entry shape:
+  #   {"file": "typewriter_01.wav",
+  #    "cue": "typewriter",
+  #    "intensity": "sharp",
+  #    "license": "CC0 | CC-BY | freesound | Pixabay | unknown",
+  #    "attribution": "Author Name — Sound Title",
+  #    "source_url": "https://...",
+  #    "duration_seconds": 0.9}
+  #
+  # Run `python -m pipeline.tools.scan_sfx_library` after dropping
+  # audio files in to backfill duration_seconds via ffprobe.
+  #
+  # Starts disabled — flip to true after the operator has dropped
+  # ≥1 file per cue into assets/sfx_library/. With enabled=false
+  # S11 Phase 2 is a no-op and the audio mix is identical to pre-
+  # Batch-C.
+  enabled: false
+  path: "${root}/assets/sfx_library"
+  manifest: "${root}/assets/sfx_library/manifest.json"
+  default_gain_db: -18.0          # SFX level vs. voice (-18 dB
+                                  # = clearly audible but distinctly
+                                  # below voice; the operator can
+                                  # override per-track via the
+                                  # manifest's gain_db_hint field)
+  crossfade_ms: 50                # short fade-in/out at SFX edges
+                                  # so the bed doesn't click
+
+callouts:
+  # On-screen text callouts (Batch C 2026-05-26). The writer LLM
+  # emits inline [CALLOUT: "$9 BILLION"] markers after high-impact
+  # concrete-number sentences. S08 parses these into a per-beat
+  # `callouts` list. S12 composites the bracketed text as a
+  # high-contrast text overlay (yellow body + black stroke, same
+  # styling as the title card).
+  enabled: true
+  max_per_beat: 1                 # Q-C2 confirmed: cap at 1,
+                                  # configurable. Raise carefully —
+                                  # spamming dilutes the effect.
+  font_size_pct: 0.10             # frac of frame height (1080 *
+                                  # 0.10 = 108 px)
+  color: "#FFE600"                # bright yellow
+  stroke_color: "#000000"
+  stroke_width: 6
+  hold_seconds: 2.5
+  fade_ms: 200
 
 generic_stash:
   enabled: true

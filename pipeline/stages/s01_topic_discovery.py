@@ -29,6 +29,7 @@ from ..browser import Browser
 from ..config import load_config
 from ..constraints import is_valid_topic, pick_assignment
 from ..llm import LLM
+from ..performance_summary import summarise_for_prompt
 from ..state import (
     add_used_topic,
     episode_workspace,
@@ -37,14 +38,13 @@ from ..state import (
     topic_already_used,
     update_episode,
 )
-from ..trends import non_us_required, validate_candidate
+from ..trends import is_incumbent_trap, non_us_required, validate_candidate
 
 logger = logging.getLogger("hermes.stage.s01")
 
 
 def run(episode: dict, queue: dict) -> str | None:
     cfg = load_config()
-    llm = LLM(role="writer")
     browser = Browser()
     tv_cfg = cfg.topic_validation
 
@@ -52,6 +52,16 @@ def run(episode: dict, queue: dict) -> str | None:
     current_year = datetime.now(timezone.utc).year
     max_year = current_year - 5  # business stories cool off faster than disasters
 
+    # Operator-injected topic short-circuit. When `--inject-topic` was
+    # used to queue this episode, S01 skips the LLM call and the
+    # rolling-window rotation hints entirely. We still run dedup, the
+    # country normaliser, and (unless --no-validate was given) the
+    # SearXNG saturation gate — those are about catching mistakes, not
+    # about picking the topic.
+    if episode.get("incident_origin") == "manual":
+        return _run_manual(episode, queue, browser, tv_cfg, used)
+
+    llm = LLM(role="writer")
     template = (cfg.prompts_dir / "topic_discovery.txt").read_text()
 
     max_retries = cfg.orchestrator["max_topic_discovery_retries"]
@@ -76,6 +86,11 @@ def run(episode: dict, queue: dict) -> str | None:
     decline_hint = _decline_hint(tv_cfg)
     non_us_hint = _non_us_hint(require_non_us, tv_cfg, recent_countries)
 
+    # Batch E 2026-05-27: pull summarised performance patterns to
+    # inject as soft guidance. Empty until --analyse-performance has
+    # been run over published episodes.
+    perf = summarise_for_prompt()
+
     for attempt in range(1, max_retries + 1):
         exclusion = "\n".join(f"  - {x}" for x in sorted(used)) or "  (none)"
         rejected_inline = "\n".join(
@@ -89,6 +104,8 @@ def run(episode: dict, queue: dict) -> str | None:
             recent_countries=", ".join(recent_countries) or "(none)",
             decline_preference_hint=decline_hint,
             non_us_required_hint=non_us_hint,
+            top_performing_story_kinds=perf["top_performing_story_kinds"],
+            worst_performing_story_kinds=perf["worst_performing_story_kinds"],
         )
         logger.info("topic discovery attempt %d (require_non_us=%s)",
                     attempt, require_non_us)
@@ -143,6 +160,21 @@ def run(episode: dict, queue: dict) -> str | None:
             rejection_reasons.append(f"{name}: {why}")
             continue
 
+        # gate 5b (Batch F 2026-05-27): incumbent-trap filter. The
+        # company / founder is too saturated on YouTube — even a great
+        # script can't break into a niche dominated by 5M-view
+        # incumbents. Operator can disable via
+        # cfg.topic_validation.reject_incumbent_traps: false.
+        if tv_cfg.get("reject_incumbent_traps", True):
+            is_trap, token = is_incumbent_trap(candidate)
+            if is_trap:
+                rejection_reasons.append(
+                    f"{name}: incumbent-trap match on '{token}' — "
+                    f"topic is over-covered on YouTube; pick an "
+                    f"under-covered alternative"
+                )
+                continue
+
         # gate 6: geographic diversity. If the rolling window says the
         # next pick must be non-US, enforce it as a hard reject so the
         # LLM gets feedback and tries again with a different country.
@@ -186,15 +218,112 @@ def run(episode: dict, queue: dict) -> str | None:
         seed=hash(incident["company_name"]) & 0xffff,
     )
 
+    _finalise_pick(episode, queue, incident, assignment, last_signals,
+                   origin="llm")
+    return None
+
+
+# ----------------------------------------------------------------------
+# Manual-injection path (operator pre-filled the incident via
+# `hermes-orchestrator --inject-topic <file.json>`)
+# ----------------------------------------------------------------------
+
+def _run_manual(
+    episode: dict,
+    queue: dict,
+    browser: Browser,
+    tv_cfg: dict,
+    used: set[str],
+) -> str | None:
+    """Handle an operator-injected episode. The incident JSON has
+    already been schema-validated at inject time; this function still
+    runs the cheap dedup + country-normalisation gates, optionally
+    runs the SearXNG demand validation (skipped iff
+    episode.skip_validation is True), and picks A/N/V — honoring any
+    `archetype_pin` / `narrator_pin` / `visual_style_pin` set on the
+    episode record.
+    """
+    incident = dict(episode.get("incident") or {})
+    name = (incident.get("company_name") or "").strip()
+    if not name:
+        return "manual injection: company_name missing on episode record"
+
+    # Re-run dedup. The operator might have queued the same topic
+    # twice across runs without realising, or used_topics may have
+    # picked it up via the auto-pilot in the meantime. Better to
+    # fail loudly here than render a duplicate.
+    if topic_already_used(name):
+        return (
+            f"manual injection: {name!r} already in used_topics.json — "
+            f"clear it manually if you intend to re-cover this topic"
+        )
+
+    # Normalise country so the rolling-window non-US accounting
+    # treats it the same as auto picks.
+    incident["hq_country"] = _normalise_country(incident.get("hq_country"))
+
+    signals: dict = {}
+    if not episode.get("skip_validation"):
+        verdict = validate_candidate(incident, tv_cfg, browser)
+        signals = verdict.signals
+        if not verdict.ok:
+            return (
+                f"manual injection demand-gate failed: {verdict.reason}. "
+                f"Re-run with --no-validate if you want to render this "
+                f"topic anyway."
+            )
+        incident["validation_signals"] = verdict.signals
+    else:
+        incident["validation_signals"] = {"skipped": True,
+                                          "reason": "--no-validate"}
+
+    rolling = queue.get("rolling_window") or {}
+    base = pick_assignment(
+        rolling,
+        seed=hash(incident["company_name"]) & 0xffff,
+    )
+    # Honor per-episode pins. The CLI strips these from `incident` and
+    # parks them on the episode record so they don't pollute the
+    # incident-shape that downstream stages read.
+    arch = episode.get("archetype_pin") or base.archetype
+    narr = episode.get("narrator_pin") or base.narrator
+    vis = episode.get("visual_style_pin") or base.visual_style
+
+    from ..constraints import Assignment   # local import to keep top
+    assignment = Assignment(archetype=arch, narrator=narr, visual_style=vis)
+
+    _finalise_pick(episode, queue, incident, assignment, signals,
+                   origin="manual")
+    return None
+
+
+# ----------------------------------------------------------------------
+# Shared post-acceptance bookkeeping (LLM and manual paths)
+# ----------------------------------------------------------------------
+
+def _finalise_pick(
+    episode: dict,
+    queue: dict,
+    incident: dict,
+    assignment,
+    signals: dict,
+    *,
+    origin: str,
+) -> None:
+    """Persist incident.json + assignment.json, update the queue
+    record, push the rolling-window state, and add the topic to the
+    used-topics set. Called by both run() (LLM path) and
+    _run_manual()."""
     slug = _slugify(incident["company_name"])
     logger.info(
-        "selected: %s [%s] (year=%s, story=%s, hero=%s, "
+        "selected [%s]: %s [%s] (year=%s, story=%s, hero=%s, "
         "archetype=%s, narrator=%s, style=%s, signals=%s)",
+        origin,
         incident["company_name"], incident.get("hq_country", "??"),
         incident.get("year_anchor"), incident.get("story_kind"),
         (incident.get("hero") or "")[:60],
         assignment.archetype, assignment.narrator, assignment.visual_style,
-        last_signals,
+        signals,
     )
 
     ws = episode_workspace(episode["id"], slug)
@@ -206,8 +335,18 @@ def run(episode: dict, queue: dict) -> str | None:
             "archetype": assignment.archetype,
             "narrator": assignment.narrator,
             "visual_style": assignment.visual_style,
+            "origin": origin,
         }, indent=2)
     )
+
+    # Iconic visual-asset derivation (Batch F 2026-05-28). One LLM
+    # call per episode at S01 time to derive the company's iconic
+    # visual cues (mascot, logo shape, signature products, era
+    # markers, recurring protagonist appearance). S08 reads this
+    # file and folds the descriptions into every FLUX prompt so the
+    # generated panels visually identify as belonging to THIS
+    # company rather than as generic business imagery.
+    _derive_iconic_assets(ws, incident)
 
     update_episode(
         queue, episode["id"],
@@ -231,7 +370,6 @@ def run(episode: dict, queue: dict) -> str | None:
     )
 
     add_used_topic(incident["company_name"])
-    return None
 
 
 # ----------------------------------------------------------------------
@@ -359,3 +497,69 @@ def _slugify(s: str) -> str:
     s = s.lower()
     s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
     return s[:60] or "unnamed"
+
+
+# ----------------------------------------------------------------------
+# Iconic visual-asset derivation (Batch F 2026-05-28)
+# ----------------------------------------------------------------------
+
+def _derive_iconic_assets(ws, incident: dict) -> None:
+    """Run a one-shot LLM call to populate 00_research/iconic_assets.json
+    with the company's mascot / logo shape / signature products /
+    era markers / recurring protagonist appearance. S08 reads this
+    file and injects the descriptions into every FLUX prompt so the
+    generated panels look like THIS company rather than generic
+    business stock imagery.
+
+    Failure modes (any of these → empty file, S08 silently skips
+    the preamble):
+      - LLM JSON parse fails
+      - prompt template missing
+      - LLM returns empty assets list (legitimate for some companies)
+    """
+    cfg = load_config()
+    template_path = cfg.prompts_dir / "iconic_assets.txt"
+    out_path = ws / "00_research" / "iconic_assets.json"
+    if not template_path.exists():
+        logger.warning("iconic_assets.txt template missing; skipping")
+        out_path.write_text(json.dumps({"assets": []}, indent=2))
+        return
+    try:
+        prompt = template_path.read_text().format(
+            company_name=incident.get("company_name", ""),
+            founder=incident.get("founder_or_protagonist", ""),
+            year_anchor=incident.get("year_anchor", ""),
+            story_kind=incident.get("story_kind", ""),
+            hero=incident.get("hero", ""),
+            conflict=incident.get("conflict", ""),
+            one_line_pitch=incident.get("one_line_pitch", ""),
+        )
+    except KeyError as e:
+        logger.warning("iconic_assets template format error: %s", e)
+        out_path.write_text(json.dumps({"assets": []}, indent=2))
+        return
+
+    llm = LLM(role="writer")
+    try:
+        result = llm.complete_json(prompt, temperature=0.4, max_tokens=2500)
+    except Exception as e:
+        logger.warning("iconic_assets LLM call failed: %s", e)
+        out_path.write_text(json.dumps({"assets": []}, indent=2))
+        return
+
+    assets = result.get("assets") or []
+    # Trim each description defensively in case the LLM ignored the
+    # 25-word cap.
+    for a in assets:
+        d = (a.get("description") or "").strip()
+        if d:
+            words = d.split()
+            if len(words) > 25:
+                a["description"] = " ".join(words[:25])
+    payload = {
+        "company_name": incident.get("company_name", ""),
+        "assets": assets,
+    }
+    out_path.write_text(json.dumps(payload, indent=2))
+    logger.info("iconic_assets derived: %d entries for %s",
+                len(assets), incident.get("company_name", "?"))

@@ -230,6 +230,14 @@ class AudioMixSpec:
     voice_dynaudnorm_gauss: int = 11
     voice_dynaudnorm_max_gain: float = 15.0
     music_start_offset_seconds: float = 0.0
+    # Optional SFX track — pre-rendered by S11 Phase 2 with all
+    # cue clips placed at beat-start offsets and gain already
+    # baked in. Mixed in alongside voice + music. Added Batch C
+    # 2026-05-26.
+    sfx_wav: Path | None = None
+    sfx_gain_db: float = 0.0   # SFX gain already baked into the
+                                # rendered sfx_wav, so no extra
+                                # attenuation here by default.
 
 
 def audio_post_mix(spec: AudioMixSpec) -> None:
@@ -247,6 +255,14 @@ def audio_post_mix(spec: AudioMixSpec) -> None:
     for m in spec.music_wavs:
         inputs += ["-i", str(m)]
     n_music = len(spec.music_wavs)
+
+    # Optional SFX track (Batch C 2026-05-26). Always added LAST to
+    # the input list so its index is predictable. Gain is baked into
+    # the file by S11; we apply spec.sfx_gain_db as a final trim
+    # (default 0 == no extra trim).
+    has_sfx = spec.sfx_wav is not None and Path(spec.sfx_wav).exists()
+    if has_sfx:
+        inputs += ["-i", str(spec.sfx_wav)]
 
     voice_filters: list[str] = []
     if spec.voice_dynaudnorm_enabled:
@@ -287,7 +303,16 @@ def audio_post_mix(spec: AudioMixSpec) -> None:
     for i in range(1, n_music):
         music_labels.append(f"[m{i}_raw]")
 
-    mix_inputs_list = ["[v_dry]"] + music_labels
+    # SFX label — input index is n_music + 1 (voice is index 0).
+    sfx_labels: list[str] = []
+    if has_sfx:
+        sfx_idx = n_music + 1
+        fc_parts.append(
+            f"[{sfx_idx}:a]volume={spec.sfx_gain_db}dB[sfx]"
+        )
+        sfx_labels.append("[sfx]")
+
+    mix_inputs_list = ["[v_dry]"] + music_labels + sfx_labels
     if len(mix_inputs_list) == 1:
         # Voice-only: skip amix — amix with inputs=1 deadlocks ffmpeg.
         fc_parts.append("[v_dry]anull[mixed]")
@@ -376,6 +401,224 @@ def audio_post_mix(spec: AudioMixSpec) -> None:
         temp_mix.unlink(missing_ok=True)
     except Exception:
         pass
+
+
+def composite_callouts_onto_clip(
+    src_clip: Path,
+    out_clip: Path,
+    callouts: list[dict],
+    *,
+    callout_cfg: dict,
+    frame_width: int = 1920,
+    frame_height: int = 1080,
+) -> bool:
+    """Overlay one or more callout text PNGs onto an existing clip.
+
+    Each callout dict: `{text, offset_seconds, hold_seconds (optional),
+    fade_ms (optional)}`. Renders the text as a transparent PNG via
+    Pillow (yellow body, black stroke), then uses ffmpeg's overlay
+    filter with timed visibility and pre-applied fade.
+
+    Returns True on success, False on failure (in which case S12
+    keeps the original clip and logs a warning). Added Batch C
+    2026-05-26.
+    """
+    if not callouts:
+        return False
+    from PIL import Image, ImageDraw, ImageFont
+
+    try:
+        # Default styling from callout_cfg.
+        font_pct = float(callout_cfg.get("font_size_pct", 0.10))
+        color = callout_cfg.get("color", "#FFE600")
+        stroke_color = callout_cfg.get("stroke_color", "#000000")
+        stroke_width = int(callout_cfg.get("stroke_width", 6))
+        default_hold = float(callout_cfg.get("hold_seconds", 2.5))
+        default_fade_ms = int(callout_cfg.get("fade_ms", 200))
+        font_size_px = int(frame_height * font_pct)
+
+        # Pillow font — try a few common system fonts (mac, linux).
+        font = None
+        for candidate in (
+            "/System/Library/Fonts/Supplemental/Impact.ttf",
+            "/System/Library/Fonts/HelveticaNeue.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ):
+            try:
+                font = ImageFont.truetype(candidate, font_size_px)
+                break
+            except (OSError, IOError):
+                continue
+        if font is None:
+            font = ImageFont.load_default()
+
+        # Render each callout to its own PNG.
+        overlay_pngs: list[tuple[Path, dict]] = []
+        tmp_dir = out_clip.parent / "_callouts_tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        for i, c in enumerate(callouts):
+            text = (c.get("text") or "").strip()
+            if not text:
+                continue
+            # Measure
+            bbox = font.getbbox(text, stroke_width=stroke_width)
+            tw = (bbox[2] - bbox[0]) + 2 * stroke_width
+            th = (bbox[3] - bbox[1]) + 2 * stroke_width
+            img = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            d.text(
+                (-bbox[0] + stroke_width, -bbox[1] + stroke_width),
+                text, font=font, fill=color,
+                stroke_width=stroke_width, stroke_fill=stroke_color,
+            )
+            png_path = tmp_dir / f"callout_{i}.png"
+            img.save(png_path, "PNG")
+            overlay_pngs.append((png_path, c))
+
+        if not overlay_pngs:
+            return False
+
+        # Build the filter graph: chain overlays.
+        inputs: list[str] = ["-i", str(src_clip)]
+        for png_path, _ in overlay_pngs:
+            inputs += ["-i", str(png_path)]
+
+        fc_parts: list[str] = []
+        prev_label = "[0:v]"
+        for i, (_, c) in enumerate(overlay_pngs):
+            start = float(c.get("offset_seconds", 0.0))
+            hold = float(c.get("hold_seconds", default_hold))
+            fade_s = float(c.get("fade_ms", default_fade_ms)) / 1000.0
+            end = start + hold
+
+            # Pre-fade the overlay PNG. Use overlay_in / overlay_out
+            # via the fade filter with alpha=1 so transparency is
+            # respected.
+            ovl_in = f"[{i+1}:v]"
+            ovl_lbl = f"[ovl{i}]"
+            fc_parts.append(
+                f"{ovl_in}format=rgba,"
+                f"fade=t=in:st=0:d={fade_s:.3f}:alpha=1,"
+                f"fade=t=out:st={max(0.0, hold - fade_s):.3f}"
+                f":d={fade_s:.3f}:alpha=1{ovl_lbl}"
+            )
+
+            # Overlay onto previous layer, centered horizontally,
+            # near the lower-third of frame (vertical hot-spot).
+            next_label = (
+                "[vout]" if i == len(overlay_pngs) - 1 else f"[v{i+1}]"
+            )
+            y_pos = int(frame_height * 0.62)
+            fc_parts.append(
+                f"{prev_label}{ovl_lbl}overlay="
+                f"x=(W-w)/2:y={y_pos}:"
+                f"enable='between(t,{start:.3f},{end:.3f})'"
+                f"{next_label}"
+            )
+            prev_label = next_label
+
+        fc = ";".join(fc_parts)
+        cmd = [
+            require_ffmpeg(), "-y", *inputs,
+            "-filter_complex", fc,
+            "-map", "[vout]",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            "-an",
+            str(out_clip),
+        ]
+        _run(cmd)
+
+        # Cleanup tmp PNGs.
+        for png_path, _ in overlay_pngs:
+            try:
+                png_path.unlink()
+            except OSError:
+                pass
+        try:
+            tmp_dir.rmdir()
+        except OSError:
+            pass
+        return out_clip.exists() and out_clip.stat().st_size > 1000
+    except Exception as e:
+        logger.warning("composite_callouts_onto_clip failed: %s", e)
+        return False
+
+
+def render_sfx_track(
+    cues: list[dict],
+    out_path: Path,
+    *,
+    total_seconds: float,
+    sample_rate: int = 48000,
+) -> bool:
+    """Render an SFX bed track of `total_seconds` length with each
+    SFX clip placed at its `start_seconds` offset.
+
+    `cues` is a list of `{path: Path, start_seconds: float,
+    gain_db: float}` dicts. Each clip is loaded, delayed via
+    ffmpeg's `adelay` filter, gain-trimmed via `volume`, then all
+    of them mixed into a single stereo track via `amix`.
+
+    Returns True on success, False on failure. Empty `cues` is a
+    no-op (returns False without rendering).
+
+    Added Batch C 2026-05-26 for S11 Phase 2.
+    """
+    if not cues:
+        return False
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    inputs: list[str] = []
+    fc_parts: list[str] = []
+    mix_labels: list[str] = []
+
+    # Anchor input: silence of total_seconds, so the output has the
+    # expected duration even if no SFX fires at the very end.
+    anchor_idx = 0
+    inputs += [
+        "-f", "lavfi", "-t", f"{total_seconds:.3f}",
+        "-i", f"anullsrc=channel_layout=stereo:sample_rate={sample_rate}",
+    ]
+    fc_parts.append(f"[{anchor_idx}:a]anull[sfx_anchor]")
+    mix_labels.append("[sfx_anchor]")
+
+    for ci, cue in enumerate(cues):
+        idx = ci + 1
+        path = cue["path"]
+        start_ms = int(max(0.0, float(cue["start_seconds"])) * 1000)
+        gain_db = float(cue.get("gain_db", 0.0))
+        inputs += ["-i", str(path)]
+        chain = []
+        if start_ms > 0:
+            chain.append(f"adelay={start_ms}|{start_ms}:all=1")
+        chain.append(f"volume={gain_db}dB")
+        chain.append("aformat=channel_layouts=stereo:sample_rates="
+                     + str(sample_rate))
+        fc_parts.append(f"[{idx}:a]{','.join(chain)}[sfx{ci}]")
+        mix_labels.append(f"[sfx{ci}]")
+
+    n = len(mix_labels)
+    fc_parts.append(
+        f"{''.join(mix_labels)}amix=inputs={n}:duration=first"
+        f":dropout_transition=0:normalize=0[sfx_out]"
+    )
+    fc = ";".join(fc_parts)
+
+    cmd = [
+        require_ffmpeg(), "-y", *inputs,
+        "-filter_complex", fc,
+        "-map", "[sfx_out]",
+        "-ar", str(sample_rate), "-ac", "2",
+        "-c:a", "pcm_s24le",
+        str(out_path),
+    ]
+    try:
+        _run(cmd)
+        return out_path.exists() and out_path.stat().st_size > 0
+    except Exception as e:
+        logger.warning("render_sfx_track failed: %s", e)
+        return False
 
 
 def extract_audio(video_path: Path, out_path: Path) -> None:

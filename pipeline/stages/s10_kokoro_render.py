@@ -22,7 +22,7 @@ import yaml
 
 from ..config import load_config
 from ..state import find_episode_workspace
-from ..tts import KOKORO_SAMPLE_RATE, Kokoro
+from ..tts import KOKORO_SAMPLE_RATE, make_tts
 
 logger = logging.getLogger("hermes.stage.s10")
 
@@ -96,7 +96,7 @@ def run(episode: dict, queue: dict) -> str | None:
     # Render
     chunks_dir = ws / "04_audio" / "chunks"
     chunks_dir.mkdir(parents=True, exist_ok=True)
-    kokoro = Kokoro(narrator_id=episode["narrator"])
+    kokoro = make_tts(narrator_id=episode["narrator"])
 
     chunk_results = kokoro.synthesize_script(
         speech_only, chunks_dir, max_words_per_chunk=300

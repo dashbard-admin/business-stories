@@ -1,0 +1,85 @@
+You are writing N={n} YouTube TITLE CANDIDATES for a business
+documentary episode. The channel covers business origin / rise-and-fall /
+disruption / scandal-postmortem stories. Audience: people who'd watch
+Modern MBA, Business Casual, Cold Fusion, Logically Answered.
+
+EPISODE:
+- Company: {company_name}
+- Founder/Protagonist: {founder}
+- Year anchor: {year_anchor}
+- Story kind: {story_kind}
+- Hero (locked at S1): {hero}
+- Conflict (locked at S1): {conflict}
+- One-line pitch: {one_line_pitch}
+
+Dramatic-moment beat snippets (use these for concrete numbers and
+specific names — every title should anchor on at least one):
+{beat_summary}
+
+================================================================
+HARD CONSTRAINTS — every title must satisfy ALL of these:
+================================================================
+- 35-70 characters TOTAL (YouTube truncates ~70 chars on mobile)
+- Contains ONE concrete anchor: a number, a year, a named person,
+  or a named company. NEVER abstract ("How an Empire Fell").
+- The HOOK is the FIRST FIVE WORDS. They carry the click decision.
+- No clickbait clichés: "Shocking", "Unbelievable", "You won't
+  believe", "Wait until you hear", "The truth about", "Nobody
+  knew", "What happened next", "the real reason".
+- No second-person commands ("You need to know about...").
+- No emoji.
+- No exclamation marks (kills algo trust).
+- No ALL CAPS except for the explicit number ("$9 BILLION" is OK).
+
+================================================================
+STYLE HYPOTHESES — distribute the N variants across these:
+================================================================
+- curiosity_gap: states an outsized outcome and a tiny cause
+  ("How a $42 late fee built a $200B company")
+- shock_value: states a loss / failure with a hard number
+  ("How $9B vanished from {company_name} in 18 months")
+- outcome_first: states the ending up front, viewer wants to
+  know how ("Why {company_name} couldn't survive Amazon — and
+  it wasn't what you think")
+- named_person: leads with the protagonist's name + a specific
+  characteristic ("{founder} built a $X empire. Then [event].")
+- question: asks one specific question ("What does $5 billion
+  in debt actually look like?")
+- contrarian: takes the opposite of the obvious read ("It
+  wasn't sales. It was debt: how {company_name} actually died")
+- number_anchored: leads with a striking specific number ("9,000
+  stores. $5 billion in debt. One bankruptcy filing.")
+- before_after: contrast structure ("$X billion in 1999. $0 in
+  2001. How {company_name} collapsed.")
+- time_anchored: leads with a specific date or period ("18
+  months that destroyed {company_name}")
+- character_voice: implies the protagonist's perspective
+  ("{founder} thought he could outrun the SEC. He couldn't.")
+
+================================================================
+OUTPUT FORMAT — JSON only, no prose, no code fences.
+================================================================
+Produce exactly {n} variants. Order by your own predicted CTR
+(highest first). For each, predict a CTR band:
+  - "high"   = likely 8%+ CTR at standard thumbnail
+  - "medium" = likely 4-8%
+  - "low"    = likely <4%
+
+{{
+  "variants": [
+    {{
+      "text": "string — the title, 35-70 chars",
+      "style_hypothesis": "one of the style names above",
+      "predicted_ctr_band": "high|medium|low",
+      "rationale": "string — 1-2 sentences on what about the
+                    title earns the click. Be concrete: name the
+                    specific psychological lever (curiosity gap,
+                    outcome reveal, anchor number, named-person
+                    intrigue) and why it fits THIS topic."
+    }}
+  ]
+}}
+
+Predict honestly. If most of your variants would land in "medium"
+or "low", say so — the operator uses predicted_ctr_band as a
+tiebreaker when picking which 3 to A/B test post-upload.

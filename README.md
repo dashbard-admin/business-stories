@@ -4,6 +4,8 @@ A faceless YouTube long-form pipeline that produces 10–15 minute comic-book-st
 
 **Stack**: Qwen3.6 (writer + extractor) + Gemma-4 (critic) + Kokoro (TTS) + FLUX via local CLI (images) + ffmpeg (assembly) + curated local music library (no audio generation).
 
+> 📖 **For the full engineering reference — module-by-module description, prompt catalog, architecture diagram, state schemas, and the maintenance contract — see [`AGENTS.md`](./AGENTS.md).** That file is the canonical source of truth for how this project is built; every code change must update it in the same commit.
+
 ## 12 stages
 
 | ID  | Module                                  | Purpose                                                                                    |

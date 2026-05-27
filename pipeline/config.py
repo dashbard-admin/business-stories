@@ -115,6 +115,48 @@ class Config:
         return merged
 
     @property
+    def visual_brand_safety(self) -> dict[str, Any]:
+        """Post-S09 VLM visual brand-safety pass (Batch F 2026-05-28).
+        Asks the VLM whether each rendered panel is topic-coherent
+        and brand-safe; flags hacking-coded / era-anachronistic /
+        misrepresented panels."""
+        defaults = {
+            "enabled": True,
+            "gate_on_severity": "high",
+            "sample_every_n": 2,
+        }
+        return {**defaults, **(self.raw.get("visual_brand_safety") or {})}
+
+    @property
+    def brand_safety(self) -> dict[str, Any]:
+        """Brand-safety / defamation review gate (Batch B 2026-05-26).
+        Configures the brand_safety_review.txt prompt that runs as the
+        tail of S07 critique.
+
+        Fields:
+          enabled: bool — master switch.
+          gate_on_severity: "high" | "low" | "off" — how strict the
+            ship-blocking gate is. "high" (default) blocks on any
+            high-severity flag; "low" blocks on any flag; "off"
+            log-only.
+        """
+        defaults = {
+            "enabled": True,
+            "gate_on_severity": "high",
+        }
+        return {**defaults, **(self.raw.get("brand_safety") or {})}
+
+    @property
+    def youtube_analytics(self) -> dict[str, Any]:
+        """Performance feedback loop config (Batch E 2026-05-27)."""
+        defaults = {
+            "enabled": False,
+            "channel_id": "",
+            "summary_window": 20,
+        }
+        return {**defaults, **(self.raw.get("youtube_analytics") or {})}
+
+    @property
     def topic_validation(self) -> dict[str, Any]:
         """S01 pre-commit demand check thresholds.
 
@@ -139,11 +181,13 @@ class Config:
         defaults = {
             "enabled": True,
             "min_youtube_results": 3,
-            "max_youtube_results": 50,
+            "max_youtube_results": 100,
             "prefer_decline_stories": True,
             "non_us_ratio": 0.33,
             "non_us_ratio_lookback": 6,
             "trending_news_lookback_days": 30,
+            # Batch F 2026-05-27 — reject over-covered topics outright.
+            "reject_incumbent_traps": True,
         }
         return {**defaults, **(self.raw.get("topic_validation") or {})}
 
@@ -194,6 +238,88 @@ class Config:
     def generic_stash(self) -> dict[str, Any]:
         defaults = {"enabled": True, "threshold": 0.18, "max_reuses_per_asset": 5}
         return {**defaults, **(self.raw.get("generic_stash") or {})}
+
+    @property
+    def sfx_library(self) -> dict[str, Any]:
+        """Local SFX library (Batch C 2026-05-26). Operator-curated
+        license-clean SFX clips matched by cue at S11 Phase 2.
+        Disabled by default until the operator populates the manifest."""
+        defaults = {
+            "enabled": False,
+            "path": str(self.assets_dir / "sfx_library"),
+            "manifest": str(self.assets_dir / "sfx_library" / "manifest.json"),
+            "default_gain_db": -18.0,
+            "crossfade_ms": 50,
+        }
+        raw = self.raw.get("sfx_library") or {}
+        merged = {**defaults, **raw}
+        merged["path"] = self._resolve(str(merged["path"]))
+        merged["manifest"] = self._resolve(str(merged["manifest"]))
+        return merged
+
+    @property
+    def tts(self) -> dict[str, Any]:
+        """TTS backend dispatcher (Batch D 2026-05-27). Kokoro is the
+        default; flip backend: elevenlabs to use premium TTS."""
+        defaults = {
+            "backend": "kokoro",
+            "elevenlabs": {
+                "enabled": False,
+                "model_id": "eleven_multilingual_v2",
+                "voice_id": "pNInz6obpgDQGcFmaJgB",
+                "voice_id_map": {},
+            },
+        }
+        raw = self.raw.get("tts") or {}
+        merged = {**defaults, **raw}
+        # Deep-merge the elevenlabs sub-dict.
+        if "elevenlabs" in raw:
+            merged["elevenlabs"] = {**defaults["elevenlabs"],
+                                    **raw["elevenlabs"]}
+        return merged
+
+    @property
+    def asr(self) -> dict[str, Any]:
+        """ASR config for Shorts subtitles (Batch D 2026-05-27)."""
+        defaults = {
+            "backend": "whisper_cpp",
+            "binary": "whisper-cli",
+            "model": "base.en",
+            "model_path": "",
+        }
+        return {**defaults, **(self.raw.get("asr") or {})}
+
+    @property
+    def packaging(self) -> dict[str, Any]:
+        """S13 packaging config (Batch D 2026-05-27)."""
+        defaults = {
+            "titles_count": 10,
+            "thumbnails_enabled": True,
+            "shorts_enabled": True,
+            "shorts_count": 3,
+            "shorts_target_seconds": 30.0,
+            "shorts_burn_subtitles": True,
+            "show_channel_logo": True,
+        }
+        return {**defaults, **(self.raw.get("packaging") or {})}
+
+    @property
+    def callouts(self) -> dict[str, Any]:
+        """On-screen text callouts (Batch C 2026-05-26). The writer
+        LLM emits `[CALLOUT: "TEXT"]` markers in the script; S08
+        parses them into per-beat lists; S12 composites them as
+        Pillow text overlays on the beat's image."""
+        defaults = {
+            "enabled": True,
+            "max_per_beat": 1,
+            "font_size_pct": 0.10,
+            "color": "#FFE600",
+            "stroke_color": "#000000",
+            "stroke_width": 6,
+            "hold_seconds": 2.5,
+            "fade_ms": 200,
+        }
+        return {**defaults, **(self.raw.get("callouts") or {})}
 
     @property
     def stock_sources(self) -> dict[str, Any]:

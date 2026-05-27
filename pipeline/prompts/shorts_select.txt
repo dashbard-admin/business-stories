@@ -1,0 +1,77 @@
+You are picking N={n} {target_seconds}-second video clips from a
+business documentary that will work as standalone YouTube SHORTS
+(vertical, no context, hook-driven). Each Short must be a
+self-contained dramatic moment that an average viewer scrolling
+their phone would stop on within the first 2 seconds.
+
+EPISODE:
+- Company: {company_name}
+- Hero: {hero}
+- Conflict: {conflict}
+- Story kind: {story_kind}
+
+BEAT TABLE (beat_id: first 200 chars of the beat's script):
+{beats_dump}
+
+================================================================
+SELECTION CRITERIA
+================================================================
+
+Each window must satisfy ALL of these:
+
+  (a) The window starts on a HOOK — a specific number, a specific
+      moment, a sharp contradiction. Never starts on a soft transition
+      ("And so...", "Meanwhile...", "Years later...").
+
+  (b) The window contains a SELF-CONTAINED arc — viewer understands
+      what happened without the surrounding context.
+
+  (c) The window has at least one CONCRETE anchor — a date, a dollar
+      amount, a named person, a named place. No vague "a tech
+      company" / "around that time".
+
+  (d) The window's PAYOFF (last 5-7 seconds) is a forward-tease or
+      a punch — something that makes a Shorts viewer tap to watch
+      the full episode. "And that's when [Founder] made the call
+      that should have been impossible." style.
+
+Strong window types (rank these in your picks):
+
+  - Cold open (Act 0): almost always the strongest Short — by
+    design it's a self-contained hook.
+  - Mid-roll tension landings (~6:00 in / ~10:00 in): both end on
+    cliffs the writer designed for retention.
+  - Pivotal-moment paragraphs in Act 3 or Act 4: a single decision
+    that turned the arc.
+  - Surprising-document moments in Act 3.5: a leaked email, a
+    deposition line that contradicts the official story.
+
+Weak windows to AVOID:
+
+  - Era-setting paragraphs (Act 1 start) — no payoff in 30s.
+  - Investigation framing without the actual revelation.
+  - Act 5 takeaways — they require the prior 17 minutes to land.
+
+================================================================
+OUTPUT FORMAT — JSON only, no prose, no code fences.
+================================================================
+
+Each window specifies a START point either by beat_id (preferred —
+the orchestrator will resolve it to seconds via voice_timing) OR
+by absolute start_seconds. End is start + {target_seconds}.
+
+{{
+  "windows": [
+    {{
+      "start_beat_id": "BEAT_NN",
+      "start_seconds": null,
+      "title_hint": "string — a 5-8 word Shorts caption / title hint",
+      "reasoning": "string — why this {target_seconds}s arc works
+                    standalone. Be specific about which sentence is
+                    the hook and which sentence is the payoff."
+    }}
+  ]
+}}
+
+Order by your predicted virality (highest first). Produce exactly
+{n} windows.

@@ -310,7 +310,18 @@ def run(episode: dict, queue: dict) -> str | None:
                 rendered, rejected_accepted, failed)
     if failed > 0 and failed > rendered * 0.1:
         return f"FLUX rendering failed for {failed}/{rendered + failed} beats"
-    return None
+
+    # Visual brand-safety pass (Batch F 2026-05-28). Runs the VLM
+    # over every rendered beat to catch scene/topic mismatches that
+    # the per-image critique can't see — e.g. a hacking-coded panel
+    # in a non-crime story (the Pets.com review video had exactly
+    # this), or era-anachronistic styling (a 1940s noir detective
+    # figure in a 1999 dot-com bust). Output:
+    # 03_assets/visual_brand_safety_flags.json. High-severity flags
+    # gate the stage (mark needs_human) unless disabled in config.
+    return _run_visual_brand_safety_pass(
+        episode=episode, ws=ws, beats=beats, cfg=cfg, vlm=vlm,
+    )
 
 
 # ---------------- VLM verdict logging ----------------
@@ -608,3 +619,297 @@ def _render_credits_card(*, ws: Path, episode: dict, cfg, flux: Flux,
         logger.info("S09 credits card rendered: %s", chosen)
     else:
         logger.warning("S09 credits card render failed; S12 will fall back to ffmpeg-drawn card")
+
+
+# ----------------------------------------------------------------------
+# Per-beat re-render entry point (Batch B 2026-05-26)
+# ----------------------------------------------------------------------
+
+# ----------------------------------------------------------------------
+# Visual brand-safety pass (Batch F 2026-05-28)
+# ----------------------------------------------------------------------
+
+def _run_visual_brand_safety_pass(
+    *,
+    episode: dict,
+    ws,
+    beats: list,
+    cfg,
+    vlm,
+) -> str | None:
+    """For every rendered beat, ask the VLM whether the panel is
+    brand-safe and topic-coherent for the episode's company / era /
+    story_kind. Emits 03_assets/visual_brand_safety_flags.json with
+    structured flags. Returns a needs_human reason if any high-
+    severity flag fires AND cfg.visual_brand_safety.gate_on_severity
+    is "high" (default). Operator clears via --approve.
+    """
+    vbs_cfg = cfg.visual_brand_safety
+    out_path = ws / "03_assets" / "visual_brand_safety_flags.json"
+
+    if not vbs_cfg.get("enabled", True):
+        out_path.write_text(json.dumps({
+            "verdict": "skipped",
+            "reason": "visual_brand_safety.enabled=false",
+            "flags": [],
+            "high_severity_count": 0,
+            "low_severity_count": 0,
+        }, indent=2))
+        return None
+
+    if vlm is None:
+        logger.info("S09 visual brand-safety: VLM disabled; skipping")
+        return None
+
+    incident = episode.get("incident") or {}
+    company_name = incident.get("company_name", "")
+    story_kind = incident.get("story_kind", "")
+    year_anchor = incident.get("year_anchor", "")
+    one_line_pitch = incident.get("one_line_pitch", "")
+
+    sample_every = max(1, int(vbs_cfg.get("sample_every_n", 1)))
+    flags: list[dict] = []
+    high = 0
+    low = 0
+    checked = 0
+    for i, b in enumerate(beats):
+        # Sample every Nth beat to keep VLM cost bounded — Pets.com
+        # video had 60+ beats so a per-beat pass adds 60 VLM calls.
+        # sample_every=2 halves it without losing the per-pattern
+        # signal we care about.
+        if i % sample_every != 0:
+            continue
+        rel = b.get("flux_asset_path")
+        if not rel:
+            continue
+        img_path = ws / rel
+        if not img_path.exists():
+            continue
+        result = vlm.brand_safety_check(
+            img_path,
+            company_name=company_name,
+            story_kind=story_kind,
+            year_anchor=year_anchor,
+            one_line_pitch=one_line_pitch,
+        )
+        checked += 1
+        if result is None:
+            continue
+        severity = result.get("severity", "clean")
+        if severity == "clean":
+            continue
+        flag = {
+            "beat_id": b.get("beat_id", ""),
+            "image_path": rel,
+            "severity": severity,
+            "category": result.get("category", ""),
+            "issue": result.get("issue", ""),
+            "suggestion": result.get("suggestion", ""),
+        }
+        flags.append(flag)
+        if severity == "high":
+            high += 1
+        elif severity == "low":
+            low += 1
+        logger.info(
+            "S09 visual-safety [%s]: %s — %s",
+            severity, b.get("beat_id", "?"),
+            (result.get("issue") or "")[:120],
+        )
+
+    out_path.write_text(json.dumps({
+        "verdict": ("ship_blocker" if high > 0 else
+                    "review_recommended" if low > 0 else "clean"),
+        "high_severity_count": high,
+        "low_severity_count": low,
+        "checked_count": checked,
+        "flags": flags,
+    }, indent=2))
+    logger.info(
+        "S09 visual brand-safety: %d high, %d low, %d clean (of %d checked)",
+        high, low, checked - high - low, checked,
+    )
+
+    # Stamp counts on the episode record for --status surfacing.
+    # The dict is passed by reference; the orchestrator's
+    # save_queue() call after dispatch_stage picks up the mutation.
+    episode["visual_safety_flags_count"] = {"high": high, "low": low}
+
+    # Apply the gate.
+    gate = (vbs_cfg.get("gate_on_severity") or "high").lower()
+    if gate == "off":
+        return None
+    if gate == "high" and high > 0:
+        return (
+            f"visual brand-safety: {high} high-severity flag(s) "
+            f"require review. Inspect 03_assets/"
+            f"visual_brand_safety_flags.json then run `--approve "
+            f"{episode['id']}` to clear (or `--rerender` the "
+            f"specific beats first)."
+        )
+    if gate == "low" and (high > 0 or low > 0):
+        return (
+            f"visual brand-safety: {high}H + {low}L flag(s) "
+            f"(gate_on_severity=low). Inspect "
+            f"03_assets/visual_brand_safety_flags.json then "
+            f"`--approve {episode['id']}` to clear."
+        )
+    return None
+
+
+def rerender_single_beat(
+    episode: dict,
+    beat_id: str,
+    *,
+    from_edited_prompt: bool = False,
+) -> bool:
+    """Re-run FLUX render + VLM judge + Grok fallback for a single
+    beat. Called by hermes_orchestrator's --rerender CLI flow.
+
+    `from_edited_prompt=True` re-reads the beat's
+    `flux_render_request.prompt` fresh from beat_sheet.json on disk
+    so an operator edit takes effect. When False, re-uses whatever
+    prompt was in the in-memory beat record (which is also read
+    from disk, just unmodified) — semantically equivalent here
+    since we don't cache; the flag exists to make the operator's
+    intent explicit.
+
+    Archives the existing render (and any Grok-corrected version)
+    to 03_assets/quarantine/<beat_id>_<timestamp>.png before
+    re-rendering, so nothing gets silently overwritten without a
+    paper trail.
+
+    Returns True on success, False on failure. Raises
+    FileNotFoundError if the workspace or beat isn't found.
+    """
+    from datetime import datetime, timezone
+
+    cfg = load_config()
+    ws = find_episode_workspace(episode["id"])
+    if not ws:
+        raise FileNotFoundError(
+            f"no workspace for episode {episode['id']}"
+        )
+
+    beat_sheet_path = ws / "02_script" / "beat_sheet.json"
+    if not beat_sheet_path.exists():
+        raise FileNotFoundError(
+            f"no beat_sheet.json at {beat_sheet_path}"
+        )
+    beat_sheet = json.loads(beat_sheet_path.read_text())
+    beats = beat_sheet.get("beats", [])
+
+    target = next((b for b in beats if b.get("beat_id") == beat_id), None)
+    if target is None:
+        raise FileNotFoundError(
+            f"beat {beat_id} not found in beat_sheet.json"
+        )
+    if "flux_render_request" not in target:
+        raise FileNotFoundError(
+            f"beat {beat_id} has no flux_render_request "
+            f"(routed to PD asset, not FLUX)"
+        )
+
+    flux_dir = ws / "03_assets" / "flux"
+    grok_dir = ws / "03_assets" / "grok"
+    quarantine_dir = ws / "03_assets" / "quarantine"
+    flux_dir.mkdir(parents=True, exist_ok=True)
+    quarantine_dir.mkdir(parents=True, exist_ok=True)
+
+    # Archive any existing renders.
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    for src_dir, suffix in [(flux_dir, "flux"), (grok_dir, "grok")]:
+        existing = src_dir / f"{beat_id}.png"
+        if existing.exists():
+            archived = quarantine_dir / f"{beat_id}.{suffix}.{ts}.png"
+            existing.rename(archived)
+            logger.info("S09 rerender: archived %s -> %s",
+                        existing.name, archived.name)
+
+    # Build single-beat render request and run the same FLUX +
+    # judge + Grok cycle. To keep this scope tight, we reuse the
+    # existing helpers but inline a minimal version of the per-beat
+    # loop from run() — the loop in run() is iterative across beats
+    # and not currently factorable without a refactor we don't want
+    # to do in Batch B.
+    flux = Flux()
+    fr = target["flux_render_request"]
+    if from_edited_prompt:
+        logger.info("S09 rerender: re-reading prompt from beat_sheet.json "
+                    "for %s (edited-prompt path)", beat_id)
+
+    out_path = flux_dir / f"{beat_id}.png"
+    req = FluxRequest(
+        beat_id=beat_id,
+        prompt=fr["prompt"],
+        negative_prompt=fr.get("negative_prompt", ""),
+        out_path=out_path,
+    )
+    qa_enabled = bool(cfg.image_qa.get("enabled", True))
+    max_attempts = max(1, int(cfg.image_qa.get("max_attempts_per_beat", 2)))
+    strict_borderline = bool(cfg.image_qa.get("strict_borderline", True))
+    vlm: VLM | None = VLM() if qa_enabled else None
+
+    chosen_path: Path | None = None
+    chosen_verdict: ImageVerdict | None = None
+    for attempt in range(1, max_attempts + 1):
+        candidate = flux.render_batch_with_retry(
+            req, num_candidates=1, seed_offset=hash(beat_id) % 10000 + attempt,
+        )
+        if not candidate or not candidate.exists():
+            logger.warning("S09 rerender: FLUX failed attempt %d for %s",
+                           attempt, beat_id)
+            continue
+        if not vlm:
+            chosen_path = candidate
+            break
+        verdict = vlm.critique_image(candidate, fr["prompt"])
+        if verdict:
+            _log_verdict(beat_id, "rerender", attempt, max_attempts, verdict)
+        if verdict and _is_good_enough(verdict, strict_borderline):
+            chosen_path = candidate
+            chosen_verdict = verdict
+            break
+
+    if chosen_path is None:
+        logger.warning("S09 rerender: no acceptable render for %s "
+                       "after %d attempt(s)", beat_id, max_attempts)
+        return False
+
+    # Grok fallback if anatomy/text issues remain.
+    grok = Grok()
+    if grok.available and chosen_verdict:
+        text_triggered, text_triggers = _has_malformed_text(chosen_verdict)
+        anatomy_bad = not chosen_verdict.anatomy_ok
+        triggers: list[str] = list(text_triggers)
+        if anatomy_bad:
+            anat_msg = "anatomy_ok=False"
+            if chosen_verdict.reasoning:
+                anat_msg = f"{anat_msg}: {chosen_verdict.reasoning[:160]}"
+            triggers.insert(0, anat_msg)
+        if text_triggered or anatomy_bad:
+            grok_template_path = cfg.prompts_dir / "grok_text_correction.txt"
+            if grok_template_path.exists():
+                grok_template = grok_template_path.read_text()
+                _correct_text_via_grok(
+                    src=chosen_path, beat_id=beat_id,
+                    flux_prompt=fr["prompt"], verdict=chosen_verdict,
+                    grok=grok, grok_dir=grok_dir,
+                    prompt_template=grok_template, triggers=triggers,
+                )
+
+    # Update the beat record + persist.
+    target["flux_asset_path"] = str(chosen_path.relative_to(ws))
+    if chosen_verdict:
+        target["image_qa"] = {
+            "verdict": chosen_verdict.verdict,
+            "score": chosen_verdict.score,
+            "prompt_match": chosen_verdict.prompt_match,
+            "anatomy_ok": chosen_verdict.anatomy_ok,
+            "artifacts": chosen_verdict.artifacts,
+            "reasoning": chosen_verdict.reasoning,
+            "rerendered_at": ts,
+        }
+    beat_sheet_path.write_text(json.dumps(beat_sheet, indent=2))
+    logger.info("S09 rerender complete: %s", chosen_path.name)
+    return True

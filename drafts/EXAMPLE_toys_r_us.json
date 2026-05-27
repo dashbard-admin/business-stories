@@ -1,0 +1,20 @@
+{
+  "_README": "Manual topic injection. Usage: python -m pipeline.hermes_orchestrator --inject-topic drafts/EXAMPLE_toys_r_us.json   (add --no-validate to bypass the SearXNG demand gate). Required fields: company_name, founder_or_protagonist, year_anchor, story_kind, hq_country, hero, conflict. Optional top-level pins: archetype, narrator, visual_style — set any of these to force the cooldown engine's choice; remove them entirely to let S01 pick via rolling-window rotation. Any other keys (including this _README) flow through to incident.json unchanged and are visible to downstream stages.",
+
+  "company_name": "Toys R Us, Inc.",
+  "founder_or_protagonist": "Charles Lazarus",
+  "year_anchor": 2017,
+  "story_kind": "scandal_postmortem",
+  "hq_country": "US",
+  "one_line_pitch": "How a $6.6bn leveraged buyout buried the world's biggest toy store right as Amazon redefined Christmas.",
+  "hero": "Charles Lazarus, the WWII vet who turned a baby furniture store on Wisconsin Avenue into a 1,600-location category killer — then watched private equity hollow it out from the cheap seats.",
+  "conflict": "A $6.6bn LBO by Bain, KKR, and Vornado that loaded Toys R Us with $5bn in debt right as Amazon and Walmart redefined toy retail, leaving the company unable to renovate stores or invest in e-commerce while servicing $400m a year in interest payments.",
+  "why_this_one": "The 2017 Chapter 11 filing is well-documented in PACER (court records open), the LBO terms are in the SEC S-1 from the 2010 attempted IPO that the PE owners pulled, and ProPublica + The Atlantic covered the post-mortem in 2018-2019. Differentiation from the typical 'Amazon killed retail' angle: this is fundamentally a story about debt servicing, not consumer demand — Toys R Us sales were FLAT, not declining, when the company filed.",
+  "predicted_archetype_fit": "A2",
+  "estimated_source_quality": "high",
+  "demonetization_risk_notes": "Charles Lazarus is deceased (2018); LBO partners (Bain, KKR, Vornado) are public corporations and fair-comment territory. No living named villain. Brand IP (Geoffrey the Giraffe) referenced descriptively only.",
+
+  "archetype": "A2",
+  "narrator": "N2",
+  "visual_style": "V2"
+}

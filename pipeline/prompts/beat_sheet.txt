@@ -95,6 +95,11 @@ LOCKED VISUAL STYLE: {visual_style_name}
 
 NARRATOR: {narrator_name}
 
+PERFORMANCE FEEDBACK (Batch E 2026-05-27 — derived from recent
+published episodes' retention curves; treat as soft guidance):
+- {visual_intents_that_retained}
+- {visual_intents_that_lost_viewers}
+
 SCRIPT:
 ---
 {script_with_beats}
