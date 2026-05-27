@@ -99,7 +99,44 @@ def load_queue() -> dict[str, Any]:
     if not path.exists():
         return _init_queue()
     with path.open() as f:
-        return json.load(f)
+        queue = json.load(f)
+    _migrate_queue_in_place(queue)
+    return queue
+
+
+def _migrate_queue_in_place(queue: dict[str, Any]) -> None:
+    """Forward-migrate an on-disk queue loaded from an older pipeline
+    version so it has every stage key the current STAGE_ORDER expects.
+
+    Hit in production after Batch D added S13: existing episode
+    records had stages={S1..S12}, and next_pending_episode tried
+    ep["stages"]["S13"] → KeyError. This walks every episode and
+    inserts any missing stage as `pending`. Idempotent.
+
+    Also backfills missing rolling_window keys (Batch A added
+    `countries`) so a queue saved before that batch still loads.
+
+    Added 2026-05-28.
+    """
+    # Per-episode stages.
+    for ep in queue.get("episodes", []):
+        stages = ep.setdefault("stages", {})
+        for sid in STAGE_ORDER:
+            if sid not in stages:
+                stages[sid] = {"status": "pending", "ts": None}
+        # If current_stage is "DONE" but new stages got appended,
+        # treat the earliest pending NEW stage as the next runnable.
+        cs = ep.get("current_stage")
+        if cs == "DONE":
+            for sid in STAGE_ORDER:
+                if stages[sid].get("status") == "pending":
+                    ep["current_stage"] = sid
+                    break
+
+    # Rolling-window keys.
+    rw = queue.setdefault("rolling_window", {})
+    for key in ("archetypes", "narrators", "visual_styles", "countries"):
+        rw.setdefault(key, [])
 
 
 def save_queue(queue: dict[str, Any]) -> None:
