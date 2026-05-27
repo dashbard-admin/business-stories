@@ -309,6 +309,13 @@ def cli() -> int:
                 tags.append(f"safety_flags={sf['high']}H/{sf.get('low', 0)}L")
             elif sf.get("low"):
                 tags.append(f"safety_flags=0H/{sf['low']}L")
+            vsf = ep.get("visual_safety_flags_count") or {}
+            if vsf.get("high"):
+                tags.append(
+                    f"visual_safety={vsf['high']}H/{vsf.get('low', 0)}L"
+                )
+            elif vsf.get("low"):
+                tags.append(f"visual_safety=0H/{vsf['low']}L")
             origin = f" ({', '.join(tags)})" if tags else ""
             blocked = "BLOCKED" if ep.get("blockers") else ""
             print(f"{ep['id']:8s}  stage={ep['current_stage']:4s}  "

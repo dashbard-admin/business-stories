@@ -187,6 +187,77 @@ Output ONLY the caption sentence(s). No JSON, no markdown, no preamble.
 """
 
 
+# ----------------------------------------------------------------------
+# Visual brand-safety check (Batch F 2026-05-28)
+# ----------------------------------------------------------------------
+
+_VISUAL_BRAND_SAFETY_PROMPT = """\
+You are a brand-safety reviewer for a Business & Brand Origin Stories
+documentary YouTube channel. The image below is a rendered comic-book
+panel that will appear in an episode about a specific company. Your
+job is to flag content that could:
+
+  (a) misrepresent the story's actual subject matter
+  (b) trigger YouTube's monetization restrictions for sensitive
+      content (drugs, weapons, sexual imagery, hate symbols, graphic
+      violence, suicide imagery, hacking/crime imagery when the story
+      is not about crime)
+  (c) plant an anachronistic visual element that breaks the documentary
+      contract (e.g. a 1940s fedora-and-trench-coat detective figure
+      in a story about a 1999 dot-com bust)
+
+EPISODE CONTEXT:
+- Company: {company_name}
+- Story kind: {story_kind}
+- Year anchor: {year_anchor}
+- Brief: {one_line_pitch}
+
+================================================================
+SEVERITY DEFINITIONS
+================================================================
+
+  high (ship-blocker):
+    - Graphic violence, sexual imagery, drugs, weapons, hate symbols.
+    - Hacking / crime imagery when the story_kind is NOT a crime /
+      fraud / cyber story (e.g. shadowy figure typing on a computer
+      with a "REDIRECTING" screen in a story about a failed pet
+      retailer).
+    - Recognisable real-person likeness of a different living person
+      than the protagonist (defamation risk).
+
+  low (worth logging, doesn't block):
+    - Era-anachronistic styling (1940s fedora figure in a 1990s
+      story; medieval wax-sealed contracts in a dot-com bust;
+      handwritten ledgers when the story is about computerized
+      finance).
+    - Recurring "noir detective" or other archetype character who
+      does NOT appear in the actual story.
+    - Generic business imagery with zero recognizable cues that this
+      panel belongs to THIS company.
+
+  clean:
+    - The panel could plausibly belong in a documentary about the
+      named company, in the named era, depicting the named story
+      kind, with no monetization risks.
+
+================================================================
+OUTPUT FORMAT — JSON only, no prose, no code fences.
+================================================================
+
+{{
+  "severity": "clean | low | high",
+  "issue": "string — if not clean, ONE short sentence naming the
+             specific issue. If clean, leave as empty string.",
+  "category": "string — one of: monetization_risk |
+               anachronism | mismatched_archetype |
+               misrepresented_topic | generic_no_identity | clean",
+  "suggestion": "string — optional, ONE sentence on how a re-render
+                  could fix the issue (e.g. 'remove the fedora-hat
+                  figure; this story has no detective character')."
+}}
+"""
+
+
 class VLM:
     """Adapter for the local Vision-Language model."""
 
@@ -373,3 +444,91 @@ class VLM:
             logger.warning("VLM verdict coercion failed for %s: %s",
                            image_path.name, str(data)[:200])
         return verdict
+
+    # ------------------------------------------------------------------
+    # Visual brand-safety check (Batch F 2026-05-28)
+    # ------------------------------------------------------------------
+
+    def brand_safety_check(
+        self,
+        image_path: Path,
+        *,
+        company_name: str,
+        story_kind: str,
+        year_anchor,
+        one_line_pitch: str = "",
+    ) -> dict | None:
+        """Ask the VLM whether the rendered image is brand-safe and
+        topic-coherent for the named company / era / story kind.
+        Returns a dict {severity, issue, category, suggestion}.
+
+        Used by S09's post-render visual brand-safety phase (Batch F
+        2026-05-28) to catch:
+          - hacking-coded panels in non-crime stories (Pets.com review
+            video had this — a noir figure typing on a 'REDIRECTING...'
+            terminal in a story about a failed pet retailer)
+          - era-anachronistic styling (1940s fedora figure in 1999)
+          - misrepresented-topic visuals
+          - monetization-risk content
+        Returns None on infrastructure failure (treat as accept).
+        """
+        try:
+            if not image_path.exists() or image_path.stat().st_size < 1000:
+                return None
+            b64 = base64.standard_b64encode(image_path.read_bytes()).decode("ascii")
+        except OSError as e:
+            logger.warning("VLM cannot read %s: %s", image_path, e)
+            return None
+
+        payload = {
+            "model": self.model_name,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text",
+                     "text": _VISUAL_BRAND_SAFETY_PROMPT.format(
+                         company_name=company_name,
+                         story_kind=story_kind,
+                         year_anchor=str(year_anchor or "?"),
+                         one_line_pitch=one_line_pitch,
+                     )},
+                    {"type": "image_url",
+                     "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                ],
+            }],
+            "temperature": 0.2,
+            "max_tokens": 250,
+        }
+
+        try:
+            r = requests.post(
+                f"{VLM_BASE}/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {VLM_API_KEY}"},
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            text = r.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            logger.warning("VLM brand-safety failed for %s: %s",
+                           image_path.name, e)
+            return None
+
+        try:
+            cleaned = _clean(text)
+            m = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            if not m:
+                return None
+            data = json.loads(m.group(0))
+        except Exception:
+            return None
+
+        severity = (data.get("severity") or "clean").strip().lower()
+        if severity not in {"clean", "low", "high"}:
+            severity = "low"
+        return {
+            "severity": severity,
+            "issue": (data.get("issue") or "").strip(),
+            "category": (data.get("category") or "").strip(),
+            "suggestion": (data.get("suggestion") or "").strip(),
+        }

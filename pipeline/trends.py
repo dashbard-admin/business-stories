@@ -53,6 +53,96 @@ class ValidationResult:
 
 
 # ----------------------------------------------------------------------
+# Incumbent-trap filter (Batch F 2026-05-27)
+# ----------------------------------------------------------------------
+
+# Companies / topics where the top 5 competing YouTube docs already
+# have millions of views combined. Adding doc #51 — even a good one —
+# fights for impressions against incumbents the algo already trusts.
+# This is a hard reject regardless of demand-validation gate result;
+# the saturation gate alone catches some of these but not all
+# (Theranos returns 100+ video URLs but each one has hundreds of
+# thousands to millions of views).
+#
+# Normalised to lowercase substring match — a candidate company_name
+# containing ANY of these tokens fails the gate.
+#
+# Operator can override per-episode by setting topic_validation.
+# bypass_incumbent_trap: true in config.yaml (NOT a CLI flag — the
+# operator must consciously edit config to override).
+_INCUMBENT_TRAPS = (
+    # Dot-com bust evergreens
+    "theranos",
+    "pets.com",
+    "webvan",
+    "boo.com",
+    "wework",
+    # Crypto / fintech scandals everyone has covered
+    "ftx",
+    "luna",
+    "celsius",
+    "bitconnect",
+    "wirecard",
+    # Classic frauds
+    "enron",
+    "lehman brothers",
+    "lehman bros",
+    "madoff",
+    "worldcom",
+    "tyco",
+    "arthur andersen",
+    "satyam",
+    # Founder-drama saturated
+    "elon musk",
+    "twitter acquisition",
+    "x corp",
+    "steve jobs",
+    "bezos",
+    "zuckerberg",
+    "elizabeth holmes",
+    "sam bankman-fried",
+    "bankman-fried",
+    "sbf",
+    "adam neumann",
+    # Retail / leveraged-buyout postmortems
+    "blockbuster",
+    "toys r us",
+    "sears",
+    "kodak",
+    "polaroid",
+    "nokia",
+    "blackberry",
+    "yahoo",
+    "myspace",
+    # The "garage origin" greatest hits
+    "apple founding",
+    "microsoft founding",
+    "amazon founding",
+    "google founding",
+    "facebook founding",
+    "nike founding",
+    "starbucks founding",
+    # Generic over-saturated phrasings
+    "billion-dollar company",
+    "biggest bankruptcy",
+)
+
+
+def is_incumbent_trap(candidate: dict[str, Any]) -> tuple[bool, str]:
+    """Return (True, matched_token) if the candidate hits the incumbent-
+    trap list, (False, "") otherwise. Match is case-insensitive
+    substring over company_name + founder_or_protagonist."""
+    name = (candidate.get("company_name") or "").strip().lower()
+    founder = (candidate.get("founder_or_protagonist") or "").strip().lower()
+    pitch = (candidate.get("one_line_pitch") or "").strip().lower()
+    haystack = " | ".join([name, founder, pitch])
+    for token in _INCUMBENT_TRAPS:
+        if token in haystack:
+            return True, token
+    return False, ""
+
+
+# ----------------------------------------------------------------------
 # Primitives
 # ----------------------------------------------------------------------
 

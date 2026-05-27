@@ -113,7 +113,12 @@ def run(episode: dict, queue: dict) -> str | None:
         voice_gain_db=-18.0,
         music_gain_db=float(ml_cfg.get("music_gain_db", -28.0)),
         ambient_gain_db=-30.0,
-        duck_depth_db=6.0,
+        # Batch F 2026-05-27: duck depth raised 6→10. The shallower 6dB
+        # duck was contributing to flat dynamics — when voice paused,
+        # the music barely swelled back, so the mix felt evenly loud
+        # throughout. 10 dB gives audible swell-back during voice gaps
+        # which restores emotional contour at act boundaries.
+        duck_depth_db=10.0,
         duck_attack_ms=100,
         duck_release_ms=800,
         lufs_target=float(cfg.quality_gates.get("audio_lufs_target", -14.0)),

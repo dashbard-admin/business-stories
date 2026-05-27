@@ -115,6 +115,19 @@ class Config:
         return merged
 
     @property
+    def visual_brand_safety(self) -> dict[str, Any]:
+        """Post-S09 VLM visual brand-safety pass (Batch F 2026-05-28).
+        Asks the VLM whether each rendered panel is topic-coherent
+        and brand-safe; flags hacking-coded / era-anachronistic /
+        misrepresented panels."""
+        defaults = {
+            "enabled": True,
+            "gate_on_severity": "high",
+            "sample_every_n": 2,
+        }
+        return {**defaults, **(self.raw.get("visual_brand_safety") or {})}
+
+    @property
     def brand_safety(self) -> dict[str, Any]:
         """Brand-safety / defamation review gate (Batch B 2026-05-26).
         Configures the brand_safety_review.txt prompt that runs as the
@@ -173,6 +186,8 @@ class Config:
             "non_us_ratio": 0.33,
             "non_us_ratio_lookback": 6,
             "trending_news_lookback_days": 30,
+            # Batch F 2026-05-27 — reject over-covered topics outright.
+            "reject_incumbent_traps": True,
         }
         return {**defaults, **(self.raw.get("topic_validation") or {})}
 

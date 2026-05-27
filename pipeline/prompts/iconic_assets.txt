@@ -1,0 +1,106 @@
+You are deriving a list of ICONIC VISUAL ASSETS that any documentary
+about {company_name} must include in its panels — the visual cues
+that make a viewer instantly recognise the company even at thumbnail
+size, even with the sound off.
+
+EPISODE:
+- Company: {company_name}
+- Founder/Protagonist: {founder}
+- Year anchor: {year_anchor}
+- Story kind: {story_kind}
+- Hero: {hero}
+- Conflict: {conflict}
+- One-line pitch: {one_line_pitch}
+
+================================================================
+WHAT COUNTS AS AN ICONIC VISUAL ASSET
+================================================================
+
+Five categories. List the assets that EXIST AND ARE WELL-KNOWN for
+this specific company in each category. If a category genuinely has
+no iconic asset for this company, return an empty list for it —
+don't invent.
+
+  1. mascot_or_brand_character
+     A recognisable cartoon / puppet / mascot specifically tied to
+     the company. Examples: Pets.com sock puppet, Aflac duck,
+     GEICO gecko, Tony the Tiger, Pillsbury Doughboy.
+     Most companies have NO such mascot — return [] in that case.
+
+  2. logo_or_wordmark
+     The company's visual logo. Describe its shape, color, and any
+     iconic associated object — NOT the legible wordmark itself
+     (FLUX renders legible text poorly). Examples:
+     "Apple rainbow apple silhouette with bite mark, six colored
+      stripes" / "Nike swoosh shape, simple curved tick mark"
+      / "McDonald's golden M arches".
+
+  3. signature_products_or_objects
+     The physical thing the company sold or made. For Pets.com:
+     brown shipping boxes with the paw-print logo, bags of dog
+     food. For Theranos: the Edison desktop blood-tester, glass
+     vials, tiny finger-prick samples. For WeWork: pine-wood
+     hot-desk furniture, neon "DO WHAT YOU LOVE" wall signs,
+     glass conference-room walls.
+
+  4. era_and_setting
+     Visual signals of the time/place the story takes place.
+     For a 1999-2000 dot-com story: beige CRT monitors, Windows 98
+     desktops, AltaVista / early Netscape interfaces, Y2K-era
+     office cubicles, dot-com-bubble Silicon Valley street scenes.
+     For a 1980s story: brick mobile phones, neon office signs,
+     IBM 5170 PCs, big-shoulder business attire.
+
+  5. recurring_protagonist_appearance
+     The founder/protagonist's visual signature — clothing,
+     posture, accessories — that should appear consistently
+     across panels. ONLY include items that are publicly
+     documented (Wikipedia photos, news photos, documentary
+     footage). Examples: "Elizabeth Holmes in a black turtleneck
+     with blonde bun, deep voice affectation"; "Steve Jobs in
+     black turtleneck and round wire-rimmed glasses, blue
+     Levi's 501 jeans"; "Adam Neumann in t-shirt and bare feet,
+     long dark hair, sometimes carrying a bottle of tequila in
+     PR contexts".
+
+================================================================
+OUTPUT RULES
+================================================================
+
+- Each asset's `description` becomes a comma-separated phrase
+  the FLUX prompt will use VERBATIM, so write it in the form
+  a comic-book illustrator would actually use:
+    "brown cardboard shipping boxes printed with the Pets.com
+     paw-print logo and the address sticker on the side"
+  NOT:
+    "shipping boxes are sometimes seen at Pets.com fulfillment
+     centres in early 2000."
+- Keep each description ≤ 25 words.
+- Avoid asking for LEGIBLE TEXT on the asset (FLUX renders text
+  as glyph-scribble). For logos that ARE text-based (Pets.com is
+  literally the word "Pets.com"), describe the visual SHAPE only:
+  "stylized paw print and rounded sans-serif blue letterforms"
+  rather than the literal string.
+- Total assets across all categories: 3-8 items. Quality > quantity.
+- If a category is irrelevant for this story (e.g. there's no
+  mascot, no signature product because it's a service company),
+  return an empty array for that category.
+
+================================================================
+OUTPUT FORMAT — JSON only, no prose, no code fences.
+================================================================
+
+{{
+  "company_name": "{company_name}",
+  "assets": [
+    {{
+      "category": "mascot_or_brand_character | logo_or_wordmark | signature_products_or_objects | era_and_setting | recurring_protagonist_appearance",
+      "description": "string — illustrator-ready phrase, ≤ 25 words"
+    }}
+  ]
+}}
+
+If the company has NO iconic assets you can confidently document
+(extremely rare — every well-known company has at least 2-3),
+return:
+  {{"company_name": "{company_name}", "assets": []}}

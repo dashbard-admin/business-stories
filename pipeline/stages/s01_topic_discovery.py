@@ -38,7 +38,7 @@ from ..state import (
     topic_already_used,
     update_episode,
 )
-from ..trends import non_us_required, validate_candidate
+from ..trends import is_incumbent_trap, non_us_required, validate_candidate
 
 logger = logging.getLogger("hermes.stage.s01")
 
@@ -159,6 +159,21 @@ def run(episode: dict, queue: dict) -> str | None:
         if not ok:
             rejection_reasons.append(f"{name}: {why}")
             continue
+
+        # gate 5b (Batch F 2026-05-27): incumbent-trap filter. The
+        # company / founder is too saturated on YouTube — even a great
+        # script can't break into a niche dominated by 5M-view
+        # incumbents. Operator can disable via
+        # cfg.topic_validation.reject_incumbent_traps: false.
+        if tv_cfg.get("reject_incumbent_traps", True):
+            is_trap, token = is_incumbent_trap(candidate)
+            if is_trap:
+                rejection_reasons.append(
+                    f"{name}: incumbent-trap match on '{token}' — "
+                    f"topic is over-covered on YouTube; pick an "
+                    f"under-covered alternative"
+                )
+                continue
 
         # gate 6: geographic diversity. If the rolling window says the
         # next pick must be non-US, enforce it as a hard reject so the
@@ -324,6 +339,15 @@ def _finalise_pick(
         }, indent=2)
     )
 
+    # Iconic visual-asset derivation (Batch F 2026-05-28). One LLM
+    # call per episode at S01 time to derive the company's iconic
+    # visual cues (mascot, logo shape, signature products, era
+    # markers, recurring protagonist appearance). S08 reads this
+    # file and folds the descriptions into every FLUX prompt so the
+    # generated panels visually identify as belonging to THIS
+    # company rather than as generic business imagery.
+    _derive_iconic_assets(ws, incident)
+
     update_episode(
         queue, episode["id"],
         slug=slug,
@@ -473,3 +497,69 @@ def _slugify(s: str) -> str:
     s = s.lower()
     s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
     return s[:60] or "unnamed"
+
+
+# ----------------------------------------------------------------------
+# Iconic visual-asset derivation (Batch F 2026-05-28)
+# ----------------------------------------------------------------------
+
+def _derive_iconic_assets(ws, incident: dict) -> None:
+    """Run a one-shot LLM call to populate 00_research/iconic_assets.json
+    with the company's mascot / logo shape / signature products /
+    era markers / recurring protagonist appearance. S08 reads this
+    file and injects the descriptions into every FLUX prompt so the
+    generated panels look like THIS company rather than generic
+    business stock imagery.
+
+    Failure modes (any of these → empty file, S08 silently skips
+    the preamble):
+      - LLM JSON parse fails
+      - prompt template missing
+      - LLM returns empty assets list (legitimate for some companies)
+    """
+    cfg = load_config()
+    template_path = cfg.prompts_dir / "iconic_assets.txt"
+    out_path = ws / "00_research" / "iconic_assets.json"
+    if not template_path.exists():
+        logger.warning("iconic_assets.txt template missing; skipping")
+        out_path.write_text(json.dumps({"assets": []}, indent=2))
+        return
+    try:
+        prompt = template_path.read_text().format(
+            company_name=incident.get("company_name", ""),
+            founder=incident.get("founder_or_protagonist", ""),
+            year_anchor=incident.get("year_anchor", ""),
+            story_kind=incident.get("story_kind", ""),
+            hero=incident.get("hero", ""),
+            conflict=incident.get("conflict", ""),
+            one_line_pitch=incident.get("one_line_pitch", ""),
+        )
+    except KeyError as e:
+        logger.warning("iconic_assets template format error: %s", e)
+        out_path.write_text(json.dumps({"assets": []}, indent=2))
+        return
+
+    llm = LLM(role="writer")
+    try:
+        result = llm.complete_json(prompt, temperature=0.4, max_tokens=2500)
+    except Exception as e:
+        logger.warning("iconic_assets LLM call failed: %s", e)
+        out_path.write_text(json.dumps({"assets": []}, indent=2))
+        return
+
+    assets = result.get("assets") or []
+    # Trim each description defensively in case the LLM ignored the
+    # 25-word cap.
+    for a in assets:
+        d = (a.get("description") or "").strip()
+        if d:
+            words = d.split()
+            if len(words) > 25:
+                a["description"] = " ".join(words[:25])
+    payload = {
+        "company_name": incident.get("company_name", ""),
+        "assets": assets,
+    }
+    out_path.write_text(json.dumps(payload, indent=2))
+    logger.info("iconic_assets derived: %d entries for %s",
+                len(assets), incident.get("company_name", "?"))

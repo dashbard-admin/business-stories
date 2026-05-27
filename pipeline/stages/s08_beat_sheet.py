@@ -87,6 +87,170 @@ def _extract_callouts(text: str, max_per_beat: int) -> tuple[str, list[dict]]:
     return cleaned, callouts
 
 
+# ----------------------------------------------------------------------
+# Batch F 2026-05-27 helpers
+# ----------------------------------------------------------------------
+
+# Available Ken Burns motion variants (must match motion_to_params() in
+# pipeline/ffmpeg_builder.py — keep them in sync).
+_KEN_BURNS_MOTIONS = (
+    "slow_zoom_in",
+    "slow_zoom_out",
+    "slow_pan_left",
+    "slow_pan_right",
+    "hold_still",
+)
+
+
+def _diversify_ken_burns_motion(beats: list[dict], *, episode_seed: int) -> None:
+    """Re-distribute Ken Burns motion across beats so 60+ sequential
+    panels don't all zoom in identically. Pet.com review showed
+    `slow_zoom_in` dominated >80% of beats — monotonous.
+
+    Strategy: walk beats in order, cycle through the 5 motions, with a
+    deterministic offset seeded by episode_id so re-runs reproduce the
+    same sequence. Hero-centric intents (founder_portrait, courtroom)
+    keep `slow_zoom_in` because that motion reads best on faces; the
+    others rotate."""
+    import random
+    rng = random.Random(episode_seed)
+    # Shuffle the motion order once per episode so episodes don't all
+    # look identical, but the per-beat sequence is stable within an
+    # episode.
+    cycle = list(_KEN_BURNS_MOTIONS)
+    rng.shuffle(cycle)
+
+    cycle_idx = 0
+    for b in beats:
+        intent = (b.get("visual_intent") or "").strip().lower()
+        # Hero-centric intents: keep the LLM's pick if it's already a
+        # face-friendly motion; else force slow_zoom_in (cinematic for
+        # portraits).
+        if intent in _HERO_CENTRIC_INTENTS:
+            current = (b.get("ken_burns_motion") or "").strip().lower()
+            if current not in {"slow_zoom_in", "slow_zoom_out", "hold_still"}:
+                b["ken_burns_motion"] = "slow_zoom_in"
+            continue
+        # All other beats: cycle through the shuffled motion list.
+        b["ken_burns_motion"] = cycle[cycle_idx % len(cycle)]
+        cycle_idx += 1
+
+
+# Visual intents that work as a hook (face / object / dramatic scene
+# the viewer can lock onto in the first 15 seconds).
+_HOOK_SAFE_INTENTS = {
+    "founder_portrait",
+    "product_reveal",
+    "office_environment",
+    "boardroom_meeting",
+    "street_scene",
+    "crowd_or_market",
+    "factory_or_workshop",
+}
+
+# Visual intents the hook MUST NOT use (flat, dark, text-heavy — the
+# 0:30 mark of the Pets.com review video was a near-black document
+# beat which is precisely the wrong frame at the retention decision
+# point).
+_HOOK_BANNED_INTENTS = {
+    "document_or_headline",
+    "chart_abstraction",
+    "montage_panel",
+}
+
+
+def _enforce_hook_beat_intents(beats: list[dict]) -> None:
+    """For the first 3 beats: if the LLM picked a banned intent,
+    rewrite to the safest available alternative. This is a hard
+    constraint, not a hint.
+
+    Doesn't touch the beats' `specific_visual_description` — only the
+    `visual_intent` tag. S09 may still render a document-heavy scene
+    if that's what the description asks for, but at least the
+    routing-by-intent (e.g. PD asset matching in Pass 1) won't pull
+    a document into the hook."""
+    for b in beats[:3]:
+        intent = (b.get("visual_intent") or "").strip().lower()
+        if intent in _HOOK_BANNED_INTENTS:
+            # Replace with the most universally-usable hook intent.
+            b["visual_intent"] = "founder_portrait"
+            b["_hook_intent_overridden"] = intent
+
+
+# Decline-arc story_kinds that get the era-aware style switch.
+_DECLINE_STORY_KINDS = {
+    "rise_and_fall",
+    "scandal_postmortem",
+    "founder_drama",
+}
+
+
+def _attach_act_and_style(
+    beats: list[dict],
+    *,
+    story_kind: str,
+    locked_style: str,
+) -> None:
+    """Tag each beat with `act` (0..5 inclusive, plus 3.5 for the
+    investigation slot) and `effective_visual_style`.
+
+    For decline stories: V1 on Acts 0-2 (the rise — bright, optimistic
+    comic), V2 on Acts 3-5 (the fall — noir comic). For non-decline
+    stories the locked episode-level style applies to every beat.
+
+    The act lookup is based on the BEAT POSITION (rank within the
+    beat list), mapped to the 7-act distribution from
+    pipeline/prompts/script_generate.txt:
+        Act 0:    1-2 beats
+        Act 1:    ~12 beats
+        Act 2:    ~11 beats
+        Act 3:    ~16 beats
+        Act 3.5:  ~9 beats
+        Act 4:    ~12 beats
+        Act 5:    ~5-6 beats
+    Total ~67-72 mid. We compute the per-act cutoff PROPORTIONALLY so
+    the mapping still works for episodes with 65-95 beats.
+    """
+    n = len(beats)
+    if n == 0:
+        return
+
+    # Reference fractions (sum to 1.0) from the script_generate template.
+    fractions = [
+        ("0",   0.02),
+        ("1",   0.18),
+        ("2",   0.16),
+        ("3",   0.23),
+        ("3.5", 0.13),
+        ("4",   0.18),
+        ("5",   0.10),
+    ]
+    cutoffs: list[tuple[str, int]] = []
+    acc = 0.0
+    for label, frac in fractions:
+        acc += frac
+        cutoffs.append((label, int(round(n * acc))))
+
+    is_decline = story_kind in _DECLINE_STORY_KINDS
+
+    for i, b in enumerate(beats):
+        act_label = "5"
+        for label, ci in cutoffs:
+            if i < ci:
+                act_label = label
+                break
+        b["act"] = act_label
+
+        if is_decline:
+            # V1 for Acts 0, 1, 2; V2 from Act 3 onward.
+            if act_label in {"0", "1", "2"}:
+                b["effective_visual_style"] = "V1"
+            else:
+                b["effective_visual_style"] = "V2"
+        else:
+            b["effective_visual_style"] = locked_style
+
+
 def run(episode: dict, queue: dict) -> str | None:
     cfg = load_config()
     llm = LLM(role="writer")
@@ -193,6 +357,31 @@ def run(episode: dict, queue: dict) -> str | None:
 
     for b in beats:
         b.setdefault("estimated_seconds", _estimate_seconds(b.get("script_text", "")))
+
+    # ----- Ken Burns motion variety (Batch F 2026-05-27) -----
+    # The writer LLM tends to default every beat to slow_zoom_in, which
+    # makes 60-95 sequential beats feel monotonous (the Pets.com review
+    # video had this — every panel zoomed in the same way for 14
+    # minutes). Re-distribute deterministically over the 5 available
+    # motions so the cadence varies but is reproducible across re-runs.
+    _diversify_ken_burns_motion(beats, episode_seed=hash(episode["id"]) & 0xffff)
+
+    # ----- Hook-beat visual-intent restriction (Batch F 2026-05-27) -----
+    # First 3 beats decide whether the viewer keeps watching. They MUST
+    # be high-contrast and contain a face / object the viewer can lock
+    # onto. document_or_headline beats are flat, dark, and text-heavy
+    # — exactly what tanked the Pets.com episode's 0:30 hook frame.
+    _enforce_hook_beat_intents(beats)
+
+    # ----- Era-aware per-beat visual style (Batch F 2026-05-27) -----
+    # Decline stories should LOOK optimistic in the rise and bleak in
+    # the fall. Override the episode-locked visual_style on a per-beat
+    # basis for rise_and_fall / scandal_postmortem / founder_drama:
+    # V1 for Acts 0-2 (the rise), V2 for Acts 3-5 (the fall).
+    incident = episode.get("incident") or {}
+    story_kind = (incident.get("story_kind") or "").strip().lower()
+    _attach_act_and_style(beats, story_kind=story_kind,
+                          locked_style=episode["visual_style"])
 
     target_min = cfg.production["target_duration_seconds"] - cfg.production["duration_tolerance_seconds"]
     target_max = cfg.production["target_duration_seconds"] + cfg.production["duration_tolerance_seconds"]
@@ -331,9 +520,23 @@ def run(episode: dict, queue: dict) -> str | None:
                         stash_assigned, len(stash_use_count))
 
     # ----- FLUX fallback for unmatched beats -----
-    style_prefix = (style_yaml.get("prefix") or "").strip()
-    style_suffix = (style_yaml.get("suffix") or "").strip()
-    style_neg = (style_yaml.get("negative_prompt") or "").strip()
+    # Per-beat style lookup (Batch F 2026-05-27). Pre-load BOTH V1 and
+    # V2 style YAMLs so we can pick whichever the beat's
+    # `effective_visual_style` field requests. Beats with no
+    # effective_visual_style fall back to the episode-locked style.
+    style_cache: dict[str, dict] = {episode["visual_style"]: style_yaml}
+    def _load_style(sid: str) -> dict:
+        if sid in style_cache:
+            return style_cache[sid]
+        path = cfg.style_profiles_dir / f"{sid}.yaml"
+        if not path.exists():
+            logger.warning("S08: visual_style %s not found; falling back to %s",
+                           sid, episode["visual_style"])
+            style_cache[sid] = style_yaml
+            return style_yaml
+        sy = yaml.safe_load(path.read_text())
+        style_cache[sid] = sy
+        return sy
 
     force_no_text = bool(iqa.get("flux_force_no_text", True))
     NO_TEXT_POSITIVE = (
@@ -349,6 +552,30 @@ def run(episode: dict, queue: dict) -> str | None:
 
     iconography = (character_profile.get("iconography") or "").strip()
     hero_inject_count = 0
+
+    # Iconic-asset preamble (Batch F 2026-05-27). Operator-curated list
+    # of "must include" visual assets for THIS company — sock puppet
+    # for Pets.com, 1999 web browsers, brown shipping boxes with logo,
+    # etc. Loaded from 00_research/iconic_assets.json (emitted by S01
+    # or hand-authored). Injected into every FLUX prompt so the
+    # generated panels visually identify as belonging to the episode's
+    # subject company rather than as generic business imagery.
+    iconic_preamble = ""
+    iconic_path = ws / "00_research" / "iconic_assets.json"
+    if iconic_path.exists():
+        try:
+            iconic_data = json.loads(iconic_path.read_text())
+            assets = iconic_data.get("assets") or []
+            if assets:
+                iconic_preamble = (
+                    "Iconic visual cues for this company (weave naturally "
+                    "where the scene allows; not every beat must include "
+                    "all): "
+                    + "; ".join(a.get("description", "") for a in assets
+                                if a.get("description"))
+                )
+        except Exception as e:
+            logger.warning("S08: iconic_assets.json unreadable: %s", e)
 
     for b in beats:
         if "pd_asset_id" in b:
@@ -366,6 +593,10 @@ def run(episode: dict, queue: dict) -> str | None:
             beat_prompt = f"{iconography} {beat_prompt}"
             hero_inject_count += 1
 
+        # Iconic-asset preamble (one line in front of every prompt).
+        if iconic_preamble:
+            beat_prompt = f"{iconic_preamble}. {beat_prompt}"
+
         # Path A — text grounding: weave PD reference description into prompt
         ref_desc = (b.get("reference_description") or "").strip()
         if ref_desc:
@@ -374,8 +605,15 @@ def run(episode: dict, queue: dict) -> str | None:
                 f"{beat_prompt}"
             )
 
-        composed = f"{style_prefix} {beat_prompt}, {style_suffix}"
-        negative = style_neg
+        # Per-beat style lookup (Batch F 2026-05-27).
+        beat_style_id = b.get("effective_visual_style") or episode["visual_style"]
+        beat_style_yaml = _load_style(beat_style_id)
+        bsp = (beat_style_yaml.get("prefix") or "").strip()
+        bss = (beat_style_yaml.get("suffix") or "").strip()
+        bsn = (beat_style_yaml.get("negative_prompt") or "").strip()
+
+        composed = f"{bsp} {beat_prompt}, {bss}"
+        negative = bsn
         if force_no_text:
             composed = f"{composed}. {NO_TEXT_POSITIVE}."
             negative = f"{NO_TEXT_NEGATIVE}, {negative}"

@@ -149,6 +149,33 @@ orchestrator:
   # auto-pilot is the value).
   gate_at_S08: false
 
+visual_brand_safety:
+  # Post-S09 VLM pass (Batch F 2026-05-28). For every rendered beat,
+  # the VLM is asked whether the panel is brand-safe and topic-
+  # coherent for the company / era / story_kind. Catches the things
+  # the per-image critique misses:
+  #   - hacking-coded panels in non-crime stories (the Pets.com
+  #     review video had a "REDIRECTING..." panel with a noir figure
+  #     that read as hacker imagery — Pets.com was NOT a crime story
+  #     and that visual could trigger YPP monetization review)
+  #   - era anachronisms (1940s noir detective in a 1999 dot-com bust)
+  #   - misrepresented-topic visuals
+  #   - generic panels with zero recognisable company iconography
+  #
+  # High-severity flags gate the stage (needs_human); operator
+  # reviews 03_assets/visual_brand_safety_flags.json then either
+  # --rerender the specific beats or --approve to ship as-is.
+  enabled: true
+  gate_on_severity: high          # "high" | "low" | "off"
+  sample_every_n: 2               # check every Nth beat to bound
+                                  # VLM cost (60-95 beat episodes
+                                  # × 1 VLM call each adds up). With
+                                  # 2, we sample ~half the beats —
+                                  # enough to catch systemic issues
+                                  # (a recurring noir character, an
+                                  # era-mismatched style) without
+                                  # 95 sequential VLM round-trips.
+
 brand_safety:
   # Defamation-risk review pass added Batch B 2026-05-26. Runs as
   # the tail of S07 critique. The brand_safety_review.txt prompt
@@ -222,6 +249,15 @@ topic_validation:
   non_us_ratio: 0.33                # 1-in-3 episodes non-US
   non_us_ratio_lookback: 6          # measured over the last N picks
   trending_news_lookback_days: 30   # advisory; logged in signals dict
+
+  # Incumbent-trap filter (Batch F 2026-05-27). When true, S01
+  # hard-rejects topics whose company_name / founder / one_line_pitch
+  # matches the over-covered-on-YouTube list in pipeline/trends.py.
+  # Theranos, Enron, WeWork, FTX, Pets.com etc. have hundreds of
+  # competing docs with millions of views combined — adding doc #51
+  # fights for impressions against incumbents the algo already
+  # trusts. Off-channel niches grow 5-10x faster.
+  reject_incumbent_traps: true
 
 upload:
   mode: "manual"                    # "manual" only — no automatic upload in this pipeline
@@ -315,18 +351,23 @@ music_library:
   path: "${root}/assets/music_library"
   manifest: "${root}/assets/music_library/manifest.json"
   crossfade_seconds: 4
-  music_gain_db: -28.0              # bed level under voice
+  music_gain_db: -31.0              # bed level under voice
   music_start_offset_seconds: 30.0  # Anchored to the new 6-act template:
                                     # Act 0 (the hook) runs 0:00-0:30 dry,
                                     # then the music bed swells in with
                                     # Act 1 ("set the era..."). Pushing
                                     # this earlier puts music UNDER the
                                     # hook delivery — bad for retention.
-  # Voice level normalization (ported from maritime, voice-only)
+  # Voice level normalization (ported from maritime, voice-only).
+  # Batch F 2026-05-27: voice_dynaudnorm_max_gain dropped from 15→9.
+  # The aggressive 15 dB ceiling was flattening voice dynamics across
+  # beats — every sentence sounded equally important, killing emotional
+  # contour. 9 preserves natural speech dynamics while still smoothing
+  # Kokoro's level inconsistencies.
   voice_dynaudnorm_enabled: true
   voice_dynaudnorm_framelen_ms: 200
   voice_dynaudnorm_gauss: 11
-  voice_dynaudnorm_max_gain: 15.0
+  voice_dynaudnorm_max_gain: 9.0
 
 grok:
   # xAI Grok image-correction pass (S09 sub-phase). When a FLUX render
