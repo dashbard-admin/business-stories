@@ -134,6 +134,16 @@ class Config:
         return {**defaults, **(self.raw.get("brand_safety") or {})}
 
     @property
+    def youtube_analytics(self) -> dict[str, Any]:
+        """Performance feedback loop config (Batch E 2026-05-27)."""
+        defaults = {
+            "enabled": False,
+            "channel_id": "",
+            "summary_window": 20,
+        }
+        return {**defaults, **(self.raw.get("youtube_analytics") or {})}
+
+    @property
     def topic_validation(self) -> dict[str, Any]:
         """S01 pre-commit demand check thresholds.
 

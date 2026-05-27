@@ -29,6 +29,7 @@ from ..browser import Browser
 from ..config import load_config
 from ..constraints import is_valid_topic, pick_assignment
 from ..llm import LLM
+from ..performance_summary import summarise_for_prompt
 from ..state import (
     add_used_topic,
     episode_workspace,
@@ -85,6 +86,11 @@ def run(episode: dict, queue: dict) -> str | None:
     decline_hint = _decline_hint(tv_cfg)
     non_us_hint = _non_us_hint(require_non_us, tv_cfg, recent_countries)
 
+    # Batch E 2026-05-27: pull summarised performance patterns to
+    # inject as soft guidance. Empty until --analyse-performance has
+    # been run over published episodes.
+    perf = summarise_for_prompt()
+
     for attempt in range(1, max_retries + 1):
         exclusion = "\n".join(f"  - {x}" for x in sorted(used)) or "  (none)"
         rejected_inline = "\n".join(
@@ -98,6 +104,8 @@ def run(episode: dict, queue: dict) -> str | None:
             recent_countries=", ".join(recent_countries) or "(none)",
             decline_preference_hint=decline_hint,
             non_us_required_hint=non_us_hint,
+            top_performing_story_kinds=perf["top_performing_story_kinds"],
+            worst_performing_story_kinds=perf["worst_performing_story_kinds"],
         )
         logger.info("topic discovery attempt %d (require_non_us=%s)",
                     attempt, require_non_us)

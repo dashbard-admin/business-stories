@@ -167,6 +167,31 @@ brand_safety:
   # is cleared:
   #   python -m pipeline.hermes_orchestrator --approve <ep_id>
 
+youtube_analytics:
+  # Performance feedback loop (Batch E 2026-05-27). Out-of-band S14
+  # stage pulls per-episode metrics from the YouTube Data + Analytics
+  # APIs and writes them back so future S1/S6/S8 prompts learn from
+  # what worked. Manual trigger only (Q-E1 confirmed):
+  #   python -m pipeline.hermes_orchestrator --analyse-performance
+  #
+  # Setup (one-time):
+  #   1. Enable YouTube Data API v3 + YouTube Analytics API in
+  #      a Google Cloud project. Create OAuth 2.0 Client ID for
+  #      Desktop app.
+  #   2. Put credentials in .env:
+  #        YOUTUBE_OAUTH_CLIENT_ID=...
+  #        YOUTUBE_OAUTH_CLIENT_SECRET=...
+  #   3. Run `python -m pipeline.hermes_orchestrator --authorize-youtube`.
+  #   4. Install optional deps: `pip install -e '.[youtube]'`
+  enabled: false                  # flip to true once OAuth is set up
+                                  # AND at least 3-5 episodes have been
+                                  # published with --set-video-id
+  channel_id: ""                  # leave blank; "channel==MINE" works
+  summary_window: 20              # last N episodes considered when
+                                  # building the prompt-injection
+                                  # summary (Q-E2: pattern + up to 3
+                                  # concrete example episode IDs)
+
 topic_validation:
   # S01 pre-commit demand check. Before persisting a topic the
   # writer LLM picked, we probe SearXNG to confirm the topic has

@@ -161,6 +161,11 @@ def run(episode: dict, queue: dict) -> str | None:
         min_w = 280
         max_w = 480
 
+    # Batch E 2026-05-27 — performance feedback. Empty until
+    # --analyse-performance accumulates data.
+    from ..performance_summary import summarise_for_prompt
+    perf = summarise_for_prompt()
+
     prompt = template.format(
         preview_mode_directive=preview_directive,
         incident_name=incident["company_name"],
@@ -188,6 +193,7 @@ def run(episode: dict, queue: dict) -> str | None:
             indent=2,
         ),
         target_beats=target_beats,
+        retention_dip_warnings=perf["retention_dip_warnings"],
     )
 
     script = _generate_within_range(

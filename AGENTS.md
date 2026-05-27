@@ -54,8 +54,12 @@ flowchart TB
         S11[S11 Audio Post]
         S12[S12 Video Assembly]
         S13[S13 Packaging<br/>titles + thumbs + Shorts]
+        S14[S14 Performance writeback<br/>OFF-BAND — manual --analyse-performance]
         S1 --> S2 --> S3 --> S4 --> S5 --> S6
         S6 --> S7 --> S8 --> S9 --> S10 --> S11 --> S12 --> S13
+        S14 -. injects perf history into prompts of .-> S1
+        S14 -. injects perf history into prompts of .-> S6
+        S14 -. injects perf history into prompts of .-> S8
     end
     cli --> STAGES
 
@@ -314,6 +318,12 @@ Whisper.cpp wrapper for Shorts subtitles. `transcribe(wav_path)` returns word-le
 ### 5.4e `shorts.py` *(added Batch D 2026-05-27)*
 Picks 3 dramatic 30-second windows via `prompts/shorts_select.txt`, cuts each as 1080×1920 vertical with hard-burned subtitles (Q-D1: configurable via `cfg.packaging.shorts_burn_subtitles`). Reads `voice_timing.json` to resolve `start_beat_id` → seconds. Output: `05_video/shorts/short_NN.mp4` + `manifest.json`.
 
+### 5.4g `youtube_analytics.py` *(added Batch E 2026-05-27)*
+YouTube Data + Analytics API client. OAuth installed-app flow via `authorize_oauth()` (one-time browser dance, refresh token cached at `state/youtube_oauth_token.json`). `YouTubeAnalytics().fetch_episode(video_id)` returns an `EpisodePerformance` dataclass with views, likes, CTR, AVD, retention curve, peak drop position, top traffic sources, impressions. Mock mode returns a canned response so the feedback loop is exercisable without real OAuth.
+
+### 5.4h `performance_summary.py` *(added Batch E 2026-05-27)*
+Formats `state/performance_history.json` into prompt-ready strings consumed by S1 / S6 / S8. `summarise_for_prompt(history, k=20)` returns a dict with keys: `top_performing_story_kinds, worst_performing_story_kinds, retention_dip_warnings, visual_intents_that_retained, visual_intents_that_lost_viewers`. Q-E2 confirmed: summarised pattern + up to 3 concrete example episode IDs per warning. Empty / placeholder strings when fewer than 2 published episodes have been analysed.
+
 ### 5.4f `elevenlabs.py` *(added Batch D 2026-05-27, wired but disabled)*
 ElevenLabs TTS adapter with the same `synthesize_script` interface as Kokoro. Activates when `cfg.tts.backend == "elevenlabs"`; `ELEVENLABS_API_KEY` must be in `.env`. Falls back to Kokoro on init failure (missing key) so flipping the backend is safe to try. Per-narrator voice_id pinning via `cfg.tts.elevenlabs.voice_id_map`.
 
@@ -339,6 +349,9 @@ Single CLI entry point. Holds the global file lock for the duration of one stage
 - `--preview` *(added Batch B 2026-05-26)* — modifier flag (use with `--enqueue` or `--inject-topic`). Tags the new episode as `preview_mode=True`. S06 generates only Act 0 + Act 5 (~360 words, ~8 beats); S12 outputs `05_video/final_preview.mp4`. Tone-check render, ~10 min of compute vs. the full 3-4 hours.
 - `--approve EP_ID` *(added Batch B 2026-05-26)* — clear any S07 brand-safety gate or S08 in-flight gate on the named episode so it can advance.
 - `--rerender EP_ID BEAT_ID [--from-edited-prompt]` *(added Batch B 2026-05-26)* — re-run S09 FLUX render for a single beat. Existing render + any Grok-corrected version archived to `03_assets/quarantine/` first. `--from-edited-prompt` re-reads the beat's FLUX prompt fresh from beat_sheet.json (operator edited it).
+- `--authorize-youtube` *(added Batch E 2026-05-27)* — one-time OAuth dance for YouTube Analytics. Caches refresh token to `state/youtube_oauth_token.json`.
+- `--set-video-id EP_ID YT_VIDEO_ID` *(added Batch E 2026-05-27)* — bind a published video to an episode record so S14 can pull its metrics.
+- `--analyse-performance` *(added Batch E 2026-05-27)* — out-of-band run of S14 (NOT in the per-cron stage flow). Walks every episode with a video_id, writes metrics to `06_metadata/youtube_performance.json` and `state/performance_history.json`. Subsequent S1/S6/S8 reads the history via `pipeline.performance_summary.summarise_for_prompt()` and injects the patterns as soft guidance.
 - `--status` — print queue state. Manual picks tagged `(manual)`; preview picks tagged `(preview)`; brand-safety flag counts surfaced as `(safety_flags=NH/NL)`.
 - `-v / --verbose` — DEBUG logging.
 - (default, no flags) — run one stage of the next pending episode and exit.
@@ -441,6 +454,20 @@ Voice + music bed + SFX *(SFX phase added Batch C 2026-05-27)*.
 - Sidechain-duck music under voice. SFX rides on top of the mix at the configured gain (no ducking).
 - Loudnorm to −14 LUFS.
 - Output: `04_audio/final_mix.wav` + `mix_manifest.json` (now lists both `tracks_used` and `sfx_used`).
+
+### S14 — Performance writeback *(added Batch E 2026-05-27, OUT-OF-BAND)*  (`s14_performance_writeback.py`)
+**Not in `STAGE_DISPATCH` / `STAGE_ORDER`.** Triggered manually via:
+
+```bash
+python -m pipeline.hermes_orchestrator --analyse-performance
+```
+
+For every queue episode with `youtube_video_id` set, fetches YouTube Analytics, writes `06_metadata/youtube_performance.json`, computes per-`visual_intent` average retention (cross-references retention curve × voice_timing × beat_sheet), and upserts a summary into `state/performance_history.json`. Subsequent S1/S6/S8 runs read this history via `pipeline.performance_summary.summarise_for_prompt()` and inject the patterns as soft guidance.
+
+Operator workflow:
+1. Once-off: `--authorize-youtube` (browser dance, token cached).
+2. After each upload: `--set-video-id EP_NNN <youtube_video_id>`.
+3. Weekly (or whenever): `--analyse-performance`.
 
 ### S13 — Packaging *(added Batch D 2026-05-27)*  (`s13_packaging.py`)
 Runs after S12 with three phases:
@@ -677,4 +704,4 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-27 — Batch D landed (S13 packaging stage: title variants, thumbnail variants, Shorts cutter, ElevenLabs adapter wired but disabled).*
+*This file last updated: 2026-05-27 — Batch E landed (S14 off-band performance writeback + summary injection into S1/S6/S8 prompts). All five batches complete.*

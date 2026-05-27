@@ -40,6 +40,10 @@ did"). One natural mention per Act is plenty.
 FACT LEDGER — these are the ONLY facts you may state as true:
 {fact_ledger_json}
 
+PERFORMANCE FEEDBACK (Batch E 2026-05-27 — derived from recent
+published episodes' retention data; treat as soft guidance):
+{retention_dip_warnings}
+
 If you need to state something not in the fact ledger, you must
 either (a) phrase it as explicit speculation ("biographers have
 suggested..."), or (b) omit it. NEVER invent dates, dollar amounts,

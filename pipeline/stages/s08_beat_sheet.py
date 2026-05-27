@@ -127,11 +127,16 @@ def run(episode: dict, queue: dict) -> str | None:
     narrator = cfg.narrator_by_id(episode["narrator"])
 
     template = (cfg.prompts_dir / "beat_sheet.txt").read_text()
+    # Batch E 2026-05-27 performance hints (soft guidance).
+    from ..performance_summary import summarise_for_prompt
+    perf = summarise_for_prompt()
     prompt = template.format(
         visual_style_name=style_yaml["name"],
         visual_style_guidance=style_yaml.get("guidance_for_llm", ""),
         narrator_name=narrator["name"],
         script_with_beats=script,
+        visual_intents_that_retained=perf["visual_intents_that_retained"],
+        visual_intents_that_lost_viewers=perf["visual_intents_that_lost_viewers"],
     )
 
     try:

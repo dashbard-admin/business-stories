@@ -94,6 +94,11 @@ ROTATION CONSTRAINTS (avoid duplicating recent episodes):
 - Recent story_kind values already covered: {recent_story_kinds}
 - Recent HQ countries already covered: {recent_countries}
 
+PERFORMANCE FEEDBACK (Batch E 2026-05-27 — added once published
+episodes accumulate enough analytics to be meaningful):
+- {top_performing_story_kinds}
+- {worst_performing_story_kinds}
+
 OUTPUT FORMAT — JSON only, no prose, no code fences:
 {{
   "company_name": "string — full legal or canonical name (e.g. 'Theranos, Inc.', 'Nike, Inc.', 'Blockbuster LLC')",

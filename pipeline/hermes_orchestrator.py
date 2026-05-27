@@ -226,6 +226,34 @@ def cli() -> int:
             "re-using the prompt the original S09 invocation built."
         ),
     )
+    parser.add_argument(
+        "--authorize-youtube", action="store_true",
+        help=(
+            "one-time OAuth dance for the YouTube Analytics API. "
+            "Requires YOUTUBE_OAUTH_CLIENT_ID + "
+            "YOUTUBE_OAUTH_CLIENT_SECRET in .env. Opens a browser; "
+            "paste the auth code back. Token cached to "
+            "state/youtube_oauth_token.json."
+        ),
+    )
+    parser.add_argument(
+        "--set-video-id", nargs=2, metavar=("EP_ID", "YT_VIDEO_ID"),
+        help=(
+            "after uploading episode EP_ID to YouTube, bind it to its "
+            "video_id so S14 can fetch performance metrics. Stored on "
+            "the episode record."
+        ),
+    )
+    parser.add_argument(
+        "--analyse-performance", action="store_true",
+        help=(
+            "out-of-band: run S14 over every episode with a "
+            "youtube_video_id, pulling latest performance metrics "
+            "into 06_metadata/youtube_performance.json and updating "
+            "state/performance_history.json. Manual run only — not "
+            "in the per-cron stage flow."
+        ),
+    )
     parser.add_argument("--status", action="store_true",
                         help="print queue status and exit")
     parser.add_argument("-v", "--verbose", action="count", default=0)
@@ -254,6 +282,18 @@ def cli() -> int:
         return _rerender_cmd(
             ep_id, beat_id, from_edited_prompt=args.from_edited_prompt,
         )
+
+    if args.authorize_youtube:
+        from .youtube_analytics import authorize_oauth
+        return authorize_oauth()
+
+    if args.set_video_id:
+        ep_id, vid = args.set_video_id
+        return _set_video_id_cmd(ep_id, vid)
+
+    if args.analyse_performance:
+        from .stages.s14_performance_writeback import run as s14_run
+        return s14_run()
 
     if args.status:
         q = load_queue()
@@ -464,6 +504,38 @@ def _rerender_cmd(
             return 0
     except RuntimeError as e:
         print(f"--rerender: lock contention: {e}", file=sys.stderr)
+        return 2
+
+
+# ----------------------------------------------------------------------
+# Batch E: --set-video-id
+# ----------------------------------------------------------------------
+
+def _set_video_id_cmd(episode_id: str, video_id: str) -> int:
+    """Bind a published YouTube video_id to an episode record so S14
+    can fetch its performance. Also stamps `published_at` so the
+    feedback loop has a date anchor."""
+    from datetime import datetime, timezone
+    cfg = load_config()
+    lock_path = cfg.state_dir / "locks" / "orchestrator.lock"
+    stale = cfg.orchestrator["stale_lock_hours"] * 3600
+    try:
+        with file_lock(lock_path, stale_seconds=stale):
+            queue = load_queue()
+            ep = find_episode(queue, episode_id)
+            if ep is None:
+                print(f"--set-video-id: no such episode {episode_id}",
+                      file=sys.stderr)
+                return 2
+            ep["youtube_video_id"] = video_id.strip()
+            ep["published_at"] = datetime.now(timezone.utc).isoformat(
+                timespec="seconds"
+            )
+            save_queue(queue)
+            print(f"bound {episode_id} → youtube://{video_id}")
+            return 0
+    except RuntimeError as e:
+        print(f"--set-video-id: lock contention: {e}", file=sys.stderr)
         return 2
 
 
