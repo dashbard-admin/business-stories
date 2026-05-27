@@ -433,7 +433,7 @@ asset_hunt:
   # S08 then routes every beat to FLUX, which is the right call for
   # comic-book-styled episodes where PD photo assets don't fit the
   # visual style anyway. Set true to restore the full PD-hunt path.
-  enabled: false
+  enabled: true 
 
   # Narrow PD path (Batch C 2026-05-26). When asset_hunt.enabled is
   # ALSO true, this list restricts PD routing to only the named
