@@ -1,4 +1,4 @@
-"""Kokoro TTS adapter.
+"""Kokoro TTS adapter + backend dispatcher.
 
 Calls the local mlx-audio Kokoro server at
 http://127.0.0.1:8001/v1/audio/speech (OpenAI-compatible API) and writes
@@ -7,6 +7,11 @@ come from `config.yaml`'s `narrators` block via `cfg.narrator_by_id()`.
 
 In mock mode, synthesizes silent WAVs at the same sample rate so the
 rest of the pipeline can run end-to-end without the GPU server.
+
+Batch D 2026-05-27 added `make_tts(narrator_id)` — a tiny factory that
+reads `cfg.tts.backend ∈ {kokoro, elevenlabs}` and returns the matching
+adapter. S10 calls the factory instead of importing Kokoro directly,
+so the backend switch is a single config-line flip with no code change.
 """
 
 from __future__ import annotations
@@ -129,3 +134,42 @@ def _write_silent_wav(path: Path, seconds: float) -> None:
         w.setsampwidth(2)
         w.setframerate(KOKORO_SAMPLE_RATE)
         w.writeframes(silence)
+
+
+# ----------------------------------------------------------------------
+# Backend factory (Batch D 2026-05-27)
+# ----------------------------------------------------------------------
+
+def make_tts(narrator_id: str):
+    """Return a TTS adapter instance for `narrator_id`, choosing the
+    backend per cfg.tts.backend. On any ElevenLabs error (missing key
+    in non-mock mode, etc.) falls back to Kokoro with a warning log
+    rather than crashing — keeps the channel running."""
+    cfg = load_config()
+    backend = (cfg.tts.get("backend") or "kokoro").lower()
+
+    if backend == "elevenlabs":
+        try:
+            from .elevenlabs import ElevenLabsTTS
+            tts = ElevenLabsTTS(narrator_id)
+            # Sanity probe: API key must exist when not in mock mode.
+            if not cfg.mock_mode and not tts._api_key:
+                logger.warning(
+                    "tts.backend=elevenlabs but ELEVENLABS_API_KEY "
+                    "missing in env; falling back to Kokoro"
+                )
+                return Kokoro(narrator_id)
+            logger.info("TTS backend: ElevenLabs (voice=%s, model=%s)",
+                        tts.voice_id, tts.model_id)
+            return tts
+        except Exception as e:
+            logger.warning(
+                "ElevenLabs adapter init failed (%s); falling back to Kokoro",
+                e,
+            )
+            return Kokoro(narrator_id)
+
+    # Default / unknown backend → Kokoro.
+    if backend not in ("kokoro", "default", ""):
+        logger.warning("unknown tts.backend=%r; using Kokoro", backend)
+    return Kokoro(narrator_id)

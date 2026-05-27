@@ -1,0 +1,1 @@
+Placeholder for channel_mark.png — operator drops a transparent PNG channel logo here (recommended 256x256+, square). When config.packaging.show_channel_logo=true, S13 thumbnail generator composites this in the lower-right corner of every thumbnail variant.

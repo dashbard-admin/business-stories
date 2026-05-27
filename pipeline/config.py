@@ -233,6 +233,52 @@ class Config:
         return merged
 
     @property
+    def tts(self) -> dict[str, Any]:
+        """TTS backend dispatcher (Batch D 2026-05-27). Kokoro is the
+        default; flip backend: elevenlabs to use premium TTS."""
+        defaults = {
+            "backend": "kokoro",
+            "elevenlabs": {
+                "enabled": False,
+                "model_id": "eleven_multilingual_v2",
+                "voice_id": "pNInz6obpgDQGcFmaJgB",
+                "voice_id_map": {},
+            },
+        }
+        raw = self.raw.get("tts") or {}
+        merged = {**defaults, **raw}
+        # Deep-merge the elevenlabs sub-dict.
+        if "elevenlabs" in raw:
+            merged["elevenlabs"] = {**defaults["elevenlabs"],
+                                    **raw["elevenlabs"]}
+        return merged
+
+    @property
+    def asr(self) -> dict[str, Any]:
+        """ASR config for Shorts subtitles (Batch D 2026-05-27)."""
+        defaults = {
+            "backend": "whisper_cpp",
+            "binary": "whisper-cli",
+            "model": "base.en",
+            "model_path": "",
+        }
+        return {**defaults, **(self.raw.get("asr") or {})}
+
+    @property
+    def packaging(self) -> dict[str, Any]:
+        """S13 packaging config (Batch D 2026-05-27)."""
+        defaults = {
+            "titles_count": 10,
+            "thumbnails_enabled": True,
+            "shorts_enabled": True,
+            "shorts_count": 3,
+            "shorts_target_seconds": 30.0,
+            "shorts_burn_subtitles": True,
+            "show_channel_logo": True,
+        }
+        return {**defaults, **(self.raw.get("packaging") or {})}
+
+    @property
     def callouts(self) -> dict[str, Any]:
         """On-screen text callouts (Batch C 2026-05-26). The writer
         LLM emits `[CALLOUT: "TEXT"]` markers in the script; S08

@@ -1,7 +1,7 @@
 [project]
 name = "business-stories-pipeline"
-version = "0.1.0"
-description = "12-stage faceless YouTube pipeline for comic-book Business & Brand Origin Stories"
+version = "0.2.0"
+description = "13-stage faceless YouTube pipeline for comic-book Business & Brand Origin Stories"
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
@@ -22,7 +22,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# YouTube Analytics writeback (Batch E performance loop).
 youtube = ["google-api-python-client>=2.110", "google-auth-oauthlib>=1.2"]
+# Premium TTS (Batch D 2026-05-27, wired but disabled by default).
+elevenlabs = ["elevenlabs>=1.0"]
 
 [build-system]
 requires = ["setuptools>=68"]

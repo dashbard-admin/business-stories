@@ -70,7 +70,11 @@ def _used_topics_path() -> Path:
     return load_config().state_dir / "used_topics.json"
 
 
-STAGE_ORDER = [f"S{i}" for i in range(1, 13)]   # S1 .. S12
+STAGE_ORDER = [f"S{i}" for i in range(1, 14)]   # S1 .. S13
+                                                # S13 added Batch D
+                                                # 2026-05-27 (packaging:
+                                                # title variants,
+                                                # thumbnails, shorts).
 
 
 def _init_queue() -> dict[str, Any]:

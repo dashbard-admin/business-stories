@@ -211,6 +211,56 @@ search:
   user_agent: "BusinessStoriesPipeline/0.1 (+research)"
   request_timeout_seconds: 30
 
+tts:
+  # TTS backend dispatcher (Batch D 2026-05-27). The orchestrator
+  # picks one of: kokoro (default, free, local) or elevenlabs
+  # (paid, perceived-quality step change). The factory in tts.py
+  # falls back to Kokoro on any ElevenLabs init failure (missing
+  # API key, etc.) so flipping `backend: elevenlabs` is safe to try.
+  backend: kokoro                  # kokoro | elevenlabs
+
+  elevenlabs:
+    # When backend==elevenlabs, this block is active. Keep
+    # enabled: false until you've put ELEVENLABS_API_KEY in .env
+    # and confirmed the voice quality on a preview-mode episode.
+    enabled: false
+    model_id: eleven_multilingual_v2   # eleven_multilingual_v2
+                                       # | eleven_turbo_v2_5
+                                       # | eleven_monolingual_v1
+    voice_id: "pNInz6obpgDQGcFmaJgB"   # "Adam" preset; fine default
+    # Per-narrator voice override map. Keys are narrator IDs from
+    # narrators.yaml; values are ElevenLabs voice_ids. Pin per
+    # narrator if you want N1/N2/N3/N4 to be different voices.
+    voice_id_map: {}                   # {N1: "voice_id_1", ...}
+
+asr:
+  # ASR backend for Shorts subtitles (Batch D 2026-05-27).
+  # whisper.cpp is the recommended choice — free, local, accurate
+  # at base.en model size. If the binary isn't on PATH, Shorts get
+  # generated without subtitles (the cut still happens).
+  backend: whisper_cpp
+  binary: whisper-cli                   # binary name on PATH
+  model: base.en                        # base.en | small.en | medium.en
+  model_path: ""                        # absolute path override for
+                                        # the .bin model file; empty =
+                                        # let whisper.cpp resolve
+
+packaging:
+  # S13 packaging settings (Batch D 2026-05-27).
+  titles_count: 10                      # title variants per episode
+  thumbnails_enabled: true
+  shorts_enabled: true
+  shorts_count: 3                       # vertical clips per episode
+  shorts_target_seconds: 30.0
+  shorts_burn_subtitles: true           # Q-D1: hard-burn subtitles,
+                                        # knob-able (set false to keep
+                                        # raw vertical cuts).
+  show_channel_logo: true               # Q-D2: composite channel logo
+                                        # in thumbnail corner. Logo
+                                        # asset at
+                                        # assets/branding/channel_mark.png
+                                        # Knob-able (false = no logo).
+
 music_library:
   # S11 audio post uses a curated local library — no MusicGen,
   # no Stable Audio Open, no synthesized music or SFX.

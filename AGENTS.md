@@ -53,8 +53,9 @@ flowchart TB
         S10[S10 Kokoro TTS]
         S11[S11 Audio Post]
         S12[S12 Video Assembly]
+        S13[S13 Packaging<br/>titles + thumbs + Shorts]
         S1 --> S2 --> S3 --> S4 --> S5 --> S6
-        S6 --> S7 --> S8 --> S9 --> S10 --> S11 --> S12
+        S6 --> S7 --> S8 --> S9 --> S10 --> S11 --> S12 --> S13
     end
     cli --> STAGES
 
@@ -266,7 +267,7 @@ LLM gateway client. `LLM(role)` where `role ∈ {"writer", "critic", "extractor"
 - `mock_mode` returns canned business-story shapes that satisfy the schemas of S1/S3/S4/S7 so end-to-end mock runs succeed.
 
 ### 5.6 `tts.py`
-Kokoro TTS client. Hits the gateway with `{voice, speed, text}` and writes WAV. S10 chunks the script into beat-sized segments and concatenates with a brief silence between.
+Kokoro TTS client + backend dispatcher. Hits the gateway with `{voice, speed, text}` and writes WAV. S10 chunks the script into beat-sized segments and concatenates with a brief silence between. *(Batch D 2026-05-27 added `make_tts(narrator_id)` — a factory that reads `cfg.tts.backend ∈ {kokoro, elevenlabs}` and returns the matching adapter. S10 uses the factory; backend switch is one config-line flip with graceful fall-back.)*
 
 ### 5.7 `flux.py`
 `flux` CLI subprocess adapter. Replaces the maritime project's HTTP-server-based FLUX adapter. Calls:
@@ -300,6 +301,21 @@ SearXNG search + plain `requests` fetch.
 
 ### 5.12 `wikimedia.py`
 Commons MediaWiki API client. S5 uses this for license-clean image hits instead of relying on SearXNG's flaky `site:commons.wikimedia.org` routing. Returns image URLs with structured `extmetadata` (license, author, source) so the caller doesn't have to scrape.
+
+### 5.4b `titles.py` *(added Batch D 2026-05-27)*
+Generates N (default 10) candidate YouTube titles per episode via the writer LLM using `prompts/title_variants.txt`. Each variant is tagged with a style hypothesis (`curiosity_gap, shock_value, outcome_first, named_person, question, contrarian, number_anchored, before_after, time_anchored, character_voice`) and a `predicted_ctr_band ∈ {high, medium, low}`. Output: `06_metadata/titles.json`. S13 calls this in Phase 1.
+
+### 5.4c `thumbnails.py` *(added Batch D 2026-05-27)*
+Generates 5 Pillow-composited thumbnail variants (1280×720 JPG). Fixed layouts: `founder_closeup, split_frame, big_number, shocked_face, noir` (noir only fires when `visual_style=V2`). Backdrop is the strongest FLUX-rendered beat image (prefers `founder_portrait` intent). Channel logo composited at `assets/branding/channel_mark.png` when present. Output: `05_video/thumbnails/thumb_<layout>.jpg`. Operator picks top 3 for YouTube native A/B test.
+
+### 5.4d `asr.py` *(added Batch D 2026-05-27)*
+Whisper.cpp wrapper for Shorts subtitles. `transcribe(wav_path)` returns word-level `Segment(start_seconds, end_seconds, text)` segments. Falls back gracefully when the `whisper-cli` binary isn't on PATH (logs a warning, returns None — Shorts get generated without subtitles). Configurable model name + path via `cfg.asr`.
+
+### 5.4e `shorts.py` *(added Batch D 2026-05-27)*
+Picks 3 dramatic 30-second windows via `prompts/shorts_select.txt`, cuts each as 1080×1920 vertical with hard-burned subtitles (Q-D1: configurable via `cfg.packaging.shorts_burn_subtitles`). Reads `voice_timing.json` to resolve `start_beat_id` → seconds. Output: `05_video/shorts/short_NN.mp4` + `manifest.json`.
+
+### 5.4f `elevenlabs.py` *(added Batch D 2026-05-27, wired but disabled)*
+ElevenLabs TTS adapter with the same `synthesize_script` interface as Kokoro. Activates when `cfg.tts.backend == "elevenlabs"`; `ELEVENLABS_API_KEY` must be in `.env`. Falls back to Kokoro on init failure (missing key) so flipping the backend is safe to try. Per-narrator voice_id pinning via `cfg.tts.elevenlabs.voice_id_map`.
 
 ### 5.13b `sfx_library.py` *(added Batch C 2026-05-27)*
 Operator-curated SFX library. `SFXLibrary().pick_cue(cue, beat_id, max_duration_seconds)` returns an `SFXPick(path, cue, duration_seconds, gain_db_hint)` matching the named cue from the catalog (`typewriter, keyboard, phone_ring, applause, door_slam, traffic_hum, market_bell, newsprint, clock_tick`). Deterministic per `(cue, beat_id)`. Disabled by default; flip `cfg.sfx_library.enabled` to true after dropping license-clean clips into `assets/sfx_library/` and running `python -m pipeline.tools.scan_sfx_library` to backfill durations. License/attribution fields match the music manifest schema.
@@ -426,6 +442,12 @@ Voice + music bed + SFX *(SFX phase added Batch C 2026-05-27)*.
 - Loudnorm to −14 LUFS.
 - Output: `04_audio/final_mix.wav` + `mix_manifest.json` (now lists both `tracks_used` and `sfx_used`).
 
+### S13 — Packaging *(added Batch D 2026-05-27)*  (`s13_packaging.py`)
+Runs after S12 with three phases:
+- **Phase 1: Title variants** — `pipeline.titles.generate_variants()` produces up to 10 candidate titles → `06_metadata/titles.json`. Each variant carries `style_hypothesis` + `predicted_ctr_band` (Q-D3 confirmed).
+- **Phase 2: Thumbnail variants** — `pipeline.thumbnails.generate_variants()` produces 5 Pillow composites at `05_video/thumbnails/thumb_<layout>.jpg`. The noir layout fires only when `visual_style=V2`; the others always render. Channel logo overlay from `assets/branding/channel_mark.png` (Q-D2: configurable via `cfg.packaging.show_channel_logo`).
+- **Phase 3: Shorts** — `pipeline.shorts.pick_windows()` asks the writer LLM for 3 dramatic 30-second windows (`prompts/shorts_select.txt`). Each window is cut from `05_video/final.mp4` as 1080×1920 vertical via ffmpeg, with hard-burned subtitles from whisper.cpp (Q-D1: hard subtitles configurable via `cfg.packaging.shorts_burn_subtitles`). Output: `05_video/shorts/short_NN.mp4` + `manifest.json`.
+
 ### S12 — Video Assembly (`s12_video_assembly.py`)
 - Title card: FLUX-rendered `title.png` background, episode title composited via Pillow (yellow body, black stroke, random-corner placement, deterministic by episode id).
 - Per-beat clip: Ken Burns motion over the beat's image, fade in/out (`fade_in_seconds`/`fade_out_seconds`).
@@ -453,6 +475,8 @@ Voice + music bed + SFX *(SFX phase added Batch C 2026-05-27)*.
 | `title_generate.txt` | S9 helper / S12 | `{incident}` | Episode title + title-card composition. |
 | `grok_text_correction.txt` | S9 Grok sub-phase | `{flux_prompt}` | Currently a pass-through — the FLUX prompt is sent verbatim to Grok. |
 | `brand_safety_review.txt` *(added Batch B 2026-05-26)* | S7 tail | `{incident_name}, {hero}, {conflict}, {fact_ledger_json}, {script}` | Defamation-risk skeptic. Returns structured flags with severity ∈ {high, low}. |
+| `title_variants.txt` *(added Batch D 2026-05-27)* | S13 Phase 1 | `{n}, {company_name}, {founder}, {year_anchor}, {story_kind}, {hero}, {conflict}, {one_line_pitch}, {beat_summary}` | 10 title candidates, each tagged with style + predicted CTR band. |
+| `shorts_select.txt` *(added Batch D 2026-05-27)* | S13 Phase 3 | `{n}, {target_seconds}, {company_name}, {hero}, {conflict}, {story_kind}, {beats_dump}` | Picks 3 dramatic 30-second windows for the Shorts cutter. |
 | `sfx_cue_prompts.yaml` | — (doc only) | n/a | SFX cue catalog. S11 doesn't synthesise; kept for a future SFX pass. |
 
 ---
@@ -653,4 +677,4 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-27 — Batch C landed (SFX layer, narrow PD path wired+disabled, on-screen callouts, license attribution emission).*
+*This file last updated: 2026-05-27 — Batch D landed (S13 packaging stage: title variants, thumbnail variants, Shorts cutter, ElevenLabs adapter wired but disabled).*

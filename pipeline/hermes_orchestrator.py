@@ -54,6 +54,8 @@ STAGE_DISPATCH = {
     "S10": ("pipeline.stages.s10_kokoro_render",     "run", "Kokoro TTS"),
     "S11": ("pipeline.stages.s11_audio_post",        "run", "Audio Post"),
     "S12": ("pipeline.stages.s12_video_assembly",    "run", "Video Assembly"),
+    # Added Batch D 2026-05-27.
+    "S13": ("pipeline.stages.s13_packaging",         "run", "Packaging"),
 }
 
 
