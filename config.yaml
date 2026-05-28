@@ -68,7 +68,7 @@ production:
   # Trade-off: more attempts = more compute (~8 min upper bound at
   # 8 attempts) but better in-range hit rate. Fewer attempts =
   # faster but more `needs_human` from out-of-range scripts.
-  max_script_generation_attempts: 8
+  max_script_generation_attempts: 20
   # Per-attempt temperature step. Lower step = more creativity
   # preserved across retries. With step=0.05 and 8 attempts the
   # sequence is 0.75 / 0.70 / 0.65 / 0.60 / 0.55 / 0.50 / 0.45 /
