@@ -210,13 +210,27 @@ def run(episode: dict, queue: dict) -> str | None:
             + "; ".join(rejection_reasons[-3:])
         )
 
-    # Pick A/N/V. No domain taxonomy in this pipeline — any narrator
-    # and any visual style is eligible; only rolling-window cooldown
-    # gates the choice.
-    assignment = pick_assignment(
+    # Pick A/N/V. Batch G 2026-05-28: narrator pick is gated by
+    # `suits_story_kinds` so the new wit-driven narrators (Felix,
+    # Sebi, Ana) don't get assigned to story kinds that don't fit
+    # their voice (e.g. Felix's sardonic voice on a sincere
+    # underdog_comeback). Existing N1-N4 are universal and remain
+    # eligible for every story_kind.
+    base = pick_assignment(
         rolling,
         seed=hash(incident["company_name"]) & 0xffff,
+        story_kind=(incident.get("story_kind") or None),
     )
+    # Batch G 2026-05-28: honor narrator/archetype/visual_style pins
+    # on the episode record (set by --enqueue --narrator, --inject-
+    # topic JSON, or operator manual edit). Pins override the
+    # cooldown engine's pick so the operator can force a tonal
+    # experiment without removing other narrators from the pool.
+    from ..constraints import Assignment
+    arch = episode.get("archetype_pin") or base.archetype
+    narr = episode.get("narrator_pin") or base.narrator
+    vis = episode.get("visual_style_pin") or base.visual_style
+    assignment = Assignment(archetype=arch, narrator=narr, visual_style=vis)
 
     _finalise_pick(episode, queue, incident, assignment, last_signals,
                    origin="llm")
@@ -281,6 +295,7 @@ def _run_manual(
     base = pick_assignment(
         rolling,
         seed=hash(incident["company_name"]) & 0xffff,
+        story_kind=(incident.get("story_kind") or None),
     )
     # Honor per-episode pins. The CLI strips these from `incident` and
     # parks them on the episode record so they don't pollute the

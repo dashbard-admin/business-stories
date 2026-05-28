@@ -128,6 +128,55 @@ fixable in place.
      not in the ledger ("she must have felt...", "he
      wondered if...").
 
+   ----------------------------------------------------------------
+   VOICE-SPECIFIC AUDIT (Batch G 2026-05-28). Only applies to the
+   wit-driven narrators (N5, N6, N7); skip when the narrator is
+   N1-N4.
+   ----------------------------------------------------------------
+
+   If narrator is N5 (Felix Carter — Sardonic Outsider):
+     * Flag any act of 350+ words that contains zero deadpan
+       understatement and zero rule-of-three. The Felix register
+       requires at least one of each per act.
+     * Flag any pun, any "(lol)" / "(yes I'm being sarcastic)"
+       style aside, any second-person command, any pop-culture
+       reference (era-risky for the LLM).
+     * Flag MORE than four parenthetical asides in the whole
+       script — restraint is the point.
+     * Flag any sentence that explicitly editorialises on
+       character ("he was an idiot", "she should have known").
+       Felix lets the facts damn the protagonist.
+
+   If narrator is N6 (Sebi Park — High-School Wiz Kid):
+     * Flag any paragraph with NO sentence under 8 words. Sebi
+       needs short fragments — write short.
+     * Flag use of "bro", "dude", "literally", "fam", "no cap",
+       any explicit Gen-Z slang — Sebi's youth is in REGISTER,
+       not in lexicon.
+     * Flag any explicit reference to the narrator being young
+       ("as a teenager...", "I'm sixteen..."). Sebi never
+       self-references age.
+     * Flag any act of 350+ words without at least one wait-what
+       reaction OR one numbered/sequenced explanation.
+     * Flag use of corporate jargon WITHOUT translation
+       ("the unit economics were upside-down" without
+       a plain-language follow-up).
+
+   If narrator is N7 (Ana Vance — Work-Hard Play-Hard Exec):
+     * Flag use of corporate jargon WITHOUT immediately
+       translating it ("In English, that means..."). This is
+       Ana's signature move; every jargon use needs the
+       translation right after.
+     * Flag any #girlboss / "leaned in" / empowerment-speak.
+     * Flag hedge words: "perhaps", "arguably", "to some extent",
+       "it appears", "one could argue". Ana is decisive.
+     * Flag explicit self-promotion ("as someone who has been
+       in this position..."). Ana's experience is shown via
+       jargon fluency, not claimed.
+     * Flag any act of 400+ words with zero boardroom-insider
+       observation or zero data-citation (specific number,
+       specific filing, specific board vote).
+
 7. ANACHRONISMS / FACTUAL FRICTION AUDIT
    - Flag any technology / language / context out of period
      (e.g. "tweeted" used for 1990s events; "venture

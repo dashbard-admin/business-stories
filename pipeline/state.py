@@ -190,12 +190,25 @@ def new_episode_record(episode_id: str) -> dict[str, Any]:
     }
 
 
-def enqueue_episodes(n: int, *, preview_mode: bool = False) -> list[str]:
+def enqueue_episodes(
+    n: int,
+    *,
+    preview_mode: bool = False,
+    narrator_pin: str | None = None,
+    archetype_pin: str | None = None,
+    visual_style_pin: str | None = None,
+) -> list[str]:
     """Add `n` empty episode records to the queue. Returns new IDs.
 
     `preview_mode=True` flags each new record so S06 generates only
     Act 0 + Act 5 (added Batch B 2026-05-26) — a tone-check render
     that takes ~10 min of compute instead of 3-4 hours.
+
+    `narrator_pin` / `archetype_pin` / `visual_style_pin` (added Batch
+    G 2026-05-28) lock the corresponding assignment dimension on
+    every new record so S01 honors them instead of asking the
+    cooldown engine. Use the CLI `--narrator N5` flag to set
+    narrator_pin from the command line.
     """
     queue = load_queue()
     existing = {e["id"] for e in queue["episodes"]}
@@ -208,6 +221,12 @@ def enqueue_episodes(n: int, *, preview_mode: bool = False) -> list[str]:
         rec = new_episode_record(eid)
         if preview_mode:
             rec["preview_mode"] = True
+        if narrator_pin:
+            rec["narrator_pin"] = narrator_pin
+        if archetype_pin:
+            rec["archetype_pin"] = archetype_pin
+        if visual_style_pin:
+            rec["visual_style_pin"] = visual_style_pin
         queue["episodes"].append(rec)
         new_ids.append(eid)
     save_queue(queue)
