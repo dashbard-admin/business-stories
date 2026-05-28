@@ -422,7 +422,7 @@ def _generate_within_range(
     for attempt in range(max_attempts):
         if attempt == 0:
             prompt = base_prompt
-            temperature = 0.75
+            temperature = 0.80
         else:
             pressure = (
                 "*** LENGTH BUDGET — READ FIRST ***\n"
@@ -437,7 +437,7 @@ def _generate_within_range(
                 "*** END LENGTH BUDGET ***\n\n"
             )
             prompt = pressure + base_prompt
-            temperature = max(0.45, 0.75 - attempt * temp_step)
+            temperature = max(0.45, 0.80 - attempt * temp_step)
 
         logger.info("S06 attempt %d (temp=%.2f)", attempt + 1, temperature)
         result = llm.complete(prompt, temperature=temperature, max_tokens=12000)
