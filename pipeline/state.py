@@ -98,8 +98,39 @@ def load_queue() -> dict[str, Any]:
     path = _queue_path()
     if not path.exists():
         return _init_queue()
-    with path.open() as f:
-        queue = json.load(f)
+    raw = path.read_text()
+    try:
+        queue = json.loads(raw)
+    except json.JSONDecodeError as e:
+        # The queue file is operator-editable (S14 binding, manual
+        # blocker clears, hand-tuning). Trailing commas are the most
+        # common hand-edit mistake; Python's strict json parser
+        # rejects them. Recover and re-save the cleaned form so the
+        # next load is fast.  Added 2026-05-28.
+        if "trailing comma" not in str(e).lower():
+            raise
+        import logging, re
+        logger = logging.getLogger("hermes.state")
+        logger.warning(
+            "queue %s had trailing-comma JSON syntax (line %d col %d); "
+            "auto-cleaning and re-saving",
+            path, e.lineno, e.colno,
+        )
+        cleaned = re.sub(r",(\s*[\]}])", r"\1", raw)
+        try:
+            queue = json.loads(cleaned)
+        except json.JSONDecodeError as e2:
+            # Bad in a different way — surface the original error so
+            # the operator can hand-fix.
+            raise json.JSONDecodeError(
+                f"queue {path} unparseable even after trailing-comma "
+                f"recovery: {e2.msg}", cleaned, e2.pos
+            ) from e2
+        # Persist the cleaned version atomically.
+        tmp = path.with_suffix(".json.tmp")
+        with tmp.open("w") as f:
+            json.dump(queue, f, indent=2, sort_keys=False)
+        os.replace(tmp, path)
     _migrate_queue_in_place(queue)
     return queue
 
