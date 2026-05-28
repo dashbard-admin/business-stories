@@ -604,7 +604,7 @@ image_qa:
   # pd_reference_threshold: any PD asset whose match exceeds this
   # contributes its caption as text grounding into the FLUX prompt
   # (always text-only — img2img is not supported by the CLI).
-  pd_reference_threshold: 0.20
+  pd_reference_threshold: 0.35
   pd_max_reuses_per_asset: 30
   pd_reference_strength: 0.1
   # FLUX CLI has no img2img, so PD references are always text-only
