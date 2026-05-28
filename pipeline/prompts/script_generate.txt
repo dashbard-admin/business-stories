@@ -50,20 +50,54 @@ suggested..."), or (b) omit it. NEVER invent dates, dollar amounts,
 quotes, names, founder dialogue, valuations, employee counts, or
 court findings not present in the ledger.
 
-CALLOUT MARKERS (added Batch C 2026-05-26):
-When you state a high-impact concrete number (dollar amount, year,
-employee count, percent statistic, specific date), you MAY emit a
-single inline marker of the form `[CALLOUT: "$9 BILLION"]` or
-`[CALLOUT: "JUNE 9, 1997"]` directly AFTER the sentence that says
-the number. S12 will composite the bracketed text as an on-screen
-overlay at the beat where it appears. Rules:
-- AT MOST one CALLOUT per beat. The configured cap is in
-  config.callouts.max_per_beat; assume 1 unless you see otherwise.
-- The CALLOUT text must be ≤ 20 characters — fits on screen big.
-- The marker is not narrated; only the bracketed text is overlaid.
-- Use sparingly. 3-6 CALLOUTs across the whole script is the sweet
-  spot — every one re-engages the visual cortex on a high-impact
-  fact. Spamming them dilutes the effect.
+CALLOUT MARKERS (MANDATORY — added Batch C 2026-05-26, hardened
+Batch H 2026-05-28):
+
+You MUST emit between 3 and 6 inline markers of the form
+`[CALLOUT: "$9 BILLION"]` directly AFTER the sentence that contains
+the high-impact concrete fact. S12 composites the bracketed text as
+an on-screen overlay. The Quibi script that triggered this hardening
+emitted ZERO callouts despite naming $1.35B, $1.1B production budget,
+$100K-per-minute, 1.7M downloads, 500K subscribers — every one of
+those should have had a callout.
+
+You MUST emit a callout after a sentence that contains ANY of:
+  - a dollar amount of $1 million or more
+  - a year anchor (e.g. "1999", "two thousand", "two thousand twenty")
+  - an employee count, customer count, or subscriber count ≥ 10,000
+  - a specific calendar date ("on February twenty-sixth")
+  - a duration that frames the failure ("six months", "nine months",
+    "two hundred ninety-four days")
+  - a price-collapse number ("two billion to one hundred million")
+
+If a sentence has multiple such facts, pick the most dramatic one for
+the callout. Do NOT emit more than one callout per beat. Do NOT
+emit fewer than three across the script — a final draft with zero
+or one or two callouts is a structural failure the S07 critic will
+flag for re-write.
+
+Marker rules:
+- AT MOST one CALLOUT per beat.
+- The CALLOUT text must be ≤ 20 characters total — must fit big on
+  screen. Use abbreviations: "$1.35B" not "$1,350,000,000".
+- Format: "$X.XB", "$XM", "N MONTHS", "DEC 1, 2020", "$2B → $100M".
+- The marker itself is NOT narrated — only the bracketed text is
+  composited as an overlay. Place it on its own line after the
+  triggering sentence.
+
+EXAMPLES (these are the patterns the LLM should produce):
+
+  "The company burned through one point three five billion dollars
+  in seven months.
+  [CALLOUT: "$1.35B IN 7 MONTHS"]"
+
+  "Quibi projected seven point four million subscribers in year one.
+  It delivered five hundred thousand.
+  [CALLOUT: "7.4M → 500K"]"
+
+  "On December first, two thousand twenty, the company ceased to
+  exist.
+  [CALLOUT: "DEC 1, 2020"]"
 
 ================================================================
 STRUCTURE — THE 7-ACT TEMPLATE  (mandatory; every act required)
@@ -253,6 +287,20 @@ Notes for Act 3.5:
 - If the ledger has fewer than 2 documentary-evidence facts,
   shorten this act to 150 words rather than fabricating.
 
+- DOCUMENTARY_EVIDENCE FACTS (Batch H 2026-05-28): the fact ledger
+  may include claims with `fact_type: "documentary_evidence"` and
+  a `document_citation` field. Act 3.5 MUST cite at least two of
+  these by name when they exist. Examples:
+    "According to the company's S-1 filing from October 1999,
+     page 47..."
+    "The deposition transcript of CFO Sarah Chen, dated August
+     fourth, 2019, includes this line..."
+    "An internal email released in discovery during Eko versus
+     Quibi, dated March twelfth, 2020, shows..."
+  Use `exact_quote` from the ledger as the verbatim line when the
+  ledger has one. Do NOT manufacture document names or page numbers
+  — only cite documents present in the ledger.
+
 ─────────────────────────────────────────────────────────────────
 ACT 4 — THE PIVOT           12:30 – 15:30    (~360 words)
 ─────────────────────────────────────────────────────────────────
@@ -393,6 +441,31 @@ DO
 
 NARRATOR PERSONA INSTRUCTIONS — {narrator_id}:
 {narrator_full_instructions}
+
+================================================================
+*** VOICE LOCK — RE-READ THE PERSONA EXEMPLARS BEFORE WRITING ***
+================================================================
+You are voicing {narrator_name}. The voice register described in
+NARRATOR PERSONA INSTRUCTIONS above is MANDATORY across every act,
+not just the cold open and closing. If your draft reads in a
+NEUTRAL business-news voice — measured, restrained, attributable —
+it has FAILED the voice lock. The S07 critic will flag it for
+re-write and the operator will see the failure flag in --status.
+
+Re-anchor on the EXEMPLARS at the TOP of the persona block before
+writing each act. Match the pace, sentence-length variance, and
+punchline placement of those passages — not the literal text.
+
+For wit-driven narrators (N5 Felix, N6 Sebi, N7 Ana) every act
+MUST contain at least:
+  - one deadpan understatement
+  - one comedic rule-of-three (escalating list, not flat list)
+  - the narrator's signature move (parenthetical aside for Felix,
+    wait-what reaction for Sebi, jargon-then-translation for Ana)
+
+If you can't think of how the persona would phrase a particular
+paragraph, pause and consult the exemplars — don't fall back on
+generic business prose.
 
 ================================================================
 OUTPUT FORMAT

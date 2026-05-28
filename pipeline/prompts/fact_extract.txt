@@ -23,10 +23,26 @@ For each fact, output an object with these fields:
     regulatory_event,
     lawsuit_or_settlement,
     leadership_change,
-    quote
+    quote,
+    documentary_evidence
   ]
+  Use `documentary_evidence` (added Batch H 2026-05-28) when the
+  source CITES a specific document, court filing, deposition, leaked
+  email, internal memo, regulatory filing page, or SEC exhibit. The
+  fact_text should name the document AND state what it shows. These
+  facts feed S06's Act 3.5 "Investigation" slot — that act is meant
+  to walk the viewer through how-we-know-what-happened, and without
+  documentary_evidence facts in the ledger the investigation slot
+  defaults to generic analysis (the Quibi script symptom).
+- document_citation: REQUIRED when fact_type is documentary_evidence;
+  optional otherwise. A short structured reference the writer can
+  cite verbatim — e.g. "SEC S-1 filing, October 1999, page 47"
+  / "Deposition of CFO Sarah Chen, August 4 2019" / "Internal email
+  from CTO, leaked in Eko v. Quibi discovery, March 12 2020" /
+  "Bankruptcy filing, EDGAR docket 20-CV-04437, exhibit 12".
 - exact_quote: the source's exact wording (max 25 words). Required for
-  the `quote` type; encouraged otherwise.
+  the `quote` type AND the `documentary_evidence` type; encouraged
+  otherwise.
 - source_paragraph_hint: brief positional reference (e.g. "page 3,
   second paragraph", "section titled 'Founding'", "paragraph
   beginning 'In 2003...'")
