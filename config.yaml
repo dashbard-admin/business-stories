@@ -453,7 +453,20 @@ asset_hunt:
   # S08 then routes every beat to FLUX, which is the right call for
   # comic-book-styled episodes where PD photo assets don't fit the
   # visual style anyway. Set true to restore the full PD-hunt path.
-  enabled: true 
+  enabled: true
+
+  # Hard cap on the total PD asset count S05 will collect
+  # (2026-05-28). Was hardcoded at 50 (Phase 1 Wikimedia) → 80
+  # (Phase 2 SearXNG image search). Operator reported "hundreds of
+  # pictures, most completely unrelated" — SearXNG image search for
+  # "Quibi" returns lots of vaguely-related stock photos and
+  # screenshots that pass the license/dimension gates but aren't
+  # actually useful. With 40 total: Phase 1 (Wikimedia, high-quality)
+  # gets the first 25, Phase 2 fills the remaining 15. Lower this
+  # if you want fewer downloads + faster S05; raise it if you want
+  # the cooldown engine to have more PD candidates to choose from
+  # at S08 routing time.
+  max_pd_assets: 40
 
   # Narrow PD path (Batch C 2026-05-26). When asset_hunt.enabled is
   # ALSO true, this list restricts PD routing to only the named
