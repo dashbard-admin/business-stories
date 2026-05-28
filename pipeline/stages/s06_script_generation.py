@@ -29,6 +29,14 @@ THINK_RE = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.DOTALL | re.IGNO
 
 # Strip Kokoro-poisoning terminal sign-offs ("End of script", "THE END",
 # "Fin.", "---END---") from the script tail.
+#
+# Batch H 2026-05-28: the original regex used a (?<=[.!?]) lookbehind
+# that broke when a separator like `--`, `## BEAT 80 ##`, or a blank-
+# line gap sat between the last sentence's period and the boilerplate.
+# The Quibi script ended with "The end." after a BEAT 80 marker and
+# the regex couldn't anchor. Two regexes now run in sequence: a strict
+# one (period-anchored, for the common case) AND a loose tail-only
+# one (matches just the trailing line(s) regardless of context).
 TERMINAL_BOILERPLATE_RE = re.compile(
     r"""(?x)
     (?<=[.!?])
@@ -49,6 +57,34 @@ TERMINAL_BOILERPLATE_RE = re.compile(
     """,
 )
 
+# Loose tail-only sweep: any LINE at the end of the document that just
+# says "the end" / "fin" / "end of script" / "[End]" / "---END---" gets
+# stripped, regardless of what's directly before it. Applied AFTER the
+# strict regex so the safer one runs first.
+TERMINAL_TAIL_LOOSE_RE = re.compile(
+    r"""(?xm)
+    (?:
+        # bare "the end", optionally bracketed/dashed
+        ^ \s* [\-*=\[\(]* \s* (?i:the \s+ end) \s* [\-*=\]\)\.\!\?]* \s* $
+        |
+        # "fin" / "fin." / "---FIN---"
+        ^ \s* [\-*=\[\(]* \s* (?i:fin) \s* [\-*=\]\)\.\!\?]* \s* $
+        |
+        # bracketed "end" with no inner content: [End] ---END--- (END)
+        ^ \s* [\-*=\[\(]+ \s* (?i:end) \s* [\-*=\]\)]+ \s* $
+        |
+        # bare "end of script/narration/report/etc.", optionally
+        # wrapped in brackets/dashes
+        ^ \s* [\-*=\[\(]* \s*
+            (?i: end \s+ of \s+
+              (?: script | narration | report | episode | story
+                  | transcript | text ))
+            \s* [\-*=\]\)\.\!\?]* \s* $
+    )
+    \s* $
+    """,
+)
+
 
 def _clean(text: str) -> str:
     text = THINK_RE.sub("", text).strip()
@@ -59,8 +95,15 @@ def _clean(text: str) -> str:
         if text.endswith("```"):
             text = text[:-3]
     text = text.strip()
+    # Up to 4 iterations: each pass strips one terminal sign-off so
+    # stacked tails ("The end.\n\n[End of script]") all come off.
     for _ in range(4):
         new_text = TERMINAL_BOILERPLATE_RE.sub("", text).rstrip()
+        if new_text != text:
+            text = new_text
+            continue
+        # Strict regex didn't match — try the loose tail-only sweep.
+        new_text = TERMINAL_TAIL_LOOSE_RE.sub("", text).rstrip()
         if new_text == text:
             break
         text = new_text
@@ -188,6 +231,11 @@ def run(episode: dict, queue: dict) -> str | None:
             [{"id": c.get("claim_id"),
               "fact_type": c.get("fact_type"),
               "statement": c.get("canonical_statement"),
+              # Batch H 2026-05-28: pass document_citation through to
+              # the writer so Act 3.5 can cite filings/depositions
+              # verbatim instead of producing generic analysis.
+              "document_citation": c.get("document_citation"),
+              "exact_quote": c.get("exact_quote"),
               "soft": c.get("soft", False)}
              for c in ledger.get("claims", [])],
             indent=2,
@@ -267,6 +315,22 @@ def run(episode: dict, queue: dict) -> str | None:
         script = _redistribute_beats(script, target_beats_count)
         beats = BEAT_RE.findall(script)
 
+    # Short-beat consolidation (Batch H 2026-05-28). The Quibi script
+    # had ~13 beats with 1-2 sentences only (8-15 words each) — at
+    # 120 wpm those play for 4-7 seconds on screen, too fast for the
+    # viewer to register the image, and they fragment the prose
+    # rhythmically. Merge any beat shorter than 15 words into the
+    # NEXT beat. Skips on preview-mode (already-tight pacing).
+    if not preview_mode:
+        script_before = script
+        script = _merge_short_beats(script, min_words=15)
+        if script != script_before:
+            merged_beats = BEAT_RE.findall(script)
+            logger.info("S06 short-beat merge: %d → %d beats "
+                        "(absorbed sub-15-word beats)",
+                        len(beats), len(merged_beats))
+            beats = merged_beats
+
     (ws / "02_script").mkdir(exist_ok=True)
     (ws / "02_script" / "script.txt").write_text(script)
 
@@ -309,6 +373,59 @@ def _find_forbidden(text: str, phrases: list[str]) -> list[str]:
 
 
 # -------------------- beat re-distribution --------------------
+
+def _merge_short_beats(script: str, *, min_words: int = 15) -> str:
+    """Walk beats in order. Any beat whose content has fewer than
+    `min_words` words is absorbed into the next beat — the marker is
+    dropped, the content stays. The trailing beat (no successor) keeps
+    its content but the marker stays too so we never lose final-act
+    closure. Beat numbers are RE-NUMBERED 1..N at the end.
+
+    Added Batch H 2026-05-28 to fix the Quibi-style fragmentation
+    (13 of 80 beats had ≤15 words, playing for 4-7s on screen each).
+    """
+    matches = list(BEAT_RE.finditer(script))
+    if len(matches) <= 1:
+        return script
+
+    # Build (marker_text, content_text, marker_start, content_end)
+    # tuples. The "content" of beat i is the text between marker i's
+    # END and marker (i+1)'s START — or to end-of-string for the last.
+    segments: list[tuple[str, str]] = []
+    for i, m in enumerate(matches):
+        content_start = m.end()
+        content_end = matches[i + 1].start() if i + 1 < len(matches) else len(script)
+        content = script[content_start:content_end]
+        segments.append((m.group(0), content))
+
+    # Walk and merge: when current beat's content < min_words AND it's
+    # not the last beat, skip emitting THIS marker — its content gets
+    # prepended to the next beat's content.
+    out_parts: list[str] = []
+    carry: str = ""
+    for idx, (_marker, content) in enumerate(segments):
+        is_last = idx == len(segments) - 1
+        merged_content = carry + content
+        wc = len(merged_content.split())
+        if wc < min_words and not is_last:
+            # Don't emit a marker for this short beat; carry its
+            # content into the next iteration.
+            carry = merged_content
+            continue
+        # Emit a fresh marker (renumbering happens below) + content.
+        out_parts.append(("__MARKER__", merged_content))
+        carry = ""
+
+    # Renumber the kept markers 1..N.
+    rebuilt: list[str] = []
+    n = 1
+    for tag, content in out_parts:
+        rebuilt.append(f"## BEAT {n} ##")
+        rebuilt.append(content.rstrip())
+        rebuilt.append("\n\n")
+        n += 1
+    return "".join(rebuilt).rstrip()
+
 
 def _consolidate_beats(script: str, target_count: int) -> str:
     matches = list(BEAT_RE.finditer(script))

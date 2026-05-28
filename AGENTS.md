@@ -717,4 +717,4 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-28 — Batch G landed (three wit-driven narrators: N5 Felix sardonic outsider, N6 Sebi wiz kid, N7 Ana exec; suits_story_kinds gate in constraints; --narrator/--archetype/--visual-style CLI pins; S07 voice-specific critique upgrades).*
+*This file last updated: 2026-05-28 — Batch H landed (archetype `suits_story_kinds` gate, narrator `enabled` flag, EXEMPLARS moved to front of Felix persona, mandatory CALLOUT markers, VOICE LOCK reminder, hardened TERMINAL_BOILERPLATE_RE, short-beat consolidation, documentary_evidence fact_type, critic-aware voice retry). Felix N5 is the only enabled narrator during testing.*

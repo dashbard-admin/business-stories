@@ -606,20 +606,38 @@ image_qa:
 # constraints.pick_assignment() relies only on rolling-window cooldown.
 
 archetypes:
+  # suits_story_kinds added Batch H 2026-05-28. The cooldown engine
+  # filters archetypes by which story_kinds they fit BEFORE applying
+  # cooldown. Quibi case: A5 (Underdog Comeback) was getting picked
+  # for a scandal_postmortem story, forcing the closing acts into a
+  # mealy "lesson learned" arc when the company had actually died.
+  # Now A5 is restricted to story_kinds where a real comeback exists.
+  # Archetypes without `suits_story_kinds` are treated as universal.
   - id: A1
     name: "Chronological Origin"
+    suits_story_kinds: [origin, pivot, underdog_comeback]
   - id: A2
     name: "Rise-and-Fall Arc"
+    suits_story_kinds: [rise_and_fall, scandal_postmortem, founder_drama]
   - id: A3
     name: "Disruption Story"
+    suits_story_kinds: [disruption, pivot, origin]
   - id: A4
     name: "Pivotal Decision"
+    suits_story_kinds: [pivot, founder_drama, disruption, underdog_comeback]
   - id: A5
     name: "Underdog Comeback"
+    suits_story_kinds: [underdog_comeback, pivot]
   - id: A6
     name: "Founder Drama"
+    suits_story_kinds: [founder_drama, scandal_postmortem, rise_and_fall]
 
 narrators:
+  # `enabled: false` removes the narrator from the cooldown engine's
+  # pool entirely. Used during testing to lock the channel to one
+  # voice. Flip back to true to restore for production rotation.
+  # Added Batch H 2026-05-28: testing Felix (N5) exclusively before
+  # going into production with the full rotation.
   - id: N1
     name: "Marcus Reed - Business Editor"
     voice: "am_michael"
@@ -627,6 +645,7 @@ narrators:
     pitch_shift: 0.0
     breath_pause_ms: 300
     tone: "measured, authoritative, dry"
+    enabled: false
   - id: N2
     name: "Daniel Hayes - Investigative Skeptic"
     voice: "bm_lewis"
@@ -634,6 +653,7 @@ narrators:
     pitch_shift: -1.0
     breath_pause_ms: 350
     tone: "skeptical, probing, restrained"
+    enabled: false
   - id: N3
     name: "Emma Gray - Documentary Storyteller"
     voice: "bf_emma"
@@ -641,6 +661,7 @@ narrators:
     pitch_shift: 0.0
     breath_pause_ms: 300
     tone: "warm, novelistic, humane"
+    enabled: false
   - id: N4
     name: "Nicole Jensen - Modern Tech Voice"
     voice: "af_alloy"
@@ -648,6 +669,7 @@ narrators:
     pitch_shift: 0.0
     breath_pause_ms: 220
     tone: "energetic, contemporary, sharp"
+    enabled: false
 
   # ---- Wit-driven narrators (Batch G 2026-05-28) ----
   # Three new personas designed to spice up the prose. Each has a
@@ -666,6 +688,7 @@ narrators:
     pitch_shift: 0.0
     breath_pause_ms: 280
     tone: "dry, observational, wry, deadpan"
+    enabled: true                  # ONLY enabled narrator during testing
     suits_story_kinds:
       - scandal_postmortem
       - rise_and_fall
@@ -679,6 +702,7 @@ narrators:
     pitch_shift: 0.0
     breath_pause_ms: 200
     tone: "curious, irreverent, simplicity-first, fast"
+    enabled: false
     suits_story_kinds:
       - disruption
       - pivot
@@ -692,6 +716,7 @@ narrators:
     pitch_shift: 0.0
     breath_pause_ms: 220
     tone: "confident, fast, jargon-fluent, insider-cynical"
+    enabled: false
     suits_story_kinds:
       - rise_and_fall
       - founder_drama

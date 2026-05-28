@@ -189,6 +189,25 @@ def run(episode: dict, queue: dict) -> str | None:
             continue
         break
 
+    # Critic-aware voice retry (Batch H 2026-05-28). For wit-driven
+    # narrators (N5/N6/N7), substring rewrites are insufficient when
+    # the critic flags STRUCTURAL voice failures ("no deadpan in
+    # Act 3", "rule-of-three missing across the script", "every
+    # paragraph reads in neutral business-news voice"). Those need
+    # a whole-passage re-voice, not a substring patch.
+    #
+    # If the final-loop verdict is `ship_blocker` AND the narrator is
+    # N5/N6/N7 AND the issues_summary mentions voice-structural
+    # failures, fire ONE full re-write pass with the writer LLM,
+    # handing it the original draft + the critique flags + the
+    # narrator instructions. The new draft replaces the old.
+    if (history and history[-1].get("verdict") == "ship_blocker"
+            and narrator_id in ("N5", "N6", "N7")):
+        script = _voice_retry(
+            cfg, script, history[-1], narrator_id, narr, incident,
+            ws=ws,
+        )
+
     script_path.write_text(script)
     (ws / "02_script" / "critique_history.json").write_text(
         json.dumps(history, indent=2)
@@ -314,3 +333,146 @@ def _run_brand_safety_pass(
             f"{episode['id']}` to clear."
         )
     return None
+
+
+# ----------------------------------------------------------------------
+# Voice-failure retry (Batch H 2026-05-28)
+# ----------------------------------------------------------------------
+
+# Trigger words/phrases in the critic's issues_summary that signal a
+# structural voice failure (substring patches won't fix). Case-
+# insensitive. The wit-driven narrators (N5 Felix, N6 Sebi, N7 Ana)
+# each have signature register elements the critic checks for; when
+# the critic says they're MISSING, we need a whole-script re-voice.
+_VOICE_FAILURE_TRIGGERS = (
+    "deadpan",
+    "rule of three",
+    "rule-of-three",
+    "parenthetical",
+    "wait-what",
+    "jargon-then-translation",
+    "boardroom-insider",
+    "no fragments",
+    "register-break",
+    "neutral business-news voice",
+    "default tone",
+    "voice did not land",
+    "voice failed",
+    "no signature move",
+)
+
+
+def _voice_retry(
+    cfg, script: str, last_loop: dict,
+    narrator_id: str, narr: dict, incident: dict,
+    *, ws,
+) -> str:
+    """Run one full re-write pass when the critic flagged voice-
+    structural failures on a wit-driven narrator. The writer LLM
+    sees the original draft + the critique's issues_summary + the
+    narrator's full persona instructions, and is asked to produce a
+    new draft that preserves length / facts / structure but
+    re-anchors the voice register.
+
+    Returns the new script on success, the original script on any
+    failure (we never lose the original draft).
+    """
+    issues = (last_loop.get("issues_summary") or "").lower()
+    if not any(t in issues for t in _VOICE_FAILURE_TRIGGERS):
+        logger.info(
+            "S07 voice-retry: critic flagged ship_blocker but "
+            "issues_summary doesn't mention voice-structural failure; "
+            "skipping voice retry"
+        )
+        return script
+
+    logger.info(
+        "S07 voice-retry: narrator=%s, critic flagged voice "
+        "failure; running whole-script re-voice pass", narrator_id,
+    )
+
+    # Load narrator full_instructions (the exemplars block is at the
+    # top after Batch H's reordering).
+    import yaml
+    narrators_yaml = yaml.safe_load(
+        (cfg.style_profiles_dir / "narrators.yaml").read_text()
+    )
+    persona = (narrators_yaml.get(narrator_id) or {}).get(
+        "full_instructions", ""
+    )
+
+    voice_retry_prompt = (
+        "You are re-writing a documentary script for VOICE. The "
+        "original draft below got the facts right but failed to "
+        "match the narrator's voice register. The critic specifically "
+        "flagged:\n\n"
+        f"  {last_loop.get('issues_summary', '(no summary)')}\n\n"
+        "Re-write the script. Constraints:\n"
+        "  - Preserve every ## BEAT N ## marker (number AND content "
+        "    boundary).\n"
+        "  - Preserve every concrete fact (numbers, dates, names, "
+        "    company names, dollar amounts).\n"
+        "  - Preserve every [CALLOUT: \"...\"] marker.\n"
+        "  - Preserve total word count within ±15%.\n"
+        "  - RE-VOICE the prose to match the narrator's register.\n\n"
+        "Narrator: " + narr.get("name", narrator_id) + "\n\n"
+        "Persona instructions (the exemplars at the top of this "
+        "block are the canonical voice anchor — pattern-match them):\n"
+        "----------------------------------------------------------\n"
+        f"{persona}\n"
+        "----------------------------------------------------------\n\n"
+        "ORIGINAL DRAFT (re-voice this, do NOT abandon it):\n"
+        "----------------------------------------------------------\n"
+        f"{script}\n"
+        "----------------------------------------------------------\n\n"
+        "Output ONLY the re-voiced script. No commentary, no preamble, "
+        "no JSON, no code fences. Use ## BEAT N ## markers as they "
+        "appear above. Use [PAUSE 2s] / [EMPHASIS] / [CALLOUT: \"...\"] "
+        "inline as appropriate."
+    )
+
+    writer = LLM(role="writer")
+    try:
+        result = writer.complete(
+            voice_retry_prompt, temperature=0.7, max_tokens=12000,
+        )
+    except Exception as e:
+        logger.warning("S07 voice-retry: LLM call failed: %s", e)
+        return script
+
+    from .s06_script_generation import _clean, BEAT_RE
+    new_script = _clean(result.text)
+    new_beats = BEAT_RE.findall(new_script)
+    old_beats = BEAT_RE.findall(script)
+
+    # Sanity: only accept the re-voice if it preserved roughly the
+    # same beat count and word count.
+    old_wc = len(script.split())
+    new_wc = len(new_script.split())
+    if not new_beats:
+        logger.warning("S07 voice-retry: re-voice produced 0 beats; "
+                       "keeping original draft")
+        return script
+    if abs(new_wc - old_wc) > 0.2 * old_wc:
+        logger.warning(
+            "S07 voice-retry: re-voice word count %d vs original %d "
+            "(>20%% drift); keeping original draft", new_wc, old_wc,
+        )
+        return script
+    if abs(len(new_beats) - len(old_beats)) > max(5, 0.15 * len(old_beats)):
+        logger.warning(
+            "S07 voice-retry: re-voice beat count %d vs original %d "
+            "(too much drift); keeping original draft",
+            len(new_beats), len(old_beats),
+        )
+        return script
+
+    logger.info(
+        "S07 voice-retry: accepted re-voiced draft "
+        "(%d→%d words, %d→%d beats)",
+        old_wc, new_wc, len(old_beats), len(new_beats),
+    )
+    # Also archive the original draft for operator comparison.
+    archive = ws / "02_script" / "script.pre-voice-retry.txt"
+    archive.write_text(script)
+    return new_script
