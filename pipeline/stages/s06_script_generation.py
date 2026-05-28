@@ -232,10 +232,22 @@ def run(episode: dict, queue: dict) -> str | None:
         wc = len(script.split())
         logger.info("S06 after condense: %d words", wc)
 
-    # Beat normalization
-    min_beats = cfg.quality_gates["min_total_beats"]
-    max_beats = cfg.quality_gates["max_total_beats"]
-    target_beats_count = (min_beats + max_beats) // 2
+    # Beat normalization.
+    # Bugfix 2026-05-28: the original block used cfg.quality_gates'
+    # min/max unconditionally. When preview_mode is on, the script is
+    # ONLY Act 0+5 (~360 words / ~8 beats), and redistributing those
+    # ~3 beats up to ~80 splits the prose at word boundaries instead
+    # of natural sentence boundaries — producing 5-words-per-beat
+    # gibberish. Honor the preview-mode beat target so redistribution
+    # stays sane.
+    if preview_mode:
+        min_beats = 6
+        max_beats = 12
+        target_beats_count = 8
+    else:
+        min_beats = cfg.quality_gates["min_total_beats"]
+        max_beats = cfg.quality_gates["max_total_beats"]
+        target_beats_count = (min_beats + max_beats) // 2
     beats = BEAT_RE.findall(script)
     if len(beats) > max_beats:
         logger.warning("S06 too many beats (%d > %d), consolidating to ~%d",
@@ -312,46 +324,74 @@ def _consolidate_beats(script: str, target_count: int) -> str:
 
 
 def _redistribute_beats(script: str, target_count: int) -> str:
+    """Insert ## BEAT N ## markers at sentence boundaries so the
+    rendered beat count lands near `target_count` without ever
+    splitting mid-sentence or mid-word.
+
+    Hard floor: every beat must contain at least MIN_WORDS_PER_BEAT
+    (20) words. At 120 wpm that's ~10 seconds of narration per
+    beat — the minimum needed for a viewer to register the image
+    on screen. If the script is too short to hit `target_count`
+    while respecting the floor, we return FEWER beats and let the
+    downstream min_total_beats gate surface "script too short" as
+    a needs_human rather than producing gibberish.
+
+    Bugfix 2026-05-28: was previously falling back to
+    `_insert_beats_by_word` which sliced at word boundaries,
+    producing 5-word "On December first, two thousand // twenty,
+    Quibi Holdings LLC ceased" splits. That fallback is removed.
+    """
     cleaned = BEAT_RE.sub("", script).strip()
     cleaned = re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", cleaned)
 
-    para_breaks = [m.start() for m in re.finditer(r"\n\n", cleaned)]
-    sent_breaks = [m.end() for m in re.finditer(r"(?<=[.!?])\s+(?=[A-Z\"'])", cleaned)]
-
-    if len(para_breaks) >= target_count:
-        breaks = para_breaks
-    else:
-        breaks = sorted(set(para_breaks + sent_breaks))
-
-    if len(breaks) < target_count:
-        return _insert_beats_by_word(cleaned, target_count)
-
-    step = len(breaks) / target_count
-    keep = sorted({breaks[int(i * step)] for i in range(target_count)})
-
-    parts: list[str] = []
+    # Build the sentence list with their character spans.
+    sent_starts: list[int] = []
+    sent_ends: list[int] = []
     cursor = 0
-    for idx, pos in enumerate(keep, start=1):
-        parts.append(cleaned[cursor:pos])
-        parts.append(f"\n\n## BEAT {idx} ##\n\n")
-        cursor = pos
-    parts.append(cleaned[cursor:])
-    return "".join(parts)
+    for m in re.finditer(r"[^.!?]*[.!?]+[\"')\s]*", cleaned, re.DOTALL):
+        s, e = m.start(), m.end()
+        if s < cursor:
+            continue
+        sent_starts.append(s)
+        sent_ends.append(e)
+        cursor = e
+    if not sent_starts:
+        # No detectable sentences — nothing safe to split. Return as
+        # one beat; downstream gate will catch the script as too
+        # short.
+        return f"## BEAT 1 ##\n\n{cleaned}"
 
+    MIN_WORDS_PER_BEAT = 20
 
-def _insert_beats_by_word(text: str, target_count: int) -> str:
-    words = text.split()
-    n = len(words)
-    if n < target_count:
-        return text
-    per_beat = max(1, n // target_count)
+    # Greedy sentence-pack: walk sentences in order, accumulate
+    # into the current beat until it has >= target_words_per_beat
+    # words, then close it and start the next. The last sentence
+    # always closes whatever beat it lands in.
+    total_words = len(cleaned.split())
+    target_words_per_beat = max(
+        MIN_WORDS_PER_BEAT, total_words // max(1, target_count)
+    )
+
     parts: list[str] = []
-    for i in range(target_count):
-        start = i * per_beat
-        end = (i + 1) * per_beat if i < target_count - 1 else n
-        parts.append(f"## BEAT {i + 1} ##")
-        parts.append(" ".join(words[start:end]))
-    return "\n\n".join(parts)
+    beat_idx = 0
+    current_start = 0
+    current_word_count = 0
+    for s_idx, (s, e) in enumerate(zip(sent_starts, sent_ends)):
+        sentence_text = cleaned[s:e]
+        sentence_word_count = len(sentence_text.split())
+        if current_word_count == 0:
+            # Start a new beat at this sentence's start position.
+            beat_idx += 1
+            parts.append(f"## BEAT {beat_idx} ##\n\n")
+            current_start = s
+        current_word_count += sentence_word_count
+        is_last_sentence = (s_idx == len(sent_starts) - 1)
+        if current_word_count >= target_words_per_beat or is_last_sentence:
+            parts.append(cleaned[current_start:e].strip())
+            parts.append("\n\n")
+            current_word_count = 0
+
+    return "".join(parts).strip()
 
 
 # -------------------- length adjustment --------------------
