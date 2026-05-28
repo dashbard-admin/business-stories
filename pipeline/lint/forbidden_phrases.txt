@@ -18,20 +18,13 @@ the dark secret
 # --- Business clichés that read as filler ---
 game-changer
 game changer
-disrupt the industry
-disrupting the industry
 rocked the world
 rocked the industry
-perfect storm
 took the world by storm
-skyrocketed
 rocketed to success
-overnight success
-quintessential
 synergies
 value proposition
 stakeholder alignment
-revolutionary product
 groundbreaking innovation
 trailblazing
 
@@ -49,8 +42,6 @@ The moral of the story
 The takeaway here
 
 # --- Tabloid superlatives without backing ---
-the greatest
-the most successful
 the biggest mistake ever
 the worst business decision in history
 
@@ -61,11 +52,9 @@ the worst business decision in history
 # matters") that fired on legitimate prose. Trimmed to phrases that
 # only appear as abstract closers.
 and the rest, as they say, is history
-is a cautionary tale
 it teaches us that
 the lesson is clear
 the moral here
 the takeaway is
 a monument to hubris
 it is a stark reminder
-a brilliant idea that failed

@@ -139,7 +139,7 @@ quality_gates:
   # Script-word window — bumped 2026-05-26 (Batch A) for 18-min target.
   # 120wpm × 18min ≈ 2160 spoken; we widen to 1900-2700 to allow
   # natural variance across narrators and story_kinds.
-  min_script_words: 2000 
+  min_script_words: 2200 
   max_script_words: 3000
   audio_lufs_target: -14
   audio_lufs_min: -15
