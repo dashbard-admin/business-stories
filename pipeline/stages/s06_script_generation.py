@@ -196,9 +196,16 @@ def run(episode: dict, queue: dict) -> str | None:
         retention_dip_warnings=perf["retention_dip_warnings"],
     )
 
+    # Retry budget + temperature decay are operator-tunable per
+    # config.production.{max_script_generation_attempts,
+    # script_generation_temp_step}. Defaults match the historical
+    # behaviour (8 attempts, 0.05 step → temp stays in the 0.45-0.75
+    # band across the whole loop).
+    max_attempts = int(cfg.production.get("max_script_generation_attempts", 8))
+    temp_step = float(cfg.production.get("script_generation_temp_step", 0.05))
     script = _generate_within_range(
         llm, prompt, min_w=min_w, max_w=max_w, target_w=target_words,
-        max_attempts=8,
+        max_attempts=max_attempts, temp_step=temp_step,
     )
 
     # forbidden-phrase lint with one rewrite attempt
@@ -399,7 +406,15 @@ def _redistribute_beats(script: str, target_count: int) -> str:
 def _generate_within_range(
     llm, base_prompt: str, *, min_w: int, max_w: int, target_w: int,
     max_attempts: int = 8,
+    temp_step: float = 0.05,
 ) -> str:
+    """Generate a script that lands inside [min_w, max_w] words, retrying
+    up to `max_attempts` times. Each retry adds a length-budget prefix
+    nudge and lowers temperature by `temp_step` (floored at 0.45).
+    Both knobs are operator-tunable via config.production from
+    2026-05-28; defaults preserve creativity across retries with
+    a 0.05 step (the original 0.10 step crashed to the floor by
+    attempt 4)."""
     best_script: str | None = None
     best_distance = float("inf")
     last_wc: int | None = None
@@ -422,7 +437,7 @@ def _generate_within_range(
                 "*** END LENGTH BUDGET ***\n\n"
             )
             prompt = pressure + base_prompt
-            temperature = max(0.45, 0.75 - attempt * 0.1)
+            temperature = max(0.45, 0.75 - attempt * temp_step)
 
         logger.info("S06 attempt %d (temp=%.2f)", attempt + 1, temperature)
         result = llm.complete(prompt, temperature=temperature, max_tokens=12000)

@@ -58,6 +58,26 @@ production:
                                     # invalidates the hook timing the
                                     # writer prompt is calibrated for.
 
+  # Operator-tunable retry budget for S06 script generation
+  # (2026-05-28). Each attempt = one full writer-LLM call (~30-60s)
+  # producing a candidate script; if outside [min_script_words,
+  # max_script_words] the loop nudges with a length-budget prefix
+  # and lowers temperature, then retries. The closest-to-target draft
+  # is kept as a fallback when all attempts run out.
+  #
+  # Trade-off: more attempts = more compute (~8 min upper bound at
+  # 8 attempts) but better in-range hit rate. Fewer attempts =
+  # faster but more `needs_human` from out-of-range scripts.
+  max_script_generation_attempts: 8
+  # Per-attempt temperature step. Lower step = more creativity
+  # preserved across retries. With step=0.05 and 8 attempts the
+  # sequence is 0.75 / 0.70 / 0.65 / 0.60 / 0.55 / 0.50 / 0.45 /
+  # 0.45 — the writer stays in a more creative band even on the
+  # later attempts. With step=0.10 it would crash to 0.45 by
+  # attempt 4 (tighter compliance, less spice). Floor is 0.45
+  # regardless of step.
+  script_generation_temp_step: 0.05
+
   # Opening title card (prepended before Act 0). The script_generate
   # prompt is explicit: NO INTRO, NO LOGO, NO "WELCOME BACK". Default
   # is 0 (disabled) so the first frame is Act 0's cold open. Set to
