@@ -86,7 +86,47 @@ TERMINAL_TAIL_LOOSE_RE = re.compile(
 )
 
 
+# Orphan beat marker — `## BEAT N` without a closing `##`.
+# The Quibi script2 had the LLM emitting these (Markdown H2 syntax)
+# alongside the canonical paired-delimiter form. Strip them in
+# _clean() BEFORE _redistribute / _merge can act on miscounted beats.
+# Added Batch I 2026-05-28.
+ORPHAN_BEAT_RE = re.compile(
+    r"""(?xm)
+    ^                       # start of line
+    [ \t]*                  # optional leading whitespace
+    \#\#                    # opening ##
+    \s*BEAT\s+\d+           # BEAT N
+    (?!\s*\#\#)             # NOT followed by closing ##
+    [ \t]*                  # optional trailing whitespace on the marker line
+    $                       # end of line
+    """,
+    re.IGNORECASE,
+)
+
+# Stray bracketed-token leaks. The Batch H Quibi script2 had
+# [SPONSOR_SLOT] markers throughout because the prompt's commented
+# placeholder was read as an instruction. We strip these post-hoc
+# in case future prompt edits re-introduce the same kind of leak.
+# CALLOUT and PAUSE/EMPHASIS are legitimate so they're NOT stripped.
+STRAY_TOKEN_RE = re.compile(
+    r"""(?x)
+    \[
+    \s*
+    (?: SPONSOR_SLOT | SPONSOR \s+ SLOT | SPONSOR \s+ READ
+        | INTRO | OUTRO )
+    \s*
+    \]
+    """,
+    re.IGNORECASE,
+)
+
+
 def _clean(text: str) -> str:
+    """Strip <think> tags, code fences, stray placeholder tokens, and
+    terminal boilerplate. Orphan beat-marker stripping lives OUTSIDE
+    this function (in run()) so the dual-stream check can see the raw
+    count first."""
     text = THINK_RE.sub("", text).strip()
     if text.startswith("```"):
         first_nl = text.find("\n")
@@ -95,6 +135,14 @@ def _clean(text: str) -> str:
         if text.endswith("```"):
             text = text[:-3]
     text = text.strip()
+
+    # Strip stray placeholder tokens (SPONSOR_SLOT etc.) that leaked
+    # from the prompt's commented placeholders. Added Batch I
+    # 2026-05-28. CALLOUT / PAUSE / EMPHASIS markers are legitimate
+    # and explicitly preserved.
+    text = STRAY_TOKEN_RE.sub("", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
     # Up to 4 iterations: each pass strips one terminal sign-off so
     # stacked tails ("The end.\n\n[End of script]") all come off.
     for _ in range(4):
@@ -108,6 +156,32 @@ def _clean(text: str) -> str:
             break
         text = new_text
     return text
+
+
+def _strip_orphan_beats(text: str) -> tuple[str, int]:
+    """Remove orphan `## BEAT N` markers (no closing `##`). Returns
+    (cleaned_text, n_stripped). Called from run() AFTER the dual-
+    stream detector has had a chance to see the raw count."""
+    matches = ORPHAN_BEAT_RE.findall(text)
+    if not matches:
+        return text, 0
+    cleaned = ORPHAN_BEAT_RE.sub("", text)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned, len(matches)
+
+
+def _detect_dual_stream(text: str) -> tuple[bool, int, int]:
+    """Detect when the LLM emitted TWO parallel beat-marker streams
+    (the Quibi script2 failure mode). Returns
+    (is_dual_stream, valid_count, orphan_count). The dual-stream flag
+    fires when BOTH counts are non-trivial and the orphan count is at
+    least ~50% of the valid count — that's the LLM emitting a parallel
+    Markdown-H2 numbering on top of the canonical paired-delimiter
+    form. Added Batch I 2026-05-28."""
+    valid = len(BEAT_RE.findall(text))
+    orphans = len(ORPHAN_BEAT_RE.findall(text))
+    is_dual = valid >= 5 and orphans >= max(3, valid // 2)
+    return is_dual, valid, orphans
 
 
 def run(episode: dict, queue: dict) -> str | None:
@@ -286,6 +360,39 @@ def run(episode: dict, queue: dict) -> str | None:
         script = _condense_script(llm, script, max_w, target_words)
         wc = len(script.split())
         logger.info("S06 after condense: %d words", wc)
+
+    # Dual-stream safety check (Batch I 2026-05-28). The Quibi
+    # script2 had the writer LLM emit BOTH paired-`## BEAT N ##`
+    # markers AND orphan `## BEAT N` Markdown-H2 markers in parallel.
+    # _redistribute_beats then added a third stream of properly-
+    # formatted markers on top because BEAT_RE.findall() only counts
+    # the paired form. The result was 80 markers in 1700 words of
+    # tangled prose. Detection runs BEFORE we strip orphans so the
+    # original counts are visible. If the LLM emitted significantly
+    # more orphans than paired markers, the output is unsalvageable
+    # by post-hoc auto-fix and goes to needs_human.
+    is_dual, valid_count, orphan_count = _detect_dual_stream(script)
+    if is_dual:
+        (ws / "02_script").mkdir(exist_ok=True)
+        (ws / "02_script" / "script.draft.dual-stream.txt").write_text(script)
+        return (
+            f"dual beat-marker stream detected: {valid_count} valid "
+            f"`## BEAT N ##` + {orphan_count} orphan `## BEAT N` "
+            f"markers in the LLM output. The writer is confused by "
+            f"the prompt. Inspect "
+            f"02_script/script.draft.dual-stream.txt then either "
+            f"hand-fix the script and `--approve {episode['id']}`, "
+            f"or re-run S6 after a prompt-template change."
+        )
+    # Below-threshold orphans (mild confusion only) get silently
+    # stripped; log how many so the operator can spot a trend.
+    if orphan_count:
+        script, n_stripped = _strip_orphan_beats(script)
+        logger.info(
+            "S06: stripped %d orphan `## BEAT N` markers (LLM emitted "
+            "%d valid + %d orphans, below dual-stream threshold)",
+            n_stripped, valid_count, orphan_count,
+        )
 
     # Beat normalization.
     # Bugfix 2026-05-28: the original block used cfg.quality_gates'
