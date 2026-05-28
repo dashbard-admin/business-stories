@@ -168,14 +168,11 @@ ACT 1 — THE BEFORE          0:30 – 3:30      (~360 words)
       - "It was a terrible idea. And he was about to bet
          everything on it."
 
-# ─────────────────────────────────────────────────────────────
-# SPONSOR SLOT — RESERVED, currently empty.
-# Channels at scale run a single sponsor read after Act 1's
-# tension landing. To activate later, swap the comment below for
-# a `[SPONSOR_SLOT]` token; S6 will leave it in place and S12
-# will overlay the operator-supplied sponsor copy + recording.
-# ─────────────────────────────────────────────────────────────
-# [SPONSOR_SLOT]
+(SPONSOR SLOT placeholder removed Batch I 2026-05-28. The writer
+LLM was treating the commented-out [SPONSOR_SLOT] token as a literal
+instruction to emit it every 8-10 beats throughout the script. When
+sponsor reads become real, a dedicated post-S06 stage will inject
+them — they won't live in this prompt.)
 
 ─────────────────────────────────────────────────────────────────
 ACT 2 — THE BET             3:30 – 6:00      (~300 words)
