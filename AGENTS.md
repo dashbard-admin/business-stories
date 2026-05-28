@@ -262,7 +262,9 @@ Queue + lock + rolling window + per-episode workspace primitives.
 - `add_used_topic / load_used_topics / topic_already_used` — permanent dedup set at `state/used_topics.json` (lowercased company names).
 
 ### 5.4 `constraints.py`
-The cooldown picker. `pick_assignment(rolling_window, seed)` returns an `Assignment(archetype, narrator, visual_style)` such that none of the three collides with the most recent N entries (per-dimension N comes from `config.constraints.rolling_window_*`). When all options are forbidden, falls back to the *least recently used*. There is no domain taxonomy in this pipeline — every narrator/style is eligible for every topic.
+The cooldown picker. `pick_assignment(rolling_window, seed, story_kind=None)` returns an `Assignment(archetype, narrator, visual_style)` such that none of the three collides with the most recent N entries (per-dimension N comes from `config.constraints.rolling_window_*`). When all options are forbidden, falls back to the *least recently used*.
+
+*(Batch G 2026-05-28)* `story_kind` gates narrators via the `suits_story_kinds` field in `config.yaml > narrators`. Narrators without that field are universal (legacy N1-N4); the three wit-driven narrators N5/N6/N7 each declare a subset of story_kinds they fit. `_eligible_narrators()` filters the pool BEFORE the cooldown check, so e.g. Felix (N5) never gets picked for an `underdog_comeback` story. Pins on the episode record (set via `--narrator N5` CLI flag) override the cooldown engine's choice entirely.
 
 ### 5.5 `llm.py`
 LLM gateway client. `LLM(role)` where `role ∈ {"writer", "critic", "extractor"}` picks the model from `config.models.llm_*`. Public surface:
@@ -349,6 +351,7 @@ Single CLI entry point. Holds the global file lock for the duration of one stage
 - `--preview` *(added Batch B 2026-05-26)* — modifier flag (use with `--enqueue` or `--inject-topic`). Tags the new episode as `preview_mode=True`. S06 generates only Act 0 + Act 5 (~360 words, ~8 beats); S12 outputs `05_video/final_preview.mp4`. Tone-check render, ~10 min of compute vs. the full 3-4 hours.
 - `--approve EP_ID` *(added Batch B 2026-05-26)* — clear any S07 brand-safety gate or S08 in-flight gate on the named episode so it can advance.
 - `--rerender EP_ID BEAT_ID [--from-edited-prompt]` *(added Batch B 2026-05-26)* — re-run S09 FLUX render for a single beat. Existing render + any Grok-corrected version archived to `03_assets/quarantine/` first. `--from-edited-prompt` re-reads the beat's FLUX prompt fresh from beat_sheet.json (operator edited it).
+- `--narrator N_ID` / `--archetype A_ID` / `--visual-style V_ID` *(added Batch G 2026-05-28)* — modifier flags (use with `--enqueue` or `--inject-topic`). Pin the corresponding A/N/V dimension on the new episode(s), overriding the cooldown engine + `suits_story_kinds` gate. Useful for trialling a specific narrator voice (e.g. `--narrator N5` for the Sardonic Outsider) on a topic the gate wouldn't normally assign them to. Validated against `config.yaml` — typos exit cleanly.
 - `--authorize-youtube` *(added Batch E 2026-05-27)* — one-time OAuth dance for YouTube Analytics. Caches refresh token to `state/youtube_oauth_token.json`.
 - `--set-video-id EP_ID YT_VIDEO_ID` *(added Batch E 2026-05-27)* — bind a published video to an episode record so S14 can pull its metrics.
 - `--analyse-performance` *(added Batch E 2026-05-27)* — out-of-band run of S14 (NOT in the per-cron stage flow). Walks every episode with a video_id, writes metrics to `06_metadata/youtube_performance.json` and `state/performance_history.json`. Subsequent S1/S6/S8 reads the history via `pipeline.performance_summary.summarise_for_prompt()` and injects the patterns as soft guidance.
@@ -525,7 +528,7 @@ Runs after S12 with three phases:
 | `V1.yaml` | **Classic Comic**. Bold ink linework, vibrant flat colors, cel-shading, halftone shading. Default for upbeat / origin / rise / disruption beats. |
 | `V2.yaml` | **Noir Comic**. Heavy chiaroscuro, ink-wash shadows, desaturated palette with single accent color. For scandal / failure / postmortem / decline beats. |
 | `archetypes.yaml` | A1–A6 archetype definitions. Each entry has `opening_device + middle_structure + closing_device` that feeds the script-generator prompt. |
-| `narrators.yaml` | N1–N4 narrator personalities. `full_instructions` is injected into the writer prompt; `voice + speed + pitch_shift + breath_pause_ms` are consumed by `tts.py`. |
+| `narrators.yaml` | Per-narrator persona prose. `full_instructions` is injected into the writer prompt as `{narrator_full_instructions}`; `voice + speed + pitch_shift + breath_pause_ms` are consumed by `tts.py`. *(Batch G 2026-05-28)* — gained three wit-driven narrators: **N5 Felix Carter** (sardonic outsider — dry, deadpan understatement, rule-of-three, parenthetical asides), **N6 Sebi Park** (high-school wiz kid — short sentences, wait-what reactions, simplicity-first explanations), **N7 Ana Vance** (work-hard-play-hard exec — jargon-then-translation, boardroom-insider observations, data-dense pace). Each persona block includes EXEMPLAR passages the LLM mimics as a voice anchor. N5/N6/N7 are story_kind-gated via `suits_story_kinds` in `config.yaml > narrators`; N1-N4 remain universal. |
 
 Pin one of these on a manual topic by setting `archetype` / `narrator` / `visual_style` in the injection JSON.
 
@@ -714,4 +717,4 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-28 — Batch F landed (era-aware per-act V1/V2, hook-beat visual-intent restriction, iconic-asset preamble, Ken Burns motion variety, audio dynamic-range fix, post-S09 visual brand-safety VLM pass, incumbent-trap topic filter).*
+*This file last updated: 2026-05-28 — Batch G landed (three wit-driven narrators: N5 Felix sardonic outsider, N6 Sebi wiz kid, N7 Ana exec; suits_story_kinds gate in constraints; --narrator/--archetype/--visual-style CLI pins; S07 voice-specific critique upgrades).*

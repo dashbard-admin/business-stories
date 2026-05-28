@@ -200,6 +200,31 @@ def cli() -> int:
         ),
     )
     parser.add_argument(
+        "--narrator", metavar="N_ID",
+        help=(
+            "modifier flag (use with --enqueue or --inject-topic). "
+            "Pin the narrator on the new episode(s). Overrides the "
+            "cooldown engine + suits_story_kinds gate. Useful for "
+            "manually trialling a specific voice (e.g. N5 Felix, N6 "
+            "Sebi, N7 Ana) on a topic the gate wouldn't normally "
+            "assign them to. Validated against config.yaml narrators."
+        ),
+    )
+    parser.add_argument(
+        "--archetype", metavar="A_ID",
+        help=(
+            "modifier flag (use with --enqueue or --inject-topic). "
+            "Pin the archetype on the new episode(s)."
+        ),
+    )
+    parser.add_argument(
+        "--visual-style", dest="visual_style", metavar="V_ID",
+        help=(
+            "modifier flag (use with --enqueue or --inject-topic). "
+            "Pin the visual style on the new episode(s)."
+        ),
+    )
+    parser.add_argument(
         "--approve", metavar="EP_ID",
         help=(
             "clear any S07 brand-safety gate or S08 in-flight gate on "
@@ -262,9 +287,39 @@ def cli() -> int:
     _setup_logging(args.verbose)
 
     if args.enqueue:
-        ids = enqueue_episodes(args.enqueue, preview_mode=args.preview)
-        tag = " (preview_mode)" if args.preview else ""
-        print(f"enqueued {len(ids)}{tag}: {', '.join(ids)}")
+        # Validate pins against config so the operator can't typo
+        # a narrator id that the cooldown engine doesn't know about.
+        cfg = load_config()
+        if args.narrator and args.narrator not in {n["id"] for n in cfg.narrators}:
+            print(f"--narrator: unknown narrator id {args.narrator!r}. "
+                  f"Known: {[n['id'] for n in cfg.narrators]}",
+                  file=sys.stderr)
+            return 2
+        if args.archetype and args.archetype not in {a["id"] for a in cfg.archetypes}:
+            print(f"--archetype: unknown archetype id {args.archetype!r}. "
+                  f"Known: {[a['id'] for a in cfg.archetypes]}",
+                  file=sys.stderr)
+            return 2
+        if args.visual_style and args.visual_style not in {v["id"] for v in cfg.visual_styles}:
+            print(f"--visual-style: unknown visual_style id {args.visual_style!r}. "
+                  f"Known: {[v['id'] for v in cfg.visual_styles]}",
+                  file=sys.stderr)
+            return 2
+
+        ids = enqueue_episodes(
+            args.enqueue,
+            preview_mode=args.preview,
+            narrator_pin=args.narrator,
+            archetype_pin=args.archetype,
+            visual_style_pin=args.visual_style,
+        )
+        tags = []
+        if args.preview: tags.append("preview_mode")
+        if args.narrator: tags.append(f"narrator={args.narrator}")
+        if args.archetype: tags.append(f"archetype={args.archetype}")
+        if args.visual_style: tags.append(f"visual_style={args.visual_style}")
+        suffix = f" ({', '.join(tags)})" if tags else ""
+        print(f"enqueued {len(ids)}{suffix}: {', '.join(ids)}")
         return 0
 
     if args.inject_topic:
@@ -272,6 +327,9 @@ def cli() -> int:
             args.inject_topic,
             skip_validation=args.no_validate,
             preview_mode=args.preview,
+            narrator_pin=args.narrator,
+            archetype_pin=args.archetype,
+            visual_style_pin=args.visual_style,
         )
 
     if args.approve:
@@ -356,10 +414,18 @@ def _inject_topic_cmd(
     *,
     skip_validation: bool,
     preview_mode: bool = False,
+    narrator_pin: str | None = None,
+    archetype_pin: str | None = None,
+    visual_style_pin: str | None = None,
 ) -> int:
     """CLI entry point for --inject-topic. Reads + validates the JSON,
     then enqueues a manual episode. Prints the new episode ID and the
-    next stage that will run."""
+    next stage that will run.
+
+    CLI pins (Batch G 2026-05-28) override pins in the JSON when both
+    are present. Operator can use `--narrator N5` to force the
+    Sardonic Outsider voice on any injected topic regardless of
+    JSON contents."""
     import json
     from pathlib import Path
 
@@ -381,6 +447,28 @@ def _inject_topic_cmd(
     # Split incident fields from pin fields so we don't pollute the
     # incident dict with assignment metadata.
     pins = {k: raw.pop(k) for k in _MANUAL_OPTIONAL_PINS if k in raw}
+    # CLI pins override JSON pins (Batch G 2026-05-28).
+    if narrator_pin:
+        pins["narrator"] = narrator_pin
+    if archetype_pin:
+        pins["archetype"] = archetype_pin
+    if visual_style_pin:
+        pins["visual_style"] = visual_style_pin
+
+    # Validate pins against config.
+    cfg = load_config()
+    if pins.get("narrator") and pins["narrator"] not in {n["id"] for n in cfg.narrators}:
+        print(f"--inject-topic: unknown narrator id "
+              f"{pins['narrator']!r}", file=sys.stderr)
+        return 2
+    if pins.get("archetype") and pins["archetype"] not in {a["id"] for a in cfg.archetypes}:
+        print(f"--inject-topic: unknown archetype id "
+              f"{pins['archetype']!r}", file=sys.stderr)
+        return 2
+    if pins.get("visual_style") and pins["visual_style"] not in {v["id"] for v in cfg.visual_styles}:
+        print(f"--inject-topic: unknown visual_style id "
+              f"{pins['visual_style']!r}", file=sys.stderr)
+        return 2
 
     missing = [f for f in _MANUAL_REQUIRED_FIELDS if not raw.get(f)]
     if missing:
