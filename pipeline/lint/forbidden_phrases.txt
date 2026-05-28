@@ -54,24 +54,18 @@ the most successful
 the biggest mistake ever
 the worst business decision in history
 
-# --- Generic abstract closers (Batch I 2026-05-28) ---
+# --- Generic abstract closers (Batch I 2026-05-28, pruned Batch I.1) ---
 # script_generate.txt bans these at prompt level; the lint catches
-# them post-hoc when the LLM ignores the ban. The Quibi script2 ended
-# with "and the rest, as they say, is history" — explicitly banned in
-# the prompt but emitted anyway. Lint is the safety net.
+# them post-hoc when the LLM ignores the ban. The first cut had
+# too-broad phrases ("the legacy of", "the future of", "context
+# matters") that fired on legitimate prose. Trimmed to phrases that
+# only appear as abstract closers.
 and the rest, as they say, is history
-the legacy of
 is a cautionary tale
 it teaches us that
 the lesson is clear
-context matters
-culture matters
-user habits matter
 the moral here
 the takeaway is
 a monument to hubris
 it is a stark reminder
-the future of
-build for the user
-ignoring user behavior
 a brilliant idea that failed

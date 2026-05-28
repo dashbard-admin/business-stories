@@ -330,17 +330,32 @@ def run(episode: dict, queue: dict) -> str | None:
         max_attempts=max_attempts, temp_step=temp_step,
     )
 
-    # forbidden-phrase lint with one rewrite attempt
+    # forbidden-phrase lint with one rewrite attempt.
+    # Batch I.1 2026-05-28: the rewrite prompt now ships the FULL
+    # forbidden list, not just the hit phrases. The previous version
+    # only told the LLM about the SPECIFIC phrases that fired, so the
+    # rewriter would avoid those but land on different banned phrases
+    # — Quibi v3 went into a circular trade ("the legacy of" out,
+    # "the future of" in; then "value proposition" + "a brilliant
+    # idea that failed" landed). Showing the whole list breaks the
+    # cycle.
     forbidden = _load_forbidden()
     hits = _find_forbidden(script, forbidden)
     if hits:
         logger.warning("forbidden phrases on chosen draft: %s", hits[:5])
+        full_list_block = "\n".join(f"  - {p}" for p in forbidden)
         retry_prompt = (
             prompt
             + "\n\nADDITIONAL CONSTRAINT FOR THIS RETRY:\n"
-            + "Your previous draft contained these forbidden phrases. "
-            + "Rewrite the script with none of them present:\n"
-            + "\n".join(f"  - {h}" for h in hits)
+            + f"Your previous draft contained these forbidden phrases:\n"
+            + "\n".join(f"  - {h}" for h in hits[:10])
+            + "\n\nRewrite the script. Avoid the phrases above AND "
+            + "all of the following (full forbidden list — DO NOT use "
+            + "ANY of these, case-insensitive substring match):\n"
+            + full_list_block
+            + "\n\nIf you find yourself wanting to write any of these, "
+            + "use a concrete fact from the ledger instead — a specific "
+            + "number, name, date, or document reference."
         )
         result = llm.complete(retry_prompt, temperature=0.7, max_tokens=12000)
         script = _clean(result.text)
