@@ -334,10 +334,16 @@ def run(episode: dict, queue: dict) -> str | None:
     forbidden = _load_forbidden()
     max_attempts = int(cfg.production.get("max_script_generation_attempts", 8))
     temp_step = float(cfg.production.get("script_generation_temp_step", 0.05))
+    # Prompt-log path (added 2026-05-28). _generate_within_range
+    # overwrites this on every attempt. After the loop returns, the
+    # file holds the prompt that produced the chosen draft — useful
+    # for diagnosing why a particular generation succeeded or failed.
+    prompt_log_path = ws / "02_script" / "script_prompt.txt"
     script = _generate_within_range(
         llm, prompt, min_w=min_w, max_w=max_w, target_w=target_words,
         max_attempts=max_attempts, temp_step=temp_step,
         forbidden=forbidden,
+        prompt_log_path=prompt_log_path,
     )
 
     # Length gate — last-mile expand/condense
@@ -624,6 +630,7 @@ def _generate_within_range(
     max_attempts: int = 8,
     temp_step: float = 0.05,
     forbidden: list[str] | None = None,
+    prompt_log_path: "Path | None" = None,
 ) -> str:
     """Generate a script that lands inside [min_w, max_w] words AND
     contains NONE of the `forbidden` phrases, retrying up to
@@ -649,13 +656,30 @@ def _generate_within_range(
 
     best_in_range: str | None = None
     best_in_range_hits: list[str] = []
+    best_in_range_prompt: str | None = None
     best_clean: str | None = None
     best_clean_distance = float("inf")
+    best_clean_prompt: str | None = None
     best_any: str | None = None
     best_any_distance = float("inf")
+    best_any_prompt: str | None = None
 
     last_wc: int | None = None
     last_hits: list[str] = []
+
+    def _write_prompt(p: str) -> None:
+        """Overwrite the prompt log on disk so the operator can inspect
+        the actual prompt that produced the most recent attempt (or,
+        after the loop returns, the prompt that produced the returned
+        draft)."""
+        if prompt_log_path is None:
+            return
+        try:
+            prompt_log_path.parent.mkdir(parents=True, exist_ok=True)
+            prompt_log_path.write_text(p)
+        except OSError as e:
+            logger.warning("S06 could not write prompt log %s: %s",
+                           prompt_log_path, e)
 
     for attempt in range(max_attempts):
         # Build the pressure block.
@@ -700,6 +724,10 @@ def _generate_within_range(
             0.45, 0.80 - attempt * temp_step
         )
 
+        # Write the prompt to disk BEFORE the LLM call so the operator
+        # can inspect even a stuck/crashed generation.
+        _write_prompt(prompt)
+
         logger.info("S06 attempt %d (temp=%.2f)", attempt + 1, temperature)
         result = llm.complete(
             prompt, temperature=temperature, max_tokens=12000,
@@ -720,47 +748,63 @@ def _generate_within_range(
             f" {hits[:5]}" if hits else "",
         )
 
-        # Best-case: in_range AND clean → return now.
+        # Best-case: in_range AND clean → return now. The prompt file
+        # already holds THIS attempt's prompt from the _write_prompt
+        # call above — no further write needed.
         if in_range and is_clean:
             return script
 
         # Otherwise update each best-tracker as appropriate. For
         # best_in_range: seed on first in_range draft regardless of
         # hit count, then keep the one with FEWEST forbidden hits.
+        # Each tracker remembers the prompt that produced it so the
+        # fallback path can rewrite the prompt log to match.
         if in_range:
             if best_in_range is None or len(hits) < len(best_in_range_hits):
                 best_in_range = script
                 best_in_range_hits = hits
+                best_in_range_prompt = prompt
         if is_clean and distance < best_clean_distance:
             best_clean = script
             best_clean_distance = distance
+            best_clean_prompt = prompt
         if distance < best_any_distance:
             best_any = script
             best_any_distance = distance
+            best_any_prompt = prompt
 
     # Selection priority after the loop:
     # 1. in_range + has-forbidden (we tried to clean it but couldn't —
     #    word-count was satisfied so we ship the cleanest in-range)
     # 2. clean + out_of_range (closer to range)
     # 3. anything else (best by raw distance)
+    # In each case we rewrite the prompt log so it matches the
+    # candidate we're actually returning (otherwise the file would
+    # hold the LAST attempt's prompt, not the chosen one).
     if best_in_range is not None:
         logger.warning(
             "S06 no attempt was in-range AND clean; using best in-range "
             "with %d forbidden hits: %s",
             len(best_in_range_hits), best_in_range_hits[:5],
         )
+        if best_in_range_prompt is not None:
+            _write_prompt(best_in_range_prompt)
         return best_in_range
     if best_clean is not None:
         logger.warning(
             "S06 no in-range attempt; using best clean draft "
             "(dist=%d, no forbidden)", best_clean_distance,
         )
+        if best_clean_prompt is not None:
+            _write_prompt(best_clean_prompt)
         return best_clean
     if best_any is not None:
         logger.warning(
             "S06 no clean attempt; using closest-to-range draft "
             "(dist=%d, may contain forbidden phrases)", best_any_distance,
         )
+        if best_any_prompt is not None:
+            _write_prompt(best_any_prompt)
         return best_any
     return ""
 
