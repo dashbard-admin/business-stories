@@ -323,45 +323,22 @@ def run(episode: dict, queue: dict) -> str | None:
     # script_generation_temp_step}. Defaults match the historical
     # behaviour (8 attempts, 0.05 step → temp stays in the 0.45-0.75
     # band across the whole loop).
+    #
+    # Batch I.2 2026-05-28: forbidden-phrase check folded INTO the
+    # retry loop (was a separate single-shot rewrite after the loop).
+    # The loop now scores each draft by word-range fit AND clean-
+    # phrase status; a draft that's in_range AND clean returns
+    # immediately, otherwise the loop keeps trying. Selection
+    # priority after exhausting attempts: in_range+forbidden >
+    # clean+out-of-range > out_of_range+forbidden.
+    forbidden = _load_forbidden()
     max_attempts = int(cfg.production.get("max_script_generation_attempts", 8))
     temp_step = float(cfg.production.get("script_generation_temp_step", 0.05))
     script = _generate_within_range(
         llm, prompt, min_w=min_w, max_w=max_w, target_w=target_words,
         max_attempts=max_attempts, temp_step=temp_step,
+        forbidden=forbidden,
     )
-
-    # forbidden-phrase lint with one rewrite attempt.
-    # Batch I.1 2026-05-28: the rewrite prompt now ships the FULL
-    # forbidden list, not just the hit phrases. The previous version
-    # only told the LLM about the SPECIFIC phrases that fired, so the
-    # rewriter would avoid those but land on different banned phrases
-    # — Quibi v3 went into a circular trade ("the legacy of" out,
-    # "the future of" in; then "value proposition" + "a brilliant
-    # idea that failed" landed). Showing the whole list breaks the
-    # cycle.
-    forbidden = _load_forbidden()
-    hits = _find_forbidden(script, forbidden)
-    if hits:
-        logger.warning("forbidden phrases on chosen draft: %s", hits[:5])
-        full_list_block = "\n".join(f"  - {p}" for p in forbidden)
-        retry_prompt = (
-            prompt
-            + "\n\nADDITIONAL CONSTRAINT FOR THIS RETRY:\n"
-            + f"Your previous draft contained these forbidden phrases:\n"
-            + "\n".join(f"  - {h}" for h in hits[:10])
-            + "\n\nRewrite the script. Avoid the phrases above AND "
-            + "all of the following (full forbidden list — DO NOT use "
-            + "ANY of these, case-insensitive substring match):\n"
-            + full_list_block
-            + "\n\nIf you find yourself wanting to write any of these, "
-            + "use a concrete fact from the ledger instead — a specific "
-            + "number, name, date, or document reference."
-        )
-        result = llm.complete(retry_prompt, temperature=0.7, max_tokens=12000)
-        script = _clean(result.text)
-        hits2 = _find_forbidden(script, forbidden)
-        if hits2:
-            return f"script still contains forbidden phrases after rewrite: {hits2[:3]}"
 
     # Length gate — last-mile expand/condense
     wc = len(script.split())
@@ -646,58 +623,146 @@ def _generate_within_range(
     llm, base_prompt: str, *, min_w: int, max_w: int, target_w: int,
     max_attempts: int = 8,
     temp_step: float = 0.05,
+    forbidden: list[str] | None = None,
 ) -> str:
-    """Generate a script that lands inside [min_w, max_w] words, retrying
-    up to `max_attempts` times. Each retry adds a length-budget prefix
-    nudge and lowers temperature by `temp_step` (floored at 0.45).
+    """Generate a script that lands inside [min_w, max_w] words AND
+    contains NONE of the `forbidden` phrases, retrying up to
+    `max_attempts` times. Each retry adds a length-budget prefix nudge
+    + (if the previous draft had forbidden hits) a forbidden-list
+    pressure block, and lowers temperature by `temp_step` (floored at
+    0.45).
+
     Both knobs are operator-tunable via config.production from
-    2026-05-28; defaults preserve creativity across retries with
-    a 0.05 step (the original 0.10 step crashed to the floor by
-    attempt 4)."""
-    best_script: str | None = None
-    best_distance = float("inf")
+    2026-05-28; defaults preserve creativity across retries with a
+    0.05 step. Batch I.2 2026-05-28: forbidden-phrase retry merged
+    into the same budget so we don't need a separate single-shot
+    rewrite after the loop.
+
+    Selection priority for the returned script (best to worst):
+      1. in_range AND clean → return immediately
+      2. in_range AND has-forbidden (track as best_in_range)
+      3. out_of_range AND clean (track as best_clean)
+      4. out_of_range AND has-forbidden (track as best_any)
+    After the loop, return the highest-priority candidate seen.
+    """
+    forbidden = forbidden or []
+
+    best_in_range: str | None = None
+    best_in_range_hits: list[str] = []
+    best_clean: str | None = None
+    best_clean_distance = float("inf")
+    best_any: str | None = None
+    best_any_distance = float("inf")
+
     last_wc: int | None = None
+    last_hits: list[str] = []
 
     for attempt in range(max_attempts):
-        if attempt == 0:
-            prompt = base_prompt
-            temperature = 0.80
-        else:
-            pressure = (
-                "*** LENGTH BUDGET — READ FIRST ***\n"
-                f"Previous attempt produced {last_wc} words. "
-                f"Target: {target_w}. Acceptable: {min_w}–{max_w}. "
-                "You MUST land in that range. "
-                "Allocate roughly: cold open 80, three forward teases "
-                "~20 each, editorial closing 230, the remainder split "
-                "evenly across BEAT chapters. Cut middle-act elaboration "
-                "and adjective stacks if running long; add forensic "
-                "detail from the ledger if running short.\n"
-                "*** END LENGTH BUDGET ***\n\n"
-            )
-            prompt = pressure + base_prompt
-            temperature = max(0.45, 0.80 - attempt * temp_step)
+        # Build the pressure block.
+        pressure_parts: list[str] = []
+        if attempt > 0:
+            if last_wc is not None:
+                pressure_parts.append(
+                    "*** LENGTH BUDGET — READ FIRST ***\n"
+                    f"Previous attempt produced {last_wc} words. "
+                    f"Target: {target_w}. Acceptable: {min_w}–{max_w}. "
+                    "You MUST land in that range. "
+                    "Allocate roughly: cold open 80, three forward teases "
+                    "~20 each, editorial closing 230, the remainder split "
+                    "evenly across BEAT chapters. Cut middle-act "
+                    "elaboration and adjective stacks if running long; "
+                    "add forensic detail from the ledger if running "
+                    "short.\n"
+                    "*** END LENGTH BUDGET ***\n"
+                )
+            if last_hits:
+                pressure_parts.append(
+                    "*** FORBIDDEN PHRASE NUDGE ***\n"
+                    "Your previous draft contained these forbidden "
+                    "phrases:\n"
+                    + "\n".join(f"  - {h}" for h in last_hits[:10])
+                    + "\n\nAvoid them on this attempt AND any of the "
+                    "full forbidden list (case-insensitive substring "
+                    "match):\n"
+                    + "\n".join(f"  - {p}" for p in forbidden)
+                    + "\n\nIf you find yourself wanting to write any of "
+                    "these, use a concrete fact from the ledger instead "
+                    "— a specific number, name, date, or document "
+                    "reference.\n"
+                    "*** END FORBIDDEN PHRASE NUDGE ***\n"
+                )
+
+        prompt = (
+            "\n".join(pressure_parts) + "\n" + base_prompt
+            if pressure_parts else base_prompt
+        )
+        temperature = 0.80 if attempt == 0 else max(
+            0.45, 0.80 - attempt * temp_step
+        )
 
         logger.info("S06 attempt %d (temp=%.2f)", attempt + 1, temperature)
-        result = llm.complete(prompt, temperature=temperature, max_tokens=12000)
+        result = llm.complete(
+            prompt, temperature=temperature, max_tokens=12000,
+        )
         script = _clean(result.text)
         wc = len(script.split())
+        hits = _find_forbidden(script, forbidden) if forbidden else []
         last_wc = wc
+        last_hits = hits
         distance = max(0, min_w - wc, wc - max_w)
         in_range = min_w <= wc <= max_w
-        logger.info("S06 attempt %d: %d words (dist=%d, in_range=%s)",
-                    attempt + 1, wc, distance, in_range)
-        if in_range:
-            return script
-        if distance < best_distance:
-            best_script = script
-            best_distance = distance
+        is_clean = not hits
 
-    if best_script is None:
-        return ""
-    logger.warning("S06 no attempt landed in [%d, %d]; using closest (dist=%d)",
-                   min_w, max_w, best_distance)
-    return best_script
+        logger.info(
+            "S06 attempt %d: %d words (dist=%d, in_range=%s, "
+            "forbidden_hits=%d%s)",
+            attempt + 1, wc, distance, in_range, len(hits),
+            f" {hits[:5]}" if hits else "",
+        )
+
+        # Best-case: in_range AND clean → return now.
+        if in_range and is_clean:
+            return script
+
+        # Otherwise update each best-tracker as appropriate. For
+        # best_in_range: seed on first in_range draft regardless of
+        # hit count, then keep the one with FEWEST forbidden hits.
+        if in_range:
+            if best_in_range is None or len(hits) < len(best_in_range_hits):
+                best_in_range = script
+                best_in_range_hits = hits
+        if is_clean and distance < best_clean_distance:
+            best_clean = script
+            best_clean_distance = distance
+        if distance < best_any_distance:
+            best_any = script
+            best_any_distance = distance
+
+    # Selection priority after the loop:
+    # 1. in_range + has-forbidden (we tried to clean it but couldn't —
+    #    word-count was satisfied so we ship the cleanest in-range)
+    # 2. clean + out_of_range (closer to range)
+    # 3. anything else (best by raw distance)
+    if best_in_range is not None:
+        logger.warning(
+            "S06 no attempt was in-range AND clean; using best in-range "
+            "with %d forbidden hits: %s",
+            len(best_in_range_hits), best_in_range_hits[:5],
+        )
+        return best_in_range
+    if best_clean is not None:
+        logger.warning(
+            "S06 no in-range attempt; using best clean draft "
+            "(dist=%d, no forbidden)", best_clean_distance,
+        )
+        return best_clean
+    if best_any is not None:
+        logger.warning(
+            "S06 no clean attempt; using closest-to-range draft "
+            "(dist=%d, may contain forbidden phrases)", best_any_distance,
+        )
+        return best_any
+    return ""
 
 
 def _expand_script(
