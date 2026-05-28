@@ -119,13 +119,13 @@ flowchart TB
 
     %% ============== Episode workspace ==============
     subgraph WS [episodes/EP_NNN_slug/]
-        R[00_research/<br/>incident.json, raw/, extracted/]
-        FC[01_factcheck/]
-        SC[02_script/<br/>script.txt, beat_sheet.json]
-        AS[03_assets/<br/>pd/, flux/, grok/, quarantine/]
-        AU[04_audio/<br/>chunks/, voice_full.wav, final_mix.wav]
-        VI[05_video/<br/>clips/, final.mp4, srt+vtt]
-        MD[06_metadata/]
+        R[00_research/<br/>incident.json, iconic_assets.json, raw/, extracted/]
+        FC[01_factcheck/<br/>verified_facts.json, character_profile.json]
+        SC[02_script/<br/>script.txt, script_prompt.txt, beat_sheet.json,<br/>brand_safety_flags.json, critique_history.json]
+        AS[03_assets/<br/>pd/, flux/, grok/, quarantine/,<br/>asset_manifest.json, visual_brand_safety_flags.json]
+        AU[04_audio/<br/>chunks/, voice_full.wav, final_mix.wav, mix_manifest.json]
+        VI[05_video/<br/>clips/, final.mp4, thumbnails/, shorts/, srt+vtt]
+        MD[06_metadata/<br/>titles.json, youtube_performance.json,<br/>license_attributions.txt]
     end
     S1 --> R
     S2 --> R
@@ -139,6 +139,9 @@ flowchart TB
     S10 --> AU
     S11 --> AU
     S12 --> VI
+    S13 --> MD
+    S13 --> VI
+    S14 --> MD
 ```
 
 The diagram is approximate — for the authoritative wiring, read `pipeline/hermes_orchestrator.py` (the `STAGE_DISPATCH` table) and the docstring at the top of each `pipeline/stages/sNN_*.py`.
@@ -252,11 +255,12 @@ Typed accessors over `config.yaml`. The `Config` dataclass exposes one property 
 ### 5.3 `state.py`
 Queue + lock + rolling window + per-episode workspace primitives.
 - `file_lock(path, stale_seconds)` — `fcntl.LOCK_EX | LOCK_NB` advisory lock with stale-lock reclamation (default 6h).
-- `load_queue() / save_queue()` — atomic JSON read/write of `state/episode_queue.json`.
-- `enqueue_episodes(n)` — append N **empty** episode records (S1 will fill them via the LLM).
+- `load_queue() / save_queue()` — atomic JSON read/write of `state/episode_queue.json`. *(2026-05-28)* `load_queue` self-heals trailing-comma JSON errors and forward-migrates queues missing newer stages (e.g. S13 added Batch D). The recovery is logged and the cleaned file is re-saved atomically.
+- `enqueue_episodes(n, *, preview_mode=False, narrator_pin=None, archetype_pin=None, visual_style_pin=None)` — append N **empty** episode records (S1 will fill them via the LLM).
 - `enqueue_manual_episode(incident, ...)` — append ONE episode with the incident pre-filled by the operator. Sets `incident_origin: "manual"` so S1 short-circuits.
 - `next_pending_episode(queue)` — find the next runnable (episode, stage_id) pair.
 - `mark_stage_done / mark_stage_failed` — advance episode through `current_stage`; failed stages mark `needs_human` and add a blocker.
+- `clear_blockers(queue, episode_id, stage_filter=None)` — used by `--approve`. *(Bugfix 2026-05-28)* Marks any `needs_human` stage as `done` and advances `current_stage` to the NEXT stage in `STAGE_ORDER` (instead of resetting to `pending` and re-pointing at the same stage, which caused an infinite re-run loop). Semantics: `--approve` means "this stage's artifact is OK, ship it" — not "re-run from scratch".
 - `push_rolling_window(queue, archetype, narrator, visual_style, country=...)` — append to rolling-window history (kept to last 6 per dimension). Called by S1 on every successful commit.
 - `episode_workspace(episode_id, slug)` — create + return the `episodes/EP_NNN_<slug>/` directory tree.
 - `add_used_topic / load_used_topics / topic_already_used` — permanent dedup set at `state/used_topics.json` (lowercased company names).
@@ -352,6 +356,7 @@ Single CLI entry point. Holds the global file lock for the duration of one stage
 - `--approve EP_ID` *(added Batch B 2026-05-26)* — clear any S07 brand-safety gate or S08 in-flight gate on the named episode so it can advance.
 - `--rerender EP_ID BEAT_ID [--from-edited-prompt]` *(added Batch B 2026-05-26)* — re-run S09 FLUX render for a single beat. Existing render + any Grok-corrected version archived to `03_assets/quarantine/` first. `--from-edited-prompt` re-reads the beat's FLUX prompt fresh from beat_sheet.json (operator edited it).
 - `--narrator N_ID` / `--archetype A_ID` / `--visual-style V_ID` *(added Batch G 2026-05-28)* — modifier flags (use with `--enqueue` or `--inject-topic`). Pin the corresponding A/N/V dimension on the new episode(s), overriding the cooldown engine + `suits_story_kinds` gate. Useful for trialling a specific narrator voice (e.g. `--narrator N5` for the Sardonic Outsider) on a topic the gate wouldn't normally assign them to. Validated against `config.yaml` — typos exit cleanly.
+- `--rerun-from EP_ID STAGE_ID` *(added 2026-05-28)* — reset the named stage AND every later stage back to `pending` so the orchestrator re-runs them. Use after a config-flag flip that invalidates an earlier stage's output: `asset_hunt.enabled false→true` (rerun-from S5), `sfx_library.enabled false→true` (S11), `tts.backend kokoro→elevenlabs` (S10), narrator persona edit (S6), callout styling change (S12). Accepts `S5` / `s5` / `5`. Does NOT delete on-disk artifacts — those get overwritten when each stage runs.
 - `--authorize-youtube` *(added Batch E 2026-05-27)* — one-time OAuth dance for YouTube Analytics. Caches refresh token to `state/youtube_oauth_token.json`.
 - `--set-video-id EP_ID YT_VIDEO_ID` *(added Batch E 2026-05-27)* — bind a published video to an episode record so S14 can pull its metrics.
 - `--analyse-performance` *(added Batch E 2026-05-27)* — out-of-band run of S14 (NOT in the per-cron stage flow). Walks every episode with a video_id, writes metrics to `06_metadata/youtube_performance.json` and `state/performance_history.json`. Subsequent S1/S6/S8 reads the history via `pipeline.performance_summary.summarise_for_prompt()` and injects the patterns as soft guidance.
@@ -397,29 +402,42 @@ Per source, calls the extractor LLM with `fact_extract.txt`. Fact types: `foundi
 Adversarial critic + skeptic over the merged ledger. `fact_verify.txt` (skeptic) rules each claim pass/borderline/reject; `fact_merge.txt` dedupes near-identical claims. Skeptic rejects any claim whose only support is a `paywall_title_only` source. Output: `01_factcheck/verified_facts.json`.
 
 ### S05 — PD Asset Hunt (`s05_asset_hunt.py`)
-Five-phase PD asset hunt. **Currently disabled** via `config.asset_hunt.enabled: false` — comic-style channel routes everything through FLUX. When enabled:
-- Phase 0: SEC EDGAR primary documents.
-- Phase 1: Wikimedia Commons via `pipeline/wikimedia.py`.
-- Phase 1b: institutional PD archives (Smithsonian / Europeana / Pixabay).
-- Phase 2: SearXNG image search across the open tiers.
+Phased PD asset hunt. Master switch: `config.asset_hunt.enabled` (operator-tunable per episode). Character-iconography sub-step runs unconditionally — it's cheap and provides cross-beat character consistency.
+- Phase 0: catalog whatever's already on disk (operator drops + prior runs).
+- Phase 1: Wikimedia Commons via `pipeline/wikimedia.py` — highest-quality source.
+- Phase 1b: institutional PD archives (Smithsonian / Europeana / Pixabay) — scaffolded behind config gates.
+- Phase 2: SearXNG image search across the open tiers — noisier but broader.
 - Phase 3: Real-ESRGAN + GFPGAN upscale (disabled by default).
-- Phase 4: ~~map renderer~~ (removed — no geographic incident to map).
-- Phase 5: generic-stash captioning for any uncaptioned images.
+- Phase 5: generic-stash entries (operator's VLM-captioned generic library).
+
+Each ingested asset gets VLM-captioned at this stage (`pipeline.vlm.VLM.caption_image`) when `image_qa.caption_pd_assets: true`. The caption goes into the manifest's `caption` field; S08 uses it as input to the cosine-similarity beat-to-asset matcher.
+
+**Configurable caps** *(added 2026-05-28)*:
+- `asset_hunt.max_pd_assets` (default 40) caps total assets across Phase 1 + Phase 2. Phase 1 budget is `round(max_pd_assets × 0.625)` (preserves the original 50/80 ratio); Phase 2 fills the remainder. Lower for faster S05 + fewer downloads; raise to give S08's cooldown engine more PD candidates.
+- `asset_hunt.enabled_visual_intents` (default `[founder_portrait, document_or_headline]`) restricts which beat intents are eligible for PD routing at S08 — even when the manifest is full, off-list intents go to FLUX.
 
 ### S06 — Script Generation (`s06_script_generation.py`)
 Writer LLM with `script_generate.txt`. **Seven-act retention template at 120 wpm** *(retuned Batch A 2026-05-26 — was 6 acts; Act 3.5 "The Investigation" was inserted to lock retention through the 10-12min midpoint sag, and the overall target stretched to ~18 min spoken / 2300 words):*
 - Act 0 (cold open, ~60w) — first 30s, dramatic moment.
 - Act 1 (before, ~360w) — set the era + introduce founder + catalyst.
-- *(reserved sponsor slot — commented placeholder after Act 1.)*
+- *(Sponsor placeholder removed Batch I 2026-05-28 — the LLM read the commented placeholder as a literal output instruction and emitted `[SPONSOR_SLOT]` markers throughout the prose. Future sponsor reads will be injected by a dedicated post-S06 stage.)*
 - Act 2 (bet, ~300w) — the founding decision + cost + first product.
 - Act 3 (crisis, ~480w) — lawsuit / competitor / market crash / collapse.
 - **Act 3.5 (investigation, ~300w)** — walks the viewer through *how we know what happened*: SEC filing, leaked emails, deposition transcripts. Doesn't advance the narrative; locks the midpoint.
 - Act 4 (pivot, ~360w) — the decision that turned the arc (or the legal closure for decline stories).
 - Act 5 (lesson, ~300w) — present-day fact + takeaway + legacy + one clean outro line.
 
-`[CALLOUT: "$9 BILLION"]` markers may be emitted after high-impact concrete-number sentences; S12 composites them as on-screen overlays.
+`[CALLOUT: "$9 BILLION"]` markers are **mandatory** (3-6 per script, hardened Batch H 2026-05-28): emitted after high-impact concrete-number sentences; S12 composites them as on-screen overlays.
 
-Multi-pass length adjustment: if word count is outside `[min_script_words, max_script_words]` tolerance, re-prompt with a delta. Forbidden-phrase lint via `pipeline/lint/forbidden_phrases.txt`.
+**Multi-pass length + forbidden-phrase retry loop** *(reworked Batch I.2 2026-05-28)*. `_generate_within_range` scores each draft by BOTH word-range fit AND clean-phrase status. Per-attempt logic:
+- Build a pressure block: length-budget nudge if previous attempt was out-of-range, full forbidden-list nudge if previous attempt had hits. Both can fire.
+- Temperature decays per `production.script_generation_temp_step` (default 0.05).
+- Selection priority: in_range+clean → return immediately. Else track best_in_range, best_clean, best_any.
+- After exhausting attempts: in_range+forbidden > clean+out_of_range > any. Never errors out for forbidden-phrase reasons; the rare ship-with-hits case is logged for operator review.
+
+**Prompt log** *(added 2026-05-28)*: `02_script/script_prompt.txt` is overwritten on every attempt. After the loop returns, the file holds the prompt that produced the chosen draft (rewritten on fallback paths). Useful for diff-ing against the template + debugging.
+
+**Defensive cleanup in `_clean()`** *(Batch I 2026-05-28)*: strips stray `[SPONSOR_SLOT]` / `[INTRO]` / `[OUTRO]` tokens, plus terminal sign-offs ("The end.", "[End of script]", "Fin."). Orphan beat markers (`## BEAT N` without closing `##`) are stripped in `run()` after a dual-stream detector — if both forms appear in roughly equal numbers, the LLM is confused and S06 returns `needs_human` with the broken draft persisted at `02_script/script.draft.dual-stream.txt`.
 
 ### S07 — Script Critique (`s07_script_critique.py`)
 Critic LLM with `script_critique.txt`. Flags weak cold-open, missing forward teases at beat boundaries, monotone hook cadence, anachronisms, unbacked superlatives, retention dips > 45s *(threshold raised Batch A 2026-05-26)*. Operator-controlled fuzzy-replace machinery applies safe edits in place.
@@ -536,7 +554,7 @@ Pin one of these on a manual topic by setting `archetype` / `narrator` / `visual
 
 ## 9. Lint / lexicon
 
-- `pipeline/lint/forbidden_phrases.txt` — one phrase per line, case-insensitive substring match. S6 rejects scripts containing these (clickbait phrases, MBA jargon, maritime leftovers). Lines starting with `#` are comments.
+- `pipeline/lint/forbidden_phrases.txt` — one phrase per line, case-insensitive substring match. S6's retry loop scores each draft against this list and prefers clean drafts over dirty ones (Batch I.2 2026-05-28). Lines starting with `#` are comments. *(Pruned Batch I.1 2026-05-28 — over-broad phrases like "the legacy of" and "the future of" were removed because they fired on legitimate prose; only unambiguous closer patterns remain: "and the rest, as they say, is history", "is a cautionary tale", "it teaches us that", "the lesson is clear", "a monument to hubris", "a brilliant idea that failed", etc.)*
 - `pipeline/lexicon/pronunciation_overrides.yaml` — Kokoro pronunciation map. Format: `"Word": "PRO-nun-see-AY-shun"`. Used by S10 to fix proper nouns Kokoro mangles by default.
 
 ---
@@ -576,6 +594,33 @@ python -m pipeline.hermes_orchestrator --inject-topic drafts/my_topic.json --no-
 ```
 
 Required fields in the JSON: `company_name`, `founder_or_protagonist`, `year_anchor` (int), `story_kind`, `hq_country` (ISO alpha-2), `hero`, `conflict`. Optional pins: `archetype`, `narrator`, `visual_style`. Any other fields flow through to `incident.json` unchanged.
+
+### 10.3b Approving gated stages *(updated 2026-05-28)*
+
+When S07 brand-safety, S08 in-flight, or S09 visual-brand-safety fires `needs_human`:
+```bash
+python -m pipeline.hermes_orchestrator --approve EP_NNN
+```
+Marks the gated stage as **done** and advances `current_stage` to the next stage in `STAGE_ORDER`. The gated stage's on-disk artifacts (script.txt, beat_sheet.json, etc.) stay in place — `--approve` means "the artifact is OK, ship it" not "re-run from scratch".
+
+### 10.3c Re-running stages after a config flip *(added 2026-05-28)*
+
+When you flip a config flag that invalidates an earlier stage's output:
+```bash
+python -m pipeline.hermes_orchestrator --rerun-from EP_NNN S5
+```
+Resets `S5` AND every later stage to `pending`, points `current_stage` at `S5`, clears blockers. Next orchestrator tick re-runs from S5 forward. On-disk artifacts are NOT deleted — each stage overwrites its own outputs.
+
+| Config flag flipped | Stage to rerun-from |
+|---|---|
+| `asset_hunt.enabled` false → true | `S5` |
+| `image_qa.pd_direct_use_threshold` changed | `S8` |
+| `sfx_library.enabled` false → true | `S11` |
+| `tts.backend` kokoro → elevenlabs | `S10` |
+| Narrator persona edited in `narrators.yaml` | `S6` |
+| Callout styling changed in `config.yaml` | `S12` |
+| Visual style YAML edited (V1.yaml / V2.yaml) | `S9` |
+| Thumbnail layout edited in `thumbnails.py` | `S13` |
 
 ### 10.4 Status / debugging
 ```bash
@@ -664,12 +709,19 @@ EP_001_toys-r-us-inc/
 │   └── company_profile.json       ← S3 HQ consolidation
 ├── 02_script/
 │   ├── script.txt                 ← S6 (or post-S7-critique revisions)
+│   ├── script_prompt.txt          ← S6 — prompt of the attempt that produced script.txt (2026-05-28)
+│   ├── script_meta.json           ← S6 final stats (word/beat counts)
+│   ├── script.draft.dual-stream.txt ← S6 needs_human draft (only if dual-stream detection fired)
+│   ├── critique_history.json      ← S7 rewrite loops
+│   ├── brand_safety_flags.json    ← S7 brand-safety review pass
 │   └── beat_sheet.json            ← S8
 ├── 03_assets/
-│   ├── pd/                        ← S5 PD assets (currently disabled)
+│   ├── pd/                        ← S5 PD assets (when asset_hunt.enabled=true)
 │   ├── flux/                      ← S9 renders + title.png + credits.png
 │   ├── grok/                      ← S9 Grok regenerations (paired with FLUX originals)
-│   └── quarantine/                ← S9 VLM-rejected renders
+│   ├── quarantine/                ← S9 VLM-rejected renders + S9 rerender archives
+│   ├── visual_brand_safety_flags.json ← S9 VLM brand-safety pass
+│   └── asset_manifest.json        ← S5 PD inventory + S9 flux entries
 ├── 04_audio/
 │   ├── chunks/                    ← S10 per-beat WAV
 │   ├── voice_full.wav             ← S10 concatenated voice track
@@ -717,4 +769,4 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-28 — Batch H landed (archetype `suits_story_kinds` gate, narrator `enabled` flag, EXEMPLARS moved to front of Felix persona, mandatory CALLOUT markers, VOICE LOCK reminder, hardened TERMINAL_BOILERPLATE_RE, short-beat consolidation, documentary_evidence fact_type, critic-aware voice retry). Felix N5 is the only enabled narrator during testing.*
+*This file last updated: 2026-05-28 — Batch I + I.1 + I.2 + assorted hot-fixes since Batch H. Notable changes: SPONSOR_SLOT placeholder removed (LLM was emitting it literally); orphan-beat-marker stripping + dual-stream detection in S06; forbidden-phrase check folded into the same retry budget as length (no more `needs_human` for forbidden phrases); `02_script/script_prompt.txt` written per attempt; `clear_blockers` advances to next stage on `--approve` (was looping); new `--rerun-from EP_ID STAGE_ID` CLI for config-flip-invalidates-stage scenarios; `asset_hunt.max_pd_assets` config knob replaces hardcoded 50/80 caps. Felix N5 remains the only enabled narrator during testing.*
