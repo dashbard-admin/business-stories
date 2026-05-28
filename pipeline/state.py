@@ -378,11 +378,22 @@ def clear_blockers(
     *,
     stage_filter: str | None = None,
 ) -> bool:
-    """Clear blockers on `episode_id` and reset any `needs_human` stage
-    back to `pending` so the orchestrator can resume. If `stage_filter`
-    is given, only clear blockers/needs_human for that stage. Returns
-    True iff something was cleared. Added Batch B 2026-05-26 for the
-    --approve CLI flow."""
+    """Approve a stage past a `needs_human` gate. Clears blockers on
+    `episode_id`, marks any gated stage as `done`, and advances
+    `current_stage` to the NEXT stage in STAGE_ORDER so the
+    orchestrator picks up at the following stage instead of looping.
+
+    Bugfix 2026-05-28: previously this function reset `needs_human`
+    stages back to `pending` AND set `current_stage` to the cleared
+    stage's own ID — which made the orchestrator's next tick re-run
+    the gated stage in an infinite loop. The brand-safety + S08
+    in-flight gates exist precisely because the stage's WORK is
+    already done (script.txt + brand_safety_flags.json present, or
+    beat_sheet.json present) — `--approve` means "the artifact is
+    OK, ship it" not "re-run this stage from scratch".
+
+    If `stage_filter` is given, only clear blockers/advance for that
+    stage. Returns True iff something was cleared."""
     ep = find_episode(queue, episode_id)
     if ep is None:
         return False
@@ -399,8 +410,17 @@ def clear_blockers(
             continue
         if stage_filter is not None and sid != stage_filter:
             continue
-        ep["stages"][sid] = {"status": "pending", "ts": _now()}
-        ep["current_stage"] = sid
+        ep["stages"][sid] = {"status": "done", "ts": _now()}
+        # Advance to the next stage in STAGE_ORDER. Mirrors the
+        # logic in mark_stage_done().
+        try:
+            idx = STAGE_ORDER.index(sid)
+        except ValueError:
+            idx = -1
+        if 0 <= idx < len(STAGE_ORDER) - 1:
+            ep["current_stage"] = STAGE_ORDER[idx + 1]
+        else:
+            ep["current_stage"] = "DONE"
         cleared = True
     return cleared
 

@@ -166,6 +166,18 @@ def run(episode: dict, queue: dict) -> str | None:
         })
     logger.info("S05 Phase 0: %d existing assets cataloged", len(manifest))
 
+    # Resolve PD asset caps from config. Operator-tunable as of
+    # 2026-05-28 (was hardcoded 50 / 80 — operator reported
+    # "hundreds of pictures, most completely unrelated"). Phase 1
+    # gets ~62% of the budget (highest-quality source — Wikimedia);
+    # Phase 2 (SearXNG image search, noisier) fills the remainder.
+    ah_cfg = (cfg.raw.get("asset_hunt") or {})
+    max_pd_assets = max(5, int(ah_cfg.get("max_pd_assets", 40)))
+    phase1_cap = max(3, int(max_pd_assets * 0.625))
+    phase2_cap = max_pd_assets
+    logger.info("S05 PD asset caps: phase1=%d, phase2=%d (total max %d)",
+                phase1_cap, phase2_cap, max_pd_assets)
+
     # ---- Phase 1: Wikimedia Commons via direct API ----
     # The earlier SearXNG-with-site:commons approach returned HTML page
     # URLs that we could not download as images. The Commons MediaWiki
@@ -173,7 +185,7 @@ def run(episode: dict, queue: dict) -> str | None:
     # one call. This is the highest-yield source for known companies.
     phase1_terms = [t for t in [company, founder, *extra_terms] if t]
     for term in phase1_terms:
-        if idx >= 50:
+        if idx >= phase1_cap:
             break
         try:
             hits = wikimedia.search(term, limit=20)
@@ -182,7 +194,7 @@ def run(episode: dict, queue: dict) -> str | None:
             continue
         logger.info("S05 Phase 1: wikimedia returned %d hits for %r", len(hits), term)
         for h in hits:
-            if idx >= 50:
+            if idx >= phase1_cap:
                 break
             if not wikimedia.is_license_acceptable(h.license_short):
                 logger.debug("S05 Phase 1: license rejected %s: %s",
@@ -195,7 +207,8 @@ def run(episode: dict, queue: dict) -> str | None:
             )
             if ok:
                 idx += 1
-    logger.info("S05 after Phase 1: %d assets", len(manifest))
+    logger.info("S05 after Phase 1: %d assets (cap %d)",
+                len(manifest), phase1_cap)
 
     # ---- Phase 2: SearXNG image-search mode (categories=images) ----
     # Image-category SearXNG results carry the direct image URL in
@@ -203,7 +216,7 @@ def run(episode: dict, queue: dict) -> str | None:
     # `.png/.jpg` extension filter required.
     image_search_terms = [t for t in [company, founder, *extra_terms[:3]] if t]
     for term in image_search_terms:
-        if idx >= 80:
+        if idx >= phase2_cap:
             break
         try:
             results = browser.search(term, n_results=20, categories="images")
@@ -213,7 +226,7 @@ def run(episode: dict, queue: dict) -> str | None:
         logger.info("S05 Phase 2: image search returned %d hits for %r",
                     len(results), term)
         for r in results:
-            if idx >= 80:
+            if idx >= phase2_cap:
                 break
             ok, _ = _try_ingest(
                 r=r, browser=browser, pd_dir=pd_dir, ws=ws,
@@ -223,7 +236,8 @@ def run(episode: dict, queue: dict) -> str | None:
             )
             if ok:
                 idx += 1
-    logger.info("S05 after Phase 2: %d assets", len(manifest))
+    logger.info("S05 after Phase 2: %d assets (cap %d)",
+                len(manifest), phase2_cap)
 
     # ---- Phase 5: generic stash ----
     if cfg.generic_stash.get("enabled", True):

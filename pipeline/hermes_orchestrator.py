@@ -233,6 +233,18 @@ def cli() -> int:
         ),
     )
     parser.add_argument(
+        "--rerun-from", nargs=2, metavar=("EP_ID", "STAGE_ID"),
+        help=(
+            "reset the named stage AND every later stage on the named "
+            "episode back to `pending` so the orchestrator re-runs them "
+            "from STAGE_ID forward. Use when a config flag flip (e.g. "
+            "asset_hunt.enabled, sfx_library.enabled) means an earlier "
+            "stage's output is now stale. STAGE_ID is e.g. S5, S8, S11. "
+            "Does NOT delete artifacts on disk — those get overwritten "
+            "by the re-runs."
+        ),
+    )
+    parser.add_argument(
         "--rerender", nargs=2, metavar=("EP_ID", "BEAT_ID"),
         help=(
             "re-run S09 FLUX render for a single beat. Use after "
@@ -334,6 +346,10 @@ def cli() -> int:
 
     if args.approve:
         return _approve_cmd(args.approve)
+
+    if args.rerun_from:
+        ep_id, stage_id = args.rerun_from
+        return _rerun_from_cmd(ep_id, stage_id)
 
     if args.rerender:
         ep_id, beat_id = args.rerender
@@ -513,6 +529,58 @@ def _inject_topic_cmd(
 # ----------------------------------------------------------------------
 # Batch B: --approve and --rerender
 # ----------------------------------------------------------------------
+
+def _rerun_from_cmd(episode_id: str, stage_id: str) -> int:
+    """Reset stage_id AND every later stage to `pending`, point
+    `current_stage` at stage_id, and clear blockers. Use when a
+    config-flag flip (asset_hunt.enabled, sfx_library.enabled,
+    tts.backend, etc.) means an earlier stage's output is now stale
+    and needs regeneration. Added 2026-05-28."""
+    cfg = load_config()
+    lock_path = cfg.state_dir / "locks" / "orchestrator.lock"
+    stale = cfg.orchestrator["stale_lock_hours"] * 3600
+
+    # Normalise: accept "S5" / "s5" / "5".
+    sid = stage_id.strip().upper()
+    if sid.startswith("S"):
+        sid_norm = sid
+    elif sid.isdigit():
+        sid_norm = f"S{sid}"
+    else:
+        sid_norm = sid
+
+    from .state import STAGE_ORDER
+    if sid_norm not in STAGE_ORDER:
+        print(f"--rerun-from: unknown stage {stage_id!r}. "
+              f"Known: {STAGE_ORDER}", file=sys.stderr)
+        return 2
+
+    try:
+        with file_lock(lock_path, stale_seconds=stale):
+            queue = load_queue()
+            ep = find_episode(queue, episode_id)
+            if ep is None:
+                print(f"--rerun-from: no such episode {episode_id}",
+                      file=sys.stderr)
+                return 2
+
+            from datetime import datetime, timezone
+            now = None  # leave ts as None so it's clear the stage hasn't run yet
+            target_idx = STAGE_ORDER.index(sid_norm)
+            reset_stages: list[str] = []
+            for sid_iter in STAGE_ORDER[target_idx:]:
+                ep["stages"][sid_iter] = {"status": "pending", "ts": now}
+                reset_stages.append(sid_iter)
+            ep["current_stage"] = sid_norm
+            ep["blockers"] = []
+            save_queue(queue)
+            print(f"rerun-from {episode_id}: reset {reset_stages} to "
+                  f"pending; current_stage={sid_norm}")
+            return 0
+    except RuntimeError as e:
+        print(f"--rerun-from: lock contention: {e}", file=sys.stderr)
+        return 2
+
 
 def _approve_cmd(episode_id: str) -> int:
     """Clear any needs_human gate on `episode_id` so the next cron
