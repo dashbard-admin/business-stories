@@ -209,14 +209,18 @@ def run(episode: dict, queue: dict) -> str | None:
         )
         needs_callouts = bool(cs) and callouts_globally_enabled
 
-        # Invalidate caches whose upstream beat_sheet is newer than
-        # the cached clip (Batch K 2026-05-29).
+        # Invalidate caches whose upstream beat sheet or voice timing
+        # changed. Also drop clips whose on-disk duration no longer
+        # matches the current beat duration; otherwise a shorter TTS
+        # rerun can reuse older, longer panels and the final mux gets
+        # truncated by `-shortest` before later beats/credits appear.
         for stale in (clip_path, overlay_path):
-            if _clip_is_valid(stale) and _any_newer(
-                [beat_sheet_path], stale
+            if _clip_is_valid(stale) and (
+                _any_newer([beat_sheet_path, timing_path], stale)
+                or _duration_mismatch(stale, float(beat_duration))
             ):
                 logger.info("S12 beat %s: cache stale "
-                            "(beat_sheet newer than %s); re-rendering",
+                            "(inputs/duration changed for %s); re-rendering",
                             beat_id, stale.name)
                 try:
                     stale.unlink()
@@ -346,6 +350,22 @@ def run(episode: dict, queue: dict) -> str | None:
     final_name = "final_preview.mp4" if preview_mode else "final.mp4"
     final_mp4 = ws / "05_video" / final_name
     try:
+        video_timeline_seconds = sum(get_duration_seconds(p) for p in clip_paths)
+        audio_seconds = get_duration_seconds(final_mix)
+        drift = video_timeline_seconds - audio_seconds
+        if abs(drift) > 8.0:
+            return (
+                "video/audio timeline mismatch before mux: "
+                f"video={video_timeline_seconds:.1f}s, "
+                f"audio={audio_seconds:.1f}s, drift={drift:.1f}s"
+            )
+        logger.info(
+            "S12 timeline preflight: video=%.1fs audio=%.1fs drift=%+.2fs",
+            video_timeline_seconds, audio_seconds, drift,
+        )
+    except Exception as e:
+        logger.warning("S12 timeline preflight skipped: %s", e)
+    try:
         concat_clips(clip_paths, final_mix, final_mp4)
     except Exception as e:
         return f"final concat failed: {e}"
@@ -392,6 +412,23 @@ def _clip_is_valid(path: Path) -> bool:
         return get_duration_seconds(path) > 0.0
     except Exception:
         return False
+
+
+def _duration_mismatch(
+    path: Path,
+    expected_seconds: float,
+    *,
+    tolerance_seconds: float = 0.35,
+) -> bool:
+    """True when a cached beat clip's duration no longer matches the
+    current voice_timing duration. This catches stale raw Ken Burns
+    clips after S10/S11 reruns that change narration length without
+    touching beat_sheet.json."""
+    try:
+        actual = get_duration_seconds(path)
+    except Exception:
+        return True
+    return abs(actual - expected_seconds) > tolerance_seconds
 
 
 def _any_newer(inputs: list[Path], cached: Path) -> bool:
