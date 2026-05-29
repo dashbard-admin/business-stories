@@ -43,6 +43,33 @@ CALLOUT_STRIP_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Batch K 2026-05-29: strip markdown emphasis/code formatting before
+# TTS. Pre-Batch-K the writer LLM was emitting `*Pretty Woman*` and
+# `*Lion King*` for italicised movie/book titles and Kokoro read the
+# asterisks aloud as the word "asterisk" — final3.mp4 had at least
+# two "asterisk pretty woman asterisk" / "asterisk Lion King asterisk"
+# moments in the first 90 seconds. The substitution preserves the
+# emphasised text (we just want the surrounding glyphs gone). Strip
+# order matters: do bold (`**foo**`, `__foo__`) BEFORE italic (`*foo*`,
+# `_foo_`) so the longer pattern wins.
+MD_BOLD_AST_RE   = re.compile(r"\*\*([^*\n]+?)\*\*")
+MD_BOLD_UND_RE   = re.compile(r"__([^_\n]+?)__")
+MD_ITALIC_AST_RE = re.compile(r"(?<!\*)\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)")
+MD_ITALIC_UND_RE = re.compile(r"(?<!\w)_(?!\s)([^_\n]+?)(?<!\s)_(?!\w)")
+MD_CODE_RE       = re.compile(r"`([^`\n]+?)`")
+
+
+def _strip_markdown(text: str) -> str:
+    """Strip the markdown formatting characters Kokoro will otherwise
+    speak aloud. Bold pairs are removed before italic singles so the
+    longer pattern doesn't get half-consumed."""
+    text = MD_BOLD_AST_RE.sub(r"\1", text)
+    text = MD_BOLD_UND_RE.sub(r"\1", text)
+    text = MD_ITALIC_AST_RE.sub(r"\1", text)
+    text = MD_ITALIC_UND_RE.sub(r"\1", text)
+    text = MD_CODE_RE.sub(r"\1", text)
+    return text
+
 
 def run(episode: dict, queue: dict) -> str | None:
     cfg = load_config()
@@ -65,6 +92,12 @@ def run(episode: dict, queue: dict) -> str | None:
     # comma twenty twenty" verbatim).
     raw_script = CALLOUT_STRIP_RE.sub("", raw_script)
     raw_script = EMPHASIS_RE.sub("", raw_script)
+    # Strip markdown emphasis/code BEFORE the beat-position scan so
+    # the bold/italic glyphs don't shift char_pos relative to
+    # post-strip n_chars. Kokoro speaks every literal "*" and "_"
+    # aloud — final3.mp4 (Batch J ship) had "asterisk pretty woman
+    # asterisk" because the writer LLM italicised the movie title.
+    raw_script = _strip_markdown(raw_script)
     # Collapse any double-spaces the strips leave behind, but preserve
     # newlines so BEAT_RE.match() still anchors to line starts cleanly.
     raw_script = re.sub(r"[ \t]+", " ", raw_script)
