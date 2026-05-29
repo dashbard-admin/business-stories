@@ -55,6 +55,11 @@ def _estimate_seconds(text: str) -> float:
     return (len(text.split()) / WPM) * 60.0
 
 
+def _split_sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    return [p.strip() for p in parts if p.strip()]
+
+
 # [CALLOUT: "text"] marker parser (Batch C 2026-05-26).
 # Matches both straight-quoted and curly-quoted forms; case-insensitive
 # on "CALLOUT". Any whitespace around the colon is tolerated.
@@ -68,7 +73,8 @@ def _extract_callouts(text: str, max_per_beat: int) -> tuple[str, list[dict]]:
     """Strip `[CALLOUT: "TEXT"]` markers from `text` and return
     (cleaned_text, callouts_list). Each callout dict has:
       - text: the bracketed string (uppercase-trimmed)
-      - offset_seconds: 0.0 for v1 (beat-anchored)
+      - sentence_index: zero-based index of the sentence that owns it
+      - offset_seconds: fallback only; S12 recomputes sentence timing
     Caps at `max_per_beat`; extras stripped from text but dropped
     from the list."""
     matches = list(_CALLOUT_RE.finditer(text))
@@ -77,7 +83,13 @@ def _extract_callouts(text: str, max_per_beat: int) -> tuple[str, list[dict]]:
     callouts: list[dict] = []
     for m in matches[:max_per_beat]:
         raw = m.group(1).strip().strip('"').strip("'")
-        callouts.append({"text": raw, "offset_seconds": 0.0})
+        prefix = _CALLOUT_RE.sub("", text[:m.start()])
+        sentence_index = max(0, len(_split_sentences(prefix)) - 1)
+        callouts.append({
+            "text": raw,
+            "sentence_index": sentence_index,
+            "offset_seconds": 0.0,
+        })
     # Always strip ALL CALLOUT markers from the script_text so
     # Kokoro doesn't read them aloud — even the ones we dropped
     # because they exceeded max_per_beat.

@@ -478,6 +478,39 @@ def composite_callouts_onto_clip(
             )
             font = ImageFont.load_default()
 
+        variants = {
+            "comic_pop_lower": {
+                "fill": color, "stroke": stroke_color, "stroke_width": stroke_width,
+                "background": None, "text_fill": color,
+                "position": "lower_center", "motion": "pop",
+            },
+            "stamp_red_angle": {
+                "fill": "#FFFFFF", "stroke": "#B00020", "stroke_width": 7,
+                "background": "#B00020", "text_fill": "#FFFFFF",
+                "position": "upper_right", "motion": "stamp", "rotate": -5,
+            },
+            "ticker_slide_left": {
+                "fill": "#FFE600", "stroke": "#000000", "stroke_width": 4,
+                "background": "#050505", "text_fill": "#FFE600",
+                "position": "lower_left", "motion": "slide_left",
+            },
+            "paper_strip_typeon": {
+                "fill": "#111111", "stroke": "#F8F1D2", "stroke_width": 3,
+                "background": "#F8F1D2", "text_fill": "#111111",
+                "position": "upper_left", "motion": "slide_up", "rotate": 2,
+            },
+            "money_pulse": {
+                "fill": "#7CFF6B", "stroke": "#00280B", "stroke_width": 6,
+                "background": None, "text_fill": "#7CFF6B",
+                "position": "lower_center", "motion": "pulse",
+            },
+            "corner_badge": {
+                "fill": "#111111", "stroke": "#FFE600", "stroke_width": 4,
+                "background": "#FFE600", "text_fill": "#111111",
+                "position": "bottom_right", "motion": "slide_up",
+            },
+        }
+
         # Render each callout to its own PNG.
         overlay_pngs: list[tuple[Path, dict]] = []
         tmp_dir = out_clip.parent / "_callouts_tmp"
@@ -486,20 +519,38 @@ def composite_callouts_onto_clip(
             text = (c.get("text") or "").strip()
             if not text:
                 continue
+            variant_name = str(c.get("variant") or "comic_pop_lower")
+            variant = variants.get(variant_name, variants["comic_pop_lower"])
             # Measure
-            bbox = font.getbbox(text, stroke_width=stroke_width)
-            tw = (bbox[2] - bbox[0]) + 2 * stroke_width
-            th = (bbox[3] - bbox[1]) + 2 * stroke_width
+            local_stroke = int(variant.get("stroke_width", stroke_width))
+            bbox = font.getbbox(text, stroke_width=local_stroke)
+            pad_x = int(font_size_px * (0.18 if variant.get("background") else 0.04))
+            pad_y = int(font_size_px * (0.12 if variant.get("background") else 0.04))
+            tw = (bbox[2] - bbox[0]) + 2 * (local_stroke + pad_x)
+            th = (bbox[3] - bbox[1]) + 2 * (local_stroke + pad_y)
             img = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
             d = ImageDraw.Draw(img)
+            if variant.get("background"):
+                d.rounded_rectangle(
+                    [0, 0, tw - 1, th - 1],
+                    radius=max(4, int(th * 0.12)),
+                    fill=variant["background"],
+                    outline=variant.get("stroke", stroke_color),
+                    width=max(2, local_stroke // 2),
+                )
             d.text(
-                (-bbox[0] + stroke_width, -bbox[1] + stroke_width),
-                text, font=font, fill=color,
-                stroke_width=stroke_width, stroke_fill=stroke_color,
+                (-bbox[0] + local_stroke + pad_x,
+                 -bbox[1] + local_stroke + pad_y),
+                text, font=font, fill=variant.get("text_fill", color),
+                stroke_width=local_stroke if not variant.get("background") else 0,
+                stroke_fill=variant.get("stroke", stroke_color),
             )
+            rotate = float(variant.get("rotate", 0.0))
+            if rotate:
+                img = img.rotate(rotate, expand=True, resample=Image.Resampling.BICUBIC)
             png_path = tmp_dir / f"callout_{i}.png"
             img.save(png_path, "PNG")
-            overlay_pngs.append((png_path, c))
+            overlay_pngs.append((png_path, {**c, "_variant": variant}))
 
         if not overlay_pngs:
             logger.warning(
@@ -531,11 +582,27 @@ def composite_callouts_onto_clip(
             # respected.
             ovl_in = f"[{i+1}:v]"
             ovl_lbl = f"[ovl{i}]"
-            fc_parts.append(
-                f"{ovl_in}format=rgba,"
-                f"fade=t=in:st=0:d={fade_s:.3f}:alpha=1,"
-                f"fade=t=out:st={max(0.0, hold - fade_s):.3f}"
+            variant = c.get("_variant") or {}
+            motion = str(variant.get("motion") or "fade")
+            scale_expr = "1"
+            if motion == "pulse":
+                scale_expr = "1+0.035*sin(10*t)"
+            elif motion in {"pop", "stamp"}:
+                scale_expr = "1+0.045*sin(16*t)*exp(-2.6*t)"
+            ovl_filters = [f"{ovl_in}format=rgba"]
+            if scale_expr != "1":
+                ovl_filters.append(
+                    f"scale=w=iw*({scale_expr}):h=ih*({scale_expr}):eval=frame"
+                )
+            ovl_filters.append(
+                f"fade=t=in:st={start:.3f}:d={fade_s:.3f}:alpha=1"
+            )
+            ovl_filters.append(
+                f"fade=t=out:st={max(start, end - fade_s):.3f}"
                 f":d={fade_s:.3f}:alpha=1{ovl_lbl}"
+            )
+            fc_parts.append(
+                ",".join(ovl_filters)
             )
 
             # Overlay onto previous layer, centered horizontally,
@@ -545,10 +612,29 @@ def composite_callouts_onto_clip(
             next_label = (
                 "[vout]" if i == len(overlay_pngs) - 1 else f"[v{i+1}]"
             )
-            y_pos = int(frame_height * 0.62)
+            position = str(variant.get("position") or "lower_center")
+            if position == "upper_left":
+                x_expr = "W*0.06"
+                y_expr = "H*0.12"
+            elif position == "upper_right":
+                x_expr = "W-w-W*0.06"
+                y_expr = "H*0.12"
+            elif position == "lower_left":
+                x_expr = "W*0.06"
+                y_expr = "H*0.70"
+            elif position == "bottom_right":
+                x_expr = "W-w-W*0.06"
+                y_expr = "H-h-H*0.12"
+            else:
+                x_expr = "(W-w)/2"
+                y_expr = "H*0.62"
+            if motion == "slide_left":
+                x_expr = f"({x_expr})-80*exp(-8*(t-{start:.3f}))"
+            elif motion == "slide_up":
+                y_expr = f"({y_expr})+70*exp(-8*(t-{start:.3f}))"
             fc_parts.append(
                 f"{prev_label}{ovl_lbl}overlay="
-                f"x=(W-w)/2:y={y_pos}:"
+                f"x='{x_expr}':y='{y_expr}':"
                 f"enable='between(t,{start:.3f},{end:.3f})'"
                 f":shortest=1"
                 f"{next_label}"
@@ -589,9 +675,11 @@ def composite_callouts_onto_clip(
         # ran on the expected beats.
         logger.info(
             "composite_callouts: %s ← %d overlays via %s "
-            "(font=%s @ %d px)",
+            "(font=%s @ %d px, variants=%s)",
             out_clip.name, len(overlay_pngs), src_clip.name,
             font_path_used or "PIL_default", font_size_px,
+            ",".join(str(c.get("variant") or "comic_pop_lower")
+                     for _p, c in overlay_pngs),
         )
         return True
     except Exception as e:
