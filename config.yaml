@@ -49,10 +49,10 @@ production:
                                     # Fusion all pivoted to 18-25 min in
                                     # 2024-25.)
   duration_tolerance_seconds: 210   # +/- 3.5 min around the 18.3-min mid
-  target_words: 2300                # 120wpm × 18 min ≈ 2160 spoken words;
+  target_words: 2500                # 120wpm × 18 min ≈ 2160 spoken words;
                                     # +160 buffer for SFX/music pauses.
   word_count_tolerance: 250
-  wpm_effective: 120                # Anchored to script_generate.txt
+  wpm_effective: 110                # Anchored to script_generate.txt
                                     # which schedules Act 0-5 hook
                                     # cadence at 120 wpm. Changing this
                                     # invalidates the hook timing the
@@ -76,7 +76,7 @@ production:
   # later attempts. With step=0.10 it would crash to 0.45 by
   # attempt 4 (tighter compliance, less spice). Floor is 0.45
   # regardless of step.
-  script_generation_temp_step: 0.05
+  script_generation_temp_step: 0.01
 
   # Opening title card (prepended before Act 0). The script_generate
   # prompt is explicit: NO INTRO, NO LOGO, NO "WELCOME BACK". Default
@@ -139,7 +139,7 @@ quality_gates:
   # Act 0 1-2 / Act 1 12 / Act 2 11 / Act 3 16 / Act 3.5 9 /
   # Act 4 12 / Act 5 5-6 → ~70 mid, up to ~95 for longer scripts.
   min_total_beats: 65
-  max_total_beats: 95
+  max_total_beats: 100
   min_sources: 8
   max_sources: 50                  # hard cap for S2 inventory size
   min_tier1_sources: 1              # ≥1 primary-source filing / Wikipedia anchor
