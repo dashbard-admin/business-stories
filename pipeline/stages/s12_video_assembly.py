@@ -1066,16 +1066,16 @@ def _pick_callout_variant(
         or re.search(r"\b[mb]\b", low)
     )
     if moneyish:
-        pool = ("money_pulse", "comic_pop_lower", "ticker_slide_left")
+        pool = ("money_pulse", "comic_pop_lower", "ticker_slide_left", "corner_ribbon")
     elif any(mon in low for mon in (
         "jan", "feb", "mar", "apr", "may", "jun",
         "jul", "aug", "sep", "oct", "nov", "dec",
     )):
-        pool = ("stamp_red_angle", "paper_strip_typeon", "corner_badge")
+        pool = ("stamp_red_angle", "paper_strip_typeon", "corner_badge", "corner_ribbon")
     elif "lawsuit" in low or "court" in low or "fail" in low:
-        pool = ("stamp_red_angle", "ticker_slide_left", "comic_pop_lower")
+        pool = ("stamp_red_angle", "ticker_slide_left", "comic_pop_lower", "corner_ribbon")
     elif visual_intent in {"document_or_headline", "chart_abstraction"}:
-        pool = ("paper_strip_typeon", "ticker_slide_left", "corner_badge")
+        pool = ("paper_strip_typeon", "ticker_slide_left", "corner_badge", "corner_ribbon")
     else:
         pool = (
             "comic_pop_lower",
@@ -1084,6 +1084,7 @@ def _pick_callout_variant(
             "paper_strip_typeon",
             "money_pulse",
             "corner_badge",
+            "corner_ribbon",
         )
     seed = sum(ord(ch) for ch in f"{beat_id}|{index}|{text}")
     return pool[seed % len(pool)]

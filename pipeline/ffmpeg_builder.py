@@ -449,21 +449,28 @@ def composite_callouts_onto_clip(
         default_fade_ms = int(callout_cfg.get("fade_ms", 200))
         font_size_px = int(frame_height * font_pct)
 
-        # Pillow font — try a few common system fonts (mac, linux).
-        font = None
-        font_path_used: str | None = None
-        for candidate in (
-            "/System/Library/Fonts/Supplemental/Impact.ttf",
-            "/System/Library/Fonts/HelveticaNeue.ttc",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        ):
-            try:
-                font = ImageFont.truetype(candidate, font_size_px)
-                font_path_used = candidate
-                break
-            except (OSError, IOError):
-                continue
-        if font is None:
+        font_candidates = (
+            ("/System/Library/Fonts/Supplemental/Impact.ttf", 0),
+            ("/System/Library/Fonts/HelveticaNeue.ttc", 1),
+            ("/System/Library/Fonts/Helvetica.ttc", 1),
+            ("/System/Library/Fonts/Supplemental/Georgia Bold.ttf", 0),
+            ("/System/Library/Fonts/Supplemental/Arial Bold.ttf", 0),
+            ("/System/Library/Fonts/Supplemental/Arial Black.ttf", 0),
+            ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 0),
+            ("/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf", 0),
+        )
+
+        def _font_for_callout(seed_text: str, size: int):
+            start_idx = sum(ord(ch) for ch in seed_text) % len(font_candidates)
+            for off in range(len(font_candidates)):
+                candidate, index = font_candidates[(start_idx + off) % len(font_candidates)]
+                try:
+                    return (
+                        ImageFont.truetype(candidate, size, index=index),
+                        candidate,
+                    )
+                except (OSError, IOError):
+                    continue
             # Batch L 2026-05-29: log when we fall through to PIL's
             # default font — at typical callout sizes (~108 px) the
             # default font renders as a TINY bitmap glyph that's
@@ -476,7 +483,7 @@ def composite_callouts_onto_clip(
                 "~10 px high, and will be nearly invisible at 1080p)",
                 src_clip.name,
             )
-            font = ImageFont.load_default()
+            return ImageFont.load_default(), "PIL_default"
 
         variants = {
             "comic_pop_lower": {
@@ -509,6 +516,11 @@ def composite_callouts_onto_clip(
                 "background": "#FFE600", "text_fill": "#111111",
                 "position": "bottom_right", "motion": "slide_up",
             },
+            "corner_ribbon": {
+                "fill": "#FFFFFF", "stroke": "#000000", "stroke_width": 4,
+                "background": "ribbon", "text_fill": "#FFFFFF",
+                "position": "corner_ribbon", "motion": "stamp",
+            },
         }
 
         # Render each callout to its own PNG.
@@ -521,16 +533,31 @@ def composite_callouts_onto_clip(
                 continue
             variant_name = str(c.get("variant") or "comic_pop_lower")
             variant = variants.get(variant_name, variants["comic_pop_lower"])
+            font, font_path_used = _font_for_callout(
+                f"{text}|{variant_name}|{i}", font_size_px,
+            )
             # Measure
             local_stroke = int(variant.get("stroke_width", stroke_width))
             bbox = font.getbbox(text, stroke_width=local_stroke)
-            pad_x = int(font_size_px * (0.18 if variant.get("background") else 0.04))
-            pad_y = int(font_size_px * (0.12 if variant.get("background") else 0.04))
+            is_ribbon = variant.get("background") == "ribbon"
+            pad_x = int(font_size_px * (0.40 if is_ribbon else 0.18 if variant.get("background") else 0.04))
+            pad_y = int(font_size_px * (0.16 if is_ribbon else 0.12 if variant.get("background") else 0.04))
             tw = (bbox[2] - bbox[0]) + 2 * (local_stroke + pad_x)
             th = (bbox[3] - bbox[1]) + 2 * (local_stroke + pad_y)
             img = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
             d = ImageDraw.Draw(img)
-            if variant.get("background"):
+            if is_ribbon:
+                bg_options = ("#B00020", "#FFE600")
+                bg = bg_options[sum(ord(ch) for ch in f"{text}|{i}") % 2]
+                fg = "#FFFFFF" if bg == "#B00020" else "#111111"
+                d.rectangle([0, 0, tw - 1, th - 1], fill=bg)
+                d.line(
+                    [(0, th - 1), (tw - 1, th - 1)],
+                    fill="#000000" if bg == "#FFE600" else "#FFE600",
+                    width=max(3, local_stroke // 2),
+                )
+                variant = {**variant, "text_fill": fg}
+            elif variant.get("background"):
                 d.rounded_rectangle(
                     [0, 0, tw - 1, th - 1],
                     radius=max(4, int(th * 0.12)),
@@ -546,11 +573,17 @@ def composite_callouts_onto_clip(
                 stroke_fill=variant.get("stroke", stroke_color),
             )
             rotate = float(variant.get("rotate", 0.0))
+            if is_ribbon:
+                rotate = -38.0
             if rotate:
                 img = img.rotate(rotate, expand=True, resample=Image.Resampling.BICUBIC)
             png_path = tmp_dir / f"callout_{i}.png"
             img.save(png_path, "PNG")
-            overlay_pngs.append((png_path, {**c, "_variant": variant}))
+            overlay_pngs.append((png_path, {
+                **c,
+                "_variant": variant,
+                "_font_path": font_path_used,
+            }))
 
         if not overlay_pngs:
             logger.warning(
@@ -625,6 +658,9 @@ def composite_callouts_onto_clip(
             elif position == "bottom_right":
                 x_expr = "W-w-W*0.06"
                 y_expr = "H-h-H*0.12"
+            elif position == "corner_ribbon":
+                x_expr = "W*0.005"
+                y_expr = "H*0.055"
             else:
                 x_expr = "(W-w)/2"
                 y_expr = "H*0.62"
@@ -675,9 +711,11 @@ def composite_callouts_onto_clip(
         # ran on the expected beats.
         logger.info(
             "composite_callouts: %s ← %d overlays via %s "
-            "(font=%s @ %d px, variants=%s)",
+            "(fonts=%s @ %d px, variants=%s)",
             out_clip.name, len(overlay_pngs), src_clip.name,
-            font_path_used or "PIL_default", font_size_px,
+            ",".join(str(c.get("_font_path") or "PIL_default")
+                     for _p, c in overlay_pngs),
+            font_size_px,
             ",".join(str(c.get("variant") or "comic_pop_lower")
                      for _p, c in overlay_pngs),
         )
