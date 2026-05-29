@@ -423,7 +423,19 @@ def composite_callouts_onto_clip(
     keeps the original clip and logs a warning). Added Batch C
     2026-05-26.
     """
+    # Batch L 2026-05-29: every `return False` now carries a specific
+    # warning so the operator can tell from `logs/orch.<date>.log`
+    # WHICH failure mode fired. Pre-Batch-L the only signal was S12's
+    # "callout compositing failed for BEAT_NN; using raw clip" — that
+    # told you "something went wrong" but not whether the data was
+    # missing (S08 emitted nothing), the font failed, the ffmpeg run
+    # crashed, or the output was 0-byte.
     if not callouts:
+        logger.warning(
+            "composite_callouts: %s — empty callouts list "
+            "(S08 found no markers for this beat)",
+            src_clip.name,
+        )
         return False
     from PIL import Image, ImageDraw, ImageFont
 
@@ -439,6 +451,7 @@ def composite_callouts_onto_clip(
 
         # Pillow font — try a few common system fonts (mac, linux).
         font = None
+        font_path_used: str | None = None
         for candidate in (
             "/System/Library/Fonts/Supplemental/Impact.ttf",
             "/System/Library/Fonts/HelveticaNeue.ttc",
@@ -446,10 +459,23 @@ def composite_callouts_onto_clip(
         ):
             try:
                 font = ImageFont.truetype(candidate, font_size_px)
+                font_path_used = candidate
                 break
             except (OSError, IOError):
                 continue
         if font is None:
+            # Batch L 2026-05-29: log when we fall through to PIL's
+            # default font — at typical callout sizes (~108 px) the
+            # default font renders as a TINY bitmap glyph that's
+            # easy to miss in a 1080p frame, which would look exactly
+            # like "no overlay at all".
+            logger.warning(
+                "composite_callouts: %s — Pillow font candidate list "
+                "exhausted; falling back to ImageFont.load_default() "
+                "(callouts will render at the default bitmap size, "
+                "~10 px high, and will be nearly invisible at 1080p)",
+                src_clip.name,
+            )
             font = ImageFont.load_default()
 
         # Render each callout to its own PNG.
@@ -476,6 +502,11 @@ def composite_callouts_onto_clip(
             overlay_pngs.append((png_path, c))
 
         if not overlay_pngs:
+            logger.warning(
+                "composite_callouts: %s — every callout text was empty "
+                "after strip; nothing to overlay (input was %d items)",
+                src_clip.name, len(callouts),
+            )
             return False
 
         # Build the filter graph: chain overlays.
@@ -539,9 +570,28 @@ def composite_callouts_onto_clip(
             tmp_dir.rmdir()
         except OSError:
             pass
-        return out_clip.exists() and out_clip.stat().st_size > 1000
+        if not (out_clip.exists() and out_clip.stat().st_size > 1000):
+            logger.warning(
+                "composite_callouts: %s — ffmpeg returned cleanly but "
+                "%s is missing or < 1000 bytes",
+                src_clip.name, out_clip.name,
+            )
+            return False
+        # Batch L 2026-05-29: a success log so the operator can
+        # confirm in the daily log that the overlay path actually
+        # ran on the expected beats.
+        logger.info(
+            "composite_callouts: %s ← %d overlays via %s "
+            "(font=%s @ %d px)",
+            out_clip.name, len(overlay_pngs), src_clip.name,
+            font_path_used or "PIL_default", font_size_px,
+        )
+        return True
     except Exception as e:
-        logger.warning("composite_callouts_onto_clip failed: %s", e)
+        logger.warning(
+            "composite_callouts: %s — unhandled exception: %s",
+            src_clip.name, e,
+        )
         return False
 
 

@@ -68,6 +68,41 @@ def run(episode: dict, queue: dict) -> str | None:
     clips_dir = ws / "05_video" / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
 
+    # ----- Batch L 2026-05-29: drop the cheap, code-dependent clips -----
+    # `zz_closing.mp4` and every `{beat_id}_callout.mp4` are short
+    # ffmpeg renders whose content is determined by overlay code
+    # (`_render_closing_card` for the closing card, S08's `callouts`
+    # list + `composite_callouts_onto_clip` for per-beat overlays)
+    # that we change frequently. The Batch K mtime invalidator only
+    # fires when an upstream ARTIFACT input (credits.png /
+    # beat_sheet.json) is newer than the cached clip — it doesn't fire
+    # when the Python overlay code itself changed but inputs didn't,
+    # which is the exact shape of `--rerun-from EP_NNN S10` after a
+    # code ship. final3.mp4 and final4.mp4 were byte-identical in the
+    # closing region because of this. Deleting the cheap clips on
+    # every S12 entry costs ~15s (one closing render + up to ~6
+    # callout overlays) and kills the cache-staleness class of bug
+    # outright. The expensive raw `{beat_id}.mp4` Ken Burns
+    # supersamples stay cached and still benefit from the Batch K
+    # mtime invalidator below.
+    closing_clip_path_for_purge = clips_dir / "zz_closing.mp4"
+    if closing_clip_path_for_purge.exists():
+        try:
+            closing_clip_path_for_purge.unlink()
+            logger.info("S12 L1: purged cached zz_closing.mp4")
+        except OSError as e:
+            logger.warning("S12 L1: failed to purge zz_closing.mp4: %s", e)
+    callout_purged = 0
+    for stale in clips_dir.glob("*_callout.mp4"):
+        try:
+            stale.unlink()
+            callout_purged += 1
+        except OSError as e:
+            logger.warning("S12 L1: failed to purge %s: %s", stale.name, e)
+    if callout_purged:
+        logger.info("S12 L1: purged %d cached _callout.mp4 clips",
+                    callout_purged)
+
     # Per-clip fade in / fade out. Applied to title card, every beat,
     # and the closing card. Configurable via production.fade_in_seconds
     # and production.fade_out_seconds. Set to 0 to disable either side.
@@ -672,8 +707,17 @@ def _render_closing_card(*, out_path: Path, backdrop: Path | None,
         img = Image.new("RGB", (OUT_W, OUT_H), color=(8, 10, 14))
 
     d = ImageDraw.Draw(img)
+    # Batch L 2026-05-29: load fonts via the path-returning helper so
+    # the post-save sanity log can show the operator WHICH font
+    # actually loaded. If the candidate list exhausted and we hit
+    # ImageFont.load_default(), the title and body render at ~10 px
+    # — essentially invisible at 1080p — which is the exact failure
+    # mode I'd expect to look like "Pillow text overlay missing"
+    # in the rendered video.
+    title_font, title_font_path = _closing_font_with_path(48)
+    body_font, body_font_path = _closing_font_with_path(30)
     d.text((100, 410), "SOURCES & ATTRIBUTION",
-           fill=fill_rgb, font=_closing_font(48))
+           fill=fill_rgb, font=title_font)
 
     lines: list[str] = []
     inv_path = workspace / "00_research" / "source_inventory.json"
@@ -714,8 +758,33 @@ def _render_closing_card(*, out_path: Path, backdrop: Path | None,
     lines = [ln for ln in lines if not _is_placeholder_line(ln)]
 
     d.multiline_text((100, 490), "\n".join(lines),
-                     fill=fill_rgb, font=_closing_font(30), spacing=8)
+                     fill=fill_rgb, font=body_font, spacing=8)
     img.save(out_path, "PNG")
+    # Batch L 2026-05-29: post-render sanity log. The pre-Batch-L
+    # function returned None silently — `final3.mp4` and `final4.mp4`
+    # both shipped credits backdrops with NO yellow text and we had
+    # no operator-visible signal to confirm whether the text-draw
+    # path even ran. Now the operator can grep the daily log for
+    # "closing card:" and see backdrop / source-line / font / size /
+    # PNG-size at a glance. If title_font_path is "PIL_default" the
+    # font candidate list exhausted and the text is rendered at the
+    # ~10 px bitmap default — that explains an invisible overlay
+    # without anything looking like an "error".
+    try:
+        out_size = out_path.stat().st_size
+    except OSError:
+        out_size = -1
+    backdrop_repr = (
+        str(backdrop) if (backdrop is not None and backdrop.exists())
+        else "NONE (using flat dark fill)"
+    )
+    body_lines_count = sum(1 for ln in lines if ln.strip())
+    logger.info(
+        "closing card: backdrop=%s, body_lines=%d (of %d total), "
+        "title_font=%s, body_font=%s, png_size=%d bytes",
+        backdrop_repr, body_lines_count, len(lines),
+        title_font_path, body_font_path, out_size,
+    )
 
 
 _PLACEHOLDER_TOKENS = ("unknown", "untitled")
@@ -734,10 +803,24 @@ def _is_placeholder_line(line: str) -> bool:
 
 
 def _closing_font(size: int) -> ImageFont.FreeTypeFont:
-    """Bold-but-thinner font for the closing credits.
+    """Bold-but-thinner font for the closing credits. Thin wrapper
+    that drops the path/index returned by `_closing_font_with_path`
+    — keeps the call sites in `_render_closing_card` short while
+    `_render_closing_card` itself uses the path-returning variant
+    for the Batch L sanity log."""
+    font, _ = _closing_font_with_path(size)
+    return font
 
-    Resembles the title's Impact-style boldness but with normal-width
-    letterforms so text stays legible at smaller sizes (24-48 px).
+
+def _closing_font_with_path(
+    size: int,
+) -> tuple[ImageFont.FreeTypeFont, str]:
+    """Bold-but-thinner font for the closing credits + the path
+    that was actually loaded. Returns ("PIL_default", default_font)
+    when no candidate matches — Batch L 2026-05-29 logs this to
+    let the operator see whether they hit the bitmap fallback,
+    which renders the credits text essentially invisibly at 1080p.
+
     Prefers Helvetica Neue / Helvetica Bold via TTC index (typical
     on macOS), falls back to standalone Arial Bold, then regular
     Helvetica, and finally PIL's default.
@@ -764,10 +847,10 @@ def _closing_font(size: int) -> ImageFont.FreeTypeFont:
     ]
     for path, index in candidates:
         try:
-            return ImageFont.truetype(path, size, index=index)
+            return ImageFont.truetype(path, size, index=index), path
         except Exception:
             continue
-    return ImageFont.load_default()
+    return ImageFont.load_default(), "PIL_default"
 
 
 def _build_captions(
