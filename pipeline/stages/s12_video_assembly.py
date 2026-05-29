@@ -45,6 +45,11 @@ from ..state import find_episode_workspace
 logger = logging.getLogger("hermes.stage.s12")
 
 OUT_W, OUT_H = 1920, 1080
+BEAT_RE = re.compile(r"##\s*BEAT\s+(\d+)\s*##", re.IGNORECASE)
+CALLOUT_RE = re.compile(
+    r"\[\s*CALLOUT\s*:\s*[\"“‘]?([^\"”’\]]+)[\"”’]?\s*\]",
+    re.IGNORECASE,
+)
 
 
 def run(episode: dict, queue: dict) -> str | None:
@@ -55,6 +60,10 @@ def run(episode: dict, queue: dict) -> str | None:
 
     beat_sheet = json.loads((ws / "02_script" / "beat_sheet.json").read_text())
     beats = beat_sheet["beats"]
+    raw_beat_texts: dict[int, str] = {}
+    script_path = ws / "02_script" / "script.txt"
+    if script_path.exists():
+        raw_beat_texts = _split_script_by_beats(script_path.read_text())
     timing_path = ws / "04_audio" / "voice_timing.json"
     if not timing_path.exists():
         return "no voice_timing.json"
@@ -176,6 +185,12 @@ def run(episode: dict, queue: dict) -> str | None:
         beat_id = b["beat_id"]
         clip_path = clips_dir / f"{beat_id}.mp4"
         overlay_path = clips_dir / f"{beat_id}_callout.mp4"
+        t = timing_by_beat.get(beat_id)
+        beat_duration = (
+            t["duration_seconds"]
+            if t and t["duration_seconds"] > 0.5
+            else b.get("estimated_seconds", 5.0)
+        )
 
         # Per-beat callout list (from S08) drives whether the chosen
         # clip is the raw ken_burns render or the overlay-composited
@@ -185,6 +200,13 @@ def run(episode: dict, queue: dict) -> str | None:
         cs = b.get("callouts") or []
         co_cap = int(co_cfg.get("max_per_beat", 1))
         cs = cs[:co_cap]
+        cs = _prepare_callouts_for_beat(
+            callouts=cs,
+            beat=b,
+            raw_beat_text=raw_beat_texts.get(_beat_id_to_int(beat_id) or -1, ""),
+            beat_duration=float(beat_duration),
+            callout_cfg=co_cfg,
+        )
         needs_callouts = bool(cs) and callouts_globally_enabled
 
         # Invalidate caches whose upstream beat_sheet is newer than
@@ -239,15 +261,10 @@ def run(episode: dict, queue: dict) -> str | None:
             if not image_path.exists():
                 return f"image missing for beat {beat_id}: {image_path}"
 
-            t = timing_by_beat.get(beat_id)
-            duration = (t["duration_seconds"]
-                        if t and t["duration_seconds"] > 0.5
-                        else b.get("estimated_seconds", 5.0))
-
             motion = b.get("ken_burns_motion", "slow_zoom_in")
             try:
                 ken_burns_clip(
-                    image_path, float(duration), motion, clip_path,
+                    image_path, float(beat_duration), motion, clip_path,
                     fade_in_seconds=fade_in,
                     fade_out_seconds=fade_out,
                 )
@@ -905,6 +922,134 @@ def _build_captions(
 def _split_sentences(text: str) -> list[str]:
     parts = re.split(r"(?<=[.!?])\s+", text)
     return [p.strip() for p in parts if p.strip()]
+
+
+def _split_script_by_beats(script: str) -> dict[int, str]:
+    matches = list(BEAT_RE.finditer(script))
+    result: dict[int, str] = {}
+    for i, m in enumerate(matches):
+        num = int(m.group(1))
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(script)
+        result[num] = script[start:end].strip()
+    return result
+
+
+def _beat_id_to_int(beat_id: str) -> int | None:
+    m = re.search(r"\d+", beat_id or "")
+    return int(m.group(0)) if m else None
+
+
+def _infer_callout_sentence_indices(raw_beat_text: str, cap: int) -> list[int]:
+    indices: list[int] = []
+    for m in list(CALLOUT_RE.finditer(raw_beat_text))[:cap]:
+        prefix = CALLOUT_RE.sub("", raw_beat_text[:m.start()])
+        indices.append(max(0, len(_split_sentences(prefix)) - 1))
+    return indices
+
+
+def _prepare_callouts_for_beat(
+    *,
+    callouts: list[dict],
+    beat: dict,
+    raw_beat_text: str,
+    beat_duration: float,
+    callout_cfg: dict,
+) -> list[dict]:
+    """Convert beat-sheet callout metadata into clip-local timings.
+
+    S08 stores `sentence_index` for new beat sheets. For older sheets
+    (like EP003's first Quibi renders), S12 can infer the same index
+    from the original script markers so an S12-only rerun is enough to
+    re-sync overlays.
+    """
+    if not callouts:
+        return []
+
+    default_hold = float(callout_cfg.get("hold_seconds", 2.5))
+    lead = float(callout_cfg.get("sentence_lead_seconds", 0.15))
+    sentences = _split_sentences((beat.get("script_text") or "").strip())
+    if not sentences:
+        return [dict(c) for c in callouts]
+
+    total_words = sum(len(s.split()) for s in sentences) or 1
+    inferred = _infer_callout_sentence_indices(raw_beat_text, len(callouts))
+    prepared: list[dict] = []
+
+    cursor = 0.0
+    sentence_windows: list[tuple[float, float]] = []
+    for s in sentences:
+        seg = beat_duration * (max(1, len(s.split())) / total_words)
+        start = cursor
+        end = min(beat_duration, cursor + seg)
+        sentence_windows.append((start, end))
+        cursor = end
+
+    for idx, c in enumerate(callouts):
+        out = dict(c)
+        sentence_index = c.get("sentence_index")
+        if sentence_index is None and idx < len(inferred):
+            sentence_index = inferred[idx]
+        try:
+            si = int(sentence_index)
+        except (TypeError, ValueError):
+            si = 0
+        si = max(0, min(si, len(sentence_windows) - 1))
+        sent_start, sent_end = sentence_windows[si]
+        start = max(0.0, sent_start - lead)
+        sentence_hold = max(1.25, sent_end - sent_start + 0.25)
+        hold = min(default_hold, sentence_hold)
+        if start + hold > beat_duration:
+            start = max(0.0, beat_duration - hold)
+        out["sentence_index"] = si
+        out["offset_seconds"] = round(start, 3)
+        out["hold_seconds"] = round(min(hold, max(0.5, beat_duration - start)), 3)
+        out["variant"] = out.get("variant") or _pick_callout_variant(
+            text=str(out.get("text") or ""),
+            beat_id=str(beat.get("beat_id") or ""),
+            index=idx,
+            visual_intent=str(beat.get("visual_intent") or ""),
+        )
+        prepared.append(out)
+
+    return prepared
+
+
+def _pick_callout_variant(
+    *,
+    text: str,
+    beat_id: str,
+    index: int,
+    visual_intent: str = "",
+) -> str:
+    low = text.lower()
+    moneyish = bool(
+        "$" in text
+        or re.search(r"\d+(?:\.\d+)?\s*[bm]\b", low)
+        or re.search(r"\b[mb]\b", low)
+    )
+    if moneyish:
+        pool = ("money_pulse", "comic_pop_lower", "ticker_slide_left")
+    elif any(mon in low for mon in (
+        "jan", "feb", "mar", "apr", "may", "jun",
+        "jul", "aug", "sep", "oct", "nov", "dec",
+    )):
+        pool = ("stamp_red_angle", "paper_strip_typeon", "corner_badge")
+    elif "lawsuit" in low or "court" in low or "fail" in low:
+        pool = ("stamp_red_angle", "ticker_slide_left", "comic_pop_lower")
+    elif visual_intent in {"document_or_headline", "chart_abstraction"}:
+        pool = ("paper_strip_typeon", "ticker_slide_left", "corner_badge")
+    else:
+        pool = (
+            "comic_pop_lower",
+            "stamp_red_angle",
+            "ticker_slide_left",
+            "paper_strip_typeon",
+            "money_pulse",
+            "corner_badge",
+        )
+    seed = sum(ord(ch) for ch in f"{beat_id}|{index}|{text}")
+    return pool[seed % len(pool)]
 
 
 def _ts_srt(seconds: float) -> str:

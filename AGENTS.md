@@ -783,10 +783,11 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-29 — callout PNG inputs looped so overlay fade frames render visibly.*
+*This file last updated: 2026-05-29 — callouts are sentence-synced and variant-styled.*
 
 ### Post-Batch-L fix — 2026-05-29
 - **Callout PNG overlay inputs now use `-loop 1` plus `overlay=shortest=1`** — EP003 produced 33 valid `*_callout.mp4` clips but no visible text because `composite_callouts_onto_clip()` fed each Pillow PNG as a one-frame ffmpeg input. The alpha fade began at 0 on that single frame, so ffmpeg wrote a valid transparent overlay clip. Looping the PNG input gives the fade filter frames across the 2.5s hold window; `shortest=1` keeps the looped PNG stream from extending output beyond the source clip.
+- **Callouts are now sentence-anchored and variant-styled** — S08 stores `sentence_index` for each `[CALLOUT: ...]` marker; S12 also infers this from `script.txt` for older beat sheets so an S12-only rerun can repair EP003. S12 converts sentence position to clip-local `offset_seconds` using the same word-weighted timing model as subtitles, with `callouts.sentence_lead_seconds` as a small lead. It also assigns deterministic visual variants (`comic_pop_lower`, `stamp_red_angle`, `ticker_slide_left`, `paper_strip_typeon`, `money_pulse`, `corner_badge`) based on callout text + beat id; `composite_callouts_onto_clip()` renders matching Pillow card styles and simple ffmpeg motion/scale effects.
 
 *Previous: 2026-05-29 — Batch L: stop caching cheap clips + loud diagnostics for closing/callout failures.*
 

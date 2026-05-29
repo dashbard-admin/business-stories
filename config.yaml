@@ -545,6 +545,8 @@ callouts:
   stroke_color: "#000000"
   stroke_width: 6
   hold_seconds: 2.5
+  sentence_lead_seconds: 0.15       # S12 nudges overlays just before
+                                    # the sentence that owns the marker.
   fade_ms: 200
 
 generic_stash:
