@@ -120,7 +120,7 @@ flowchart TB
     %% ============== Episode workspace ==============
     subgraph WS [episodes/EP_NNN_slug/]
         R[00_research/<br/>incident.json, iconic_assets.json, raw/, extracted/]
-        FC[01_factcheck/<br/>verified_facts.json, character_profile.json]
+        FC[01_factcheck/<br/>fact_ledger.json, character_profile.json]
         SC[02_script/<br/>script.txt, script_prompt.txt, beat_sheet.json,<br/>brand_safety_flags.json, critique_history.json]
         AS[03_assets/<br/>pd/, flux/, grok/, quarantine/,<br/>asset_manifest.json, visual_brand_safety_flags.json]
         AU[04_audio/<br/>chunks/, voice_full.wav, final_mix.wav, mix_manifest.json]
@@ -399,7 +399,7 @@ Relevance gate matches `company_name + year_anchor` tokens. Quality gate: `min_s
 Per source, calls the extractor LLM with `fact_extract.txt`. Fact types: `founding_date | location_founded | founder | early_employee | product_launch | business_model | market_context | crisis_trigger | pivotal_decision | financial_metric | acquisition | regulatory_event | quote`. Then runs `company_hq_consolidate.txt` to derive `{city, state_or_region, country}` from location-type facts. Outputs `01_factcheck/facts.json` + `01_factcheck/company_profile.json`.
 
 ### S04 — Fact Verification (`s04_fact_verification.py`)
-Adversarial critic + skeptic over the merged ledger. `fact_verify.txt` (skeptic) rules each claim pass/borderline/reject; `fact_merge.txt` dedupes near-identical claims. Skeptic rejects any claim whose only support is a `paywall_title_only` source. Output: `01_factcheck/verified_facts.json`.
+Adversarial critic + skeptic over the merged ledger. `fact_verify.txt` (skeptic) rules each claim pass/borderline/reject; `fact_merge.txt` dedupes near-identical claims. Skeptic rejects any claim whose only support is a `paywall_title_only` source. Output: `01_factcheck/fact_ledger.json`.
 
 ### S05 — PD Asset Hunt (`s05_asset_hunt.py`)
 Phased PD asset hunt. Master switch: `config.asset_hunt.enabled` (operator-tunable per episode). Character-iconography sub-step runs unconditionally — it's cheap and provides cross-beat character consistency.
@@ -466,7 +466,7 @@ Splits the script into 65–95 beats *(beat window widened Batch A 2026-05-26 fo
 ### S09 — FLUX Render (`s09_flux_render.py`)
 For each beat that routes to FLUX, the stage:
 
-*(Batch B 2026-05-26 — added the `rerender_single_beat(episode, beat_id, from_edited_prompt=False)` entry point that the orchestrator's `--rerender` CLI calls. Archives existing renders to `03_assets/quarantine/<beat_id>.<flux|grok>.<timestamp>.png` before re-rendering. Reuses the same VLM judge + Grok fallback path as the main loop.)*
+*(Batch B 2026-05-26 — added the `rerender_single_beat(episode, beat_id, from_edited_prompt=False)` entry point that the orchestrator's `--rerender` CLI calls. Archives existing renders to `03_assets/quarantine/<beat_id>.<flux|grok>.<timestamp>.png` before re-rendering. Reuses the same VLM judge + Grok fallback path as the main loop. 2026-05-29 fix: rerender now uses per-attempt temp files, keeps the best rejected attempt when none pass, marks VLM outages as `unjudged`, and promotes successful Grok corrections to the canonical FLUX path.)*
 
 *(Batch F 2026-05-28 — added post-render visual brand-safety phase. `_run_visual_brand_safety_pass()` walks every Nth rendered beat (configurable via `visual_brand_safety.sample_every_n`) and asks the VLM whether the panel is topic-coherent / era-appropriate / monetization-safe for the episode's company / story_kind / year_anchor. Flags written to `03_assets/visual_brand_safety_flags.json` with severity ∈ {clean, low, high}. High-severity fires `needs_human`; operator inspects the flag file then `--rerender` specific beats or `--approve` to ship as-is.)*
 
@@ -719,7 +719,7 @@ EP_001_toys-r-us-inc/
 │   └── extracted/                 ← S3 extracted-text per source
 ├── 01_factcheck/
 │   ├── facts.json                 ← S3
-│   ├── verified_facts.json        ← S4
+│   ├── fact_ledger.json           ← S4
 │   └── company_profile.json       ← S3 HQ consolidation
 ├── 02_script/
 │   ├── script.txt                 ← S6 (or post-S7-critique revisions)

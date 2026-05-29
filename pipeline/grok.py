@@ -1,17 +1,16 @@
-"""xAI Grok image-edit adapter.
+"""xAI Grok image-regeneration adapter.
 
 S09 uses this to repair FLUX renders whose VLM verdict flagged
-malformed / illegible text. We POST the offending image plus the
-original FLUX prompt (wrapped in the operator-tunable
-grok_text_correction.txt template) to xAI's image-edit endpoint
-and receive a corrected image back, then write it to disk.
+malformed / illegible text. We POST the original FLUX prompt
+(wrapped in the operator-tunable grok_text_correction.txt template)
+to xAI's image-generation endpoint and receive a corrected image
+back, then write it to disk.
 
-The endpoint shape defaults to OpenAI-compatible
-multipart/form-data (POST /v1/images/edits with `image`, `prompt`,
-`model`, `n`, `size`). Both base64-JSON and URL response shapes
-are handled. If xAI ships a slightly different shape later, the
-endpoint_path can be overridden in config.yaml without code
-changes.
+The endpoint shape defaults to OpenAI-compatible JSON
+(POST /v1/images/generations with `model`, `prompt`, `resolution`,
+`aspect_ratio`, `n`). Both base64-JSON and URL response shapes are
+handled. If xAI ships a slightly different shape later, the
+endpoint_path can be overridden in config.yaml without code changes.
 
 Auth: bearer token from config.yaml > grok.api_key. While the key
 is empty or matches the placeholder, the adapter reports
@@ -40,11 +39,11 @@ API_KEY_ENV_VARS = ("XAI_API_KEY", "GROK_API_KEY")
 
 
 class Grok:
-    """xAI Grok image-edit client.
+    """xAI Grok image-regeneration client.
 
     Public surface:
         .available — bool, True iff config is good enough to call.
-        .correct_image(image_path, prompt, out_path) -> Path | None
+        .regenerate_from_prompt(prompt, out_path) -> Path | None
     """
 
     def __init__(self):
@@ -63,7 +62,7 @@ class Grok:
         self.api_key: str = _resolve_api_key(gc.get("api_key", ""))
         self.model: str = gc.get("model", "grok-imagine-image")
         self.base_url: str = (gc.get("base_url") or "").rstrip("/")
-        self.endpoint_path: str = gc.get("endpoint_path", "/images/edits")
+        self.endpoint_path: str = gc.get("endpoint_path", "/images/generations")
         self.timeout: int = int(gc.get("timeout_seconds", 180))
         self.resolution: str = gc.get("resolution", "2k")
         self.aspect_ratio: str = gc.get("aspect_ratio", "16:9")
@@ -183,7 +182,7 @@ class Grok:
     # ------------------------------------------------------------------
 
     def _write_response_image(self, r: requests.Response, out: Path) -> bool:
-        """Extract an image from an OpenAI-compatible /images/edits
+        """Extract an image from an OpenAI-compatible image-generation
         response. Tries base64 (`data[0].b64_json`) first, falls back
         to a URL (`data[0].url`). Returns True on success."""
         try:

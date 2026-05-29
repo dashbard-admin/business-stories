@@ -249,7 +249,7 @@ def _run_brand_safety_pass(
 
     # Lazy-load the fact ledger if it exists. The brand-safety prompt
     # uses it to decide what's safe to state as fact.
-    fact_ledger_path = ws / "01_factcheck" / "verified_facts.json"
+    fact_ledger_path = ws / "01_factcheck" / "fact_ledger.json"
     fact_ledger_json = "[]"
     if fact_ledger_path.exists():
         try:

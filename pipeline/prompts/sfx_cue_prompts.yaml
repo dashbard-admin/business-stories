@@ -31,7 +31,7 @@ traffic_hum:
 market_bell:
   - "single NYSE-style bell strike, dry, no reverb"
   - "trading-floor bell, single strike then crowd murmur fades up"
-newsprint_rustle:
+newsprint:
   - "newspaper being folded once, paper rustle, then placed on a desk"
   - "newsprint page being turned, dry, no other ambience"
 clock_tick:
