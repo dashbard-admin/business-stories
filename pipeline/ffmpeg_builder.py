@@ -509,10 +509,14 @@ def composite_callouts_onto_clip(
             )
             return False
 
-        # Build the filter graph: chain overlays.
+        # Build the filter graph: chain overlays. PNG inputs must be
+        # looped so the fade filter has frames across the whole
+        # callout window; otherwise ffmpeg sees a single transparent
+        # alpha-fade frame at t=0 and the overlay looks invisible even
+        # though the command succeeds.
         inputs: list[str] = ["-i", str(src_clip)]
         for png_path, _ in overlay_pngs:
-            inputs += ["-i", str(png_path)]
+            inputs += ["-loop", "1", "-i", str(png_path)]
 
         fc_parts: list[str] = []
         prev_label = "[0:v]"
@@ -536,6 +540,8 @@ def composite_callouts_onto_clip(
 
             # Overlay onto previous layer, centered horizontally,
             # near the lower-third of frame (vertical hot-spot).
+            # shortest=1 keeps the looped PNG input from extending
+            # output beyond the finite source clip.
             next_label = (
                 "[vout]" if i == len(overlay_pngs) - 1 else f"[v{i+1}]"
             )
@@ -544,6 +550,7 @@ def composite_callouts_onto_clip(
                 f"{prev_label}{ovl_lbl}overlay="
                 f"x=(W-w)/2:y={y_pos}:"
                 f"enable='between(t,{start:.3f},{end:.3f})'"
+                f":shortest=1"
                 f"{next_label}"
             )
             prev_label = next_label

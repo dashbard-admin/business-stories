@@ -36,7 +36,7 @@ Each entry has:
   your prompt should be ONLY the scene description (no style
   language, no "no text", etc.).
 - sfx_cue: optional, one of [typewriter, keyboard, phone_ring,
-  applause, door_slam, traffic_hum, market_bell, newsprint_rustle,
+  applause, door_slam, traffic_hum, market_bell, newsprint,
   clock_tick, silence] or null. (Documentation only — NOT
   synthesised by this pipeline; the music bed runs uninterrupted.)
 

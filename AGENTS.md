@@ -120,7 +120,7 @@ flowchart TB
     %% ============== Episode workspace ==============
     subgraph WS [episodes/EP_NNN_slug/]
         R[00_research/<br/>incident.json, iconic_assets.json, raw/, extracted/]
-        FC[01_factcheck/<br/>verified_facts.json, character_profile.json]
+        FC[01_factcheck/<br/>fact_ledger.json, character_profile.json]
         SC[02_script/<br/>script.txt, script_prompt.txt, beat_sheet.json,<br/>brand_safety_flags.json, critique_history.json]
         AS[03_assets/<br/>pd/, flux/, grok/, quarantine/,<br/>asset_manifest.json, visual_brand_safety_flags.json]
         AU[04_audio/<br/>chunks/, voice_full.wav, final_mix.wav, mix_manifest.json]
@@ -399,7 +399,7 @@ Relevance gate matches `company_name + year_anchor` tokens. Quality gate: `min_s
 Per source, calls the extractor LLM with `fact_extract.txt`. Fact types: `founding_date | location_founded | founder | early_employee | product_launch | business_model | market_context | crisis_trigger | pivotal_decision | financial_metric | acquisition | regulatory_event | quote`. Then runs `company_hq_consolidate.txt` to derive `{city, state_or_region, country}` from location-type facts. Outputs `01_factcheck/facts.json` + `01_factcheck/company_profile.json`.
 
 ### S04 — Fact Verification (`s04_fact_verification.py`)
-Adversarial critic + skeptic over the merged ledger. `fact_verify.txt` (skeptic) rules each claim pass/borderline/reject; `fact_merge.txt` dedupes near-identical claims. Skeptic rejects any claim whose only support is a `paywall_title_only` source. Output: `01_factcheck/verified_facts.json`.
+Adversarial critic + skeptic over the merged ledger. `fact_verify.txt` (skeptic) rules each claim pass/borderline/reject; `fact_merge.txt` dedupes near-identical claims. Skeptic rejects any claim whose only support is a `paywall_title_only` source. Output: `01_factcheck/fact_ledger.json`.
 
 ### S05 — PD Asset Hunt (`s05_asset_hunt.py`)
 Phased PD asset hunt. Master switch: `config.asset_hunt.enabled` (operator-tunable per episode). Character-iconography sub-step runs unconditionally — it's cheap and provides cross-beat character consistency.
@@ -466,7 +466,7 @@ Splits the script into 65–95 beats *(beat window widened Batch A 2026-05-26 fo
 ### S09 — FLUX Render (`s09_flux_render.py`)
 For each beat that routes to FLUX, the stage:
 
-*(Batch B 2026-05-26 — added the `rerender_single_beat(episode, beat_id, from_edited_prompt=False)` entry point that the orchestrator's `--rerender` CLI calls. Archives existing renders to `03_assets/quarantine/<beat_id>.<flux|grok>.<timestamp>.png` before re-rendering. Reuses the same VLM judge + Grok fallback path as the main loop.)*
+*(Batch B 2026-05-26 — added the `rerender_single_beat(episode, beat_id, from_edited_prompt=False)` entry point that the orchestrator's `--rerender` CLI calls. Archives existing renders to `03_assets/quarantine/<beat_id>.<flux|grok>.<timestamp>.png` before re-rendering. Reuses the same VLM judge + Grok fallback path as the main loop. 2026-05-29 fix: rerender now uses per-attempt temp files, keeps the best rejected attempt when none pass, marks VLM outages as `unjudged`, and promotes successful Grok corrections to the canonical FLUX path.)*
 
 *(Batch F 2026-05-28 — added post-render visual brand-safety phase. `_run_visual_brand_safety_pass()` walks every Nth rendered beat (configurable via `visual_brand_safety.sample_every_n`) and asks the VLM whether the panel is topic-coherent / era-appropriate / monetization-safe for the episode's company / story_kind / year_anchor. Flags written to `03_assets/visual_brand_safety_flags.json` with severity ∈ {clean, low, high}. High-severity fires `needs_human`; operator inspects the flag file then `--rerender` specific beats or `--approve` to ship as-is.)*
 
@@ -719,7 +719,7 @@ EP_001_toys-r-us-inc/
 │   └── extracted/                 ← S3 extracted-text per source
 ├── 01_factcheck/
 │   ├── facts.json                 ← S3
-│   ├── verified_facts.json        ← S4
+│   ├── fact_ledger.json           ← S4
 │   └── company_profile.json       ← S3 HQ consolidation
 ├── 02_script/
 │   ├── script.txt                 ← S6 (or post-S7-critique revisions)
@@ -783,7 +783,12 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-29 — Batch L: stop caching cheap clips + loud diagnostics for closing/callout failures.*
+*This file last updated: 2026-05-29 — callout PNG inputs looped so overlay fade frames render visibly.*
+
+### Post-Batch-L fix — 2026-05-29
+- **Callout PNG overlay inputs now use `-loop 1` plus `overlay=shortest=1`** — EP003 produced 33 valid `*_callout.mp4` clips but no visible text because `composite_callouts_onto_clip()` fed each Pillow PNG as a one-frame ffmpeg input. The alpha fade began at 0 on that single frame, so ffmpeg wrote a valid transparent overlay clip. Looping the PNG input gives the fade filter frames across the 2.5s hold window; `shortest=1` keeps the looped PNG stream from extending output beyond the source clip.
+
+*Previous: 2026-05-29 — Batch L: stop caching cheap clips + loud diagnostics for closing/callout failures.*
 
 *Batch L ship list:*
 - **S12 unconditional purge of `zz_closing.mp4` and every `*_callout.mp4` at S12 entry** — final3.mp4 and final4.mp4 were byte-identical in the closing region because the Batch K mtime invalidator only caught "upstream artifact changed" (credits.png / beat_sheet.json / asset_manifest.json), not "S12 / `_render_closing_card` / `composite_callouts_onto_clip` code changed since the cached clip was rendered". The operator's `--rerun-from EP_NNN S10` workflow doesn't bump those upstream mtimes, so the invalidator never fired. The cheap, code-dependent overlay clips are now re-rendered every S12 run (~15s total). The expensive raw `{beat_id}.mp4` Ken Burns supersamples stay cached with the Batch K `_any_newer` invalidator.

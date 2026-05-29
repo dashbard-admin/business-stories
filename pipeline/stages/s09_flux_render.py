@@ -839,20 +839,22 @@ def rerender_single_beat(
                     "for %s (edited-prompt path)", beat_id)
 
     out_path = flux_dir / f"{beat_id}.png"
-    req = FluxRequest(
-        beat_id=beat_id,
-        prompt=fr["prompt"],
-        negative_prompt=fr.get("negative_prompt", ""),
-        out_path=out_path,
-    )
     qa_enabled = bool(cfg.image_qa.get("enabled", True))
     max_attempts = max(1, int(cfg.image_qa.get("max_attempts_per_beat", 2)))
     strict_borderline = bool(cfg.image_qa.get("strict_borderline", True))
     vlm: VLM | None = VLM() if qa_enabled else None
 
+    attempts: list[tuple[Path, ImageVerdict | None]] = []
     chosen_path: Path | None = None
     chosen_verdict: ImageVerdict | None = None
     for attempt in range(1, max_attempts + 1):
+        attempt_path = flux_dir / f"{beat_id}_rerender_a{attempt}.png"
+        req = FluxRequest(
+            beat_id=beat_id,
+            prompt=fr["prompt"],
+            negative_prompt=fr.get("negative_prompt", ""),
+            out_path=attempt_path,
+        )
         candidate = flux.render_batch_with_retry(
             req, num_candidates=1, seed_offset=hash(beat_id) % 10000 + attempt,
         )
@@ -866,15 +868,36 @@ def rerender_single_beat(
         verdict = vlm.critique_image(candidate, fr["prompt"])
         if verdict:
             _log_verdict(beat_id, "rerender", attempt, max_attempts, verdict)
+        else:
+            chosen_path = candidate
+            logger.warning(
+                "S09 rerender: VLM unavailable for %s attempt %d; "
+                "keeping unjudged render",
+                beat_id, attempt,
+            )
+            break
         if verdict and _is_good_enough(verdict, strict_borderline):
             chosen_path = candidate
             chosen_verdict = verdict
             break
+        attempts.append((candidate, verdict))
 
     if chosen_path is None:
-        logger.warning("S09 rerender: no acceptable render for %s "
-                       "after %d attempt(s)", beat_id, max_attempts)
-        return False
+        if attempts:
+            attempts.sort(
+                key=lambda x: (x[1].score if x[1] else 5),
+                reverse=True,
+            )
+            chosen_path, chosen_verdict = attempts[0]
+            logger.warning(
+                "S09 rerender: no acceptable render for %s after %d "
+                "attempt(s); keeping best rejected attempt",
+                beat_id, max_attempts,
+            )
+        else:
+            logger.warning("S09 rerender: no render for %s after %d attempt(s)",
+                           beat_id, max_attempts)
+            return False
 
     # Grok fallback if anatomy/text issues remain.
     grok = Grok()
@@ -891,12 +914,43 @@ def rerender_single_beat(
             grok_template_path = cfg.prompts_dir / "grok_text_correction.txt"
             if grok_template_path.exists():
                 grok_template = grok_template_path.read_text()
-                _correct_text_via_grok(
+                grok_correction_info = _correct_text_via_grok(
                     src=chosen_path, beat_id=beat_id,
                     flux_prompt=fr["prompt"], verdict=chosen_verdict,
                     grok=grok, grok_dir=grok_dir,
                     prompt_template=grok_template, triggers=triggers,
                 )
+                if grok_correction_info and grok_correction_info.get("corrected_path"):
+                    corrected_path = Path(grok_correction_info["corrected_path"])
+                    if corrected_path.exists():
+                        if out_path.exists() and corrected_path != out_path:
+                            out_path.unlink()
+                        if corrected_path != out_path:
+                            shutil.copy(str(corrected_path), str(out_path))
+                        chosen_path = out_path
+                        logger.info(
+                            "S09 rerender: promoted Grok correction for %s",
+                            beat_id,
+                        )
+
+    if chosen_path != out_path:
+        if out_path.exists():
+            out_path.unlink()
+        shutil.move(str(chosen_path), str(out_path))
+        chosen_path = out_path
+
+    for attempt_path, _verdict in attempts:
+        if attempt_path != chosen_path and attempt_path.exists():
+            try:
+                attempt_path.unlink()
+            except OSError:
+                pass
+    for attempt_path in flux_dir.glob(f"{beat_id}_rerender_a*.png"):
+        if attempt_path != chosen_path and attempt_path.exists():
+            try:
+                attempt_path.unlink()
+            except OSError:
+                pass
 
     # Update the beat record + persist.
     target["flux_asset_path"] = str(chosen_path.relative_to(ws))
@@ -908,6 +962,12 @@ def rerender_single_beat(
             "anatomy_ok": chosen_verdict.anatomy_ok,
             "artifacts": chosen_verdict.artifacts,
             "reasoning": chosen_verdict.reasoning,
+            "rerendered_at": ts,
+        }
+    else:
+        target["image_qa"] = {
+            "verdict": "unjudged",
+            "reasoning": "VLM unavailable",
             "rerendered_at": ts,
         }
     beat_sheet_path.write_text(json.dumps(beat_sheet, indent=2))
