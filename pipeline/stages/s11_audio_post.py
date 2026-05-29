@@ -33,6 +33,7 @@ from ..ffmpeg_builder import (
     audio_post_mix,
     concat_music_with_crossfade,
     get_duration_seconds,
+    pad_audio_silence,
     render_sfx_track,
 )
 from ..music_library import MusicLibrary
@@ -60,8 +61,46 @@ def run(episode: dict, queue: dict) -> str | None:
         voice_seconds = info.frames / info.samplerate
     logger.info("voice duration: %.1fs", voice_seconds)
 
+    # ----- voice padding for title + closing cards (Batch J 2026-05-29) -----
+    # S12 prepends an optional title card and appends an optional closing
+    # source-attribution card around the per-beat clips. Without padding
+    # the voice with silence, final_mix.wav is voice_seconds long, but
+    # the assembled video timeline is title + voice + closing.
+    # S12's concat uses `-shortest` which then truncates the video at
+    # audio length and the closing card never appears. Padding the voice
+    # by exactly those amounts makes audio ≥ video and lets the closing
+    # card render — and, because there's no voice to sidechain against
+    # during the tail, the music bed swells to full level there, which
+    # is the "music keeps playing through credits" behavior the operator
+    # asked for.
+    prod_cfg = cfg.production
+    head_pad = max(0.0, float(prod_cfg.get("opening_title_card_seconds", 0)))
+    closing_card = max(0.0, float(prod_cfg.get("closing_card_seconds", 0)))
+    # +1.0s tail buffer absorbs ffmpeg rounding so -shortest doesn't
+    # nibble the last frame of the closing card.
+    tail_pad = closing_card + (1.0 if closing_card > 0 else 0.0)
+
+    if head_pad > 0 or tail_pad > 0:
+        voice_padded = ws / "04_audio" / "voice_padded.wav"
+        try:
+            pad_audio_silence(voice_path, voice_padded, head_pad, tail_pad)
+            voice_for_mix = voice_padded
+            voice_padded_seconds = voice_seconds + head_pad + tail_pad
+            logger.info(
+                "S11 voice padded: +%.1fs head / +%.1fs tail "
+                "(total %.1fs for title+voice+closing cover)",
+                head_pad, tail_pad, voice_padded_seconds,
+            )
+        except Exception as e:
+            logger.warning("voice padding failed (%s); using raw voice", e)
+            voice_for_mix = voice_path
+            voice_padded_seconds = voice_seconds
+    else:
+        voice_for_mix = voice_path
+        voice_padded_seconds = voice_seconds
+
     ml_cfg = cfg.music_library
-    target_seconds = voice_seconds + max(0.0, float(ml_cfg.get("music_start_offset_seconds", 20.0))) + 6.0
+    target_seconds = voice_padded_seconds + max(0.0, float(ml_cfg.get("music_start_offset_seconds", 20.0))) + 6.0
     crossfade_s = float(ml_cfg.get("crossfade_seconds", 4.0))
 
     # ----- pick music tracks -----
@@ -101,13 +140,18 @@ def run(episode: dict, queue: dict) -> str | None:
         logger.info("S11: no tracks picked (mock mode, empty library, or no match) — voice-only mix")
 
     # ----- Phase 2: SFX track (Batch C 2026-05-26) -----
+    # head_pad shifts voice content forward inside the padded mix, so
+    # SFX cue start offsets (which come from voice_timing.json in raw-
+    # voice frame of reference) need the same shift to stay in sync.
     sfx_wav, sfx_picks = _build_sfx_track(
         ws=ws, episode=episode, cfg=cfg,
         voice_seconds=voice_seconds, music_dir=music_dir,
+        voice_start_offset_seconds=head_pad,
+        total_seconds_full=voice_padded_seconds,
     )
 
     spec = AudioMixSpec(
-        voice_wav=voice_path,
+        voice_wav=voice_for_mix,
         music_wavs=music_wavs,
         out_wav=final_mix,
         voice_gain_db=-18.0,
@@ -154,6 +198,11 @@ def run(episode: dict, queue: dict) -> str | None:
         "voice_path": str(voice_path.relative_to(ws)),
         "final_mix_path": str(final_mix.relative_to(ws)),
         "voice_seconds": round(voice_seconds, 3),
+        # Padding applied to cover title + closing cards in S12.
+        # Added Batch J 2026-05-29.
+        "voice_padding_head_seconds": round(head_pad, 3),
+        "voice_padding_tail_seconds": round(tail_pad, 3),
+        "voice_padded_seconds": round(voice_padded_seconds, 3),
         "tracks_used": [
             {
                 "file": p.path.name,
@@ -195,6 +244,8 @@ def _build_sfx_track(
     cfg,
     voice_seconds: float,
     music_dir,
+    voice_start_offset_seconds: float = 0.0,
+    total_seconds_full: float | None = None,
 ) -> tuple[Path | None, list[dict]]:
     """Build sfx_track.wav with all SFX cues placed at their beat-start
     offsets, gain pre-applied. Returns (path, sfx_picks) where path
@@ -248,15 +299,18 @@ def _build_sfx_track(
         pick = sfx_lib.pick_cue(cue, beat_id=bid)
         if pick is None:
             continue
+        # Shift by voice_start_offset_seconds so SFX lands inside the
+        # padded mix, not under the silent title-card head (Batch J).
+        effective_start = start + voice_start_offset_seconds
         cues.append({
             "path": pick.path,
-            "start_seconds": start,
+            "start_seconds": effective_start,
             "gain_db": pick.gain_db_hint,
         })
         sfx_picks_meta.append({
             "file": pick.path.name,
             "cue": pick.cue,
-            "start_seconds": round(start, 3),
+            "start_seconds": round(effective_start, 3),
             "gain_db": pick.gain_db_hint,
         })
 
@@ -267,7 +321,8 @@ def _build_sfx_track(
     sfx_path = music_dir / "sfx_track.wav"
     ok = render_sfx_track(
         cues, sfx_path,
-        total_seconds=voice_seconds,
+        total_seconds=float(total_seconds_full if total_seconds_full is not None
+                            else voice_seconds),
     )
     if not ok:
         logger.warning("S11 SFX: render_sfx_track failed; mixing without SFX")

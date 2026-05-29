@@ -629,6 +629,52 @@ def extract_audio(video_path: Path, out_path: Path) -> None:
     _run(cmd)
 
 
+# -------------------- voice padding (Batch J 2026-05-29) --------------------
+
+def pad_audio_silence(
+    src: Path,
+    dst: Path,
+    head_seconds: float,
+    tail_seconds: float,
+) -> None:
+    """Pad an audio file with silence at the head and/or tail.
+
+    Used by S11 so that final_mix.wav covers the full video timeline
+    (title card + voice + closing card) instead of just the voice
+    duration. Without this, S12's `-shortest` mux truncates the
+    output at audio length and the closing source-attribution card
+    never makes it into the rendered MP4.
+
+    head_seconds and tail_seconds are clamped to 0 if negative.
+    When both are 0, the source file is copied through (re-encoded
+    to PCM_S16LE so downstream filters see a known format).
+    """
+    head = max(0.0, float(head_seconds))
+    tail = max(0.0, float(tail_seconds))
+
+    filters: list[str] = []
+    if head > 0:
+        head_ms = int(round(head * 1000))
+        # `adelay=N:all=1` prepends N ms of silence to every channel.
+        filters.append(f"adelay={head_ms}:all=1")
+    if tail > 0:
+        # `apad=pad_dur=N` appends N seconds of silence.
+        filters.append(f"apad=pad_dur={tail:.3f}")
+
+    cmd: list[str] = [
+        require_ffmpeg(), "-y",
+        "-i", str(src),
+    ]
+    if filters:
+        cmd += ["-af", ",".join(filters)]
+    cmd += [
+        "-c:a", "pcm_s16le",
+        "-ar", "24000",  # match Kokoro's sample rate; concat downstream
+        str(dst),
+    ]
+    _run(cmd)
+
+
 # -------------------- music-bed concatenation --------------------
 
 def concat_music_with_crossfade(
