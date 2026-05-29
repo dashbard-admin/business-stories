@@ -783,7 +783,12 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-29 — Batch L: stop caching cheap clips + loud diagnostics for closing/callout failures.*
+*This file last updated: 2026-05-29 — callout PNG inputs looped so overlay fade frames render visibly.*
+
+### Post-Batch-L fix — 2026-05-29
+- **Callout PNG overlay inputs now use `-loop 1` plus `overlay=shortest=1`** — EP003 produced 33 valid `*_callout.mp4` clips but no visible text because `composite_callouts_onto_clip()` fed each Pillow PNG as a one-frame ffmpeg input. The alpha fade began at 0 on that single frame, so ffmpeg wrote a valid transparent overlay clip. Looping the PNG input gives the fade filter frames across the 2.5s hold window; `shortest=1` keeps the looped PNG stream from extending output beyond the source clip.
+
+*Previous: 2026-05-29 — Batch L: stop caching cheap clips + loud diagnostics for closing/callout failures.*
 
 *Batch L ship list:*
 - **S12 unconditional purge of `zz_closing.mp4` and every `*_callout.mp4` at S12 entry** — final3.mp4 and final4.mp4 were byte-identical in the closing region because the Batch K mtime invalidator only caught "upstream artifact changed" (credits.png / beat_sheet.json / asset_manifest.json), not "S12 / `_render_closing_card` / `composite_callouts_onto_clip` code changed since the cached clip was rendered". The operator's `--rerun-from EP_NNN S10` workflow doesn't bump those upstream mtimes, so the invalidator never fired. The cheap, code-dependent overlay clips are now re-rendered every S12 run (~15s total). The expensive raw `{beat_id}.mp4` Ken Burns supersamples stay cached with the Batch K `_any_newer` invalidator.
