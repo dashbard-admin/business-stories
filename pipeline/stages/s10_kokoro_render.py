@@ -31,6 +31,17 @@ NUMBER_RE = re.compile(r"\b\d{1,6}\b")
 YEAR_RE = re.compile(r"\b(1[5-9]\d{2}|20\d{2})\b")
 PAUSE_RE = re.compile(r"\[PAUSE\s+(\d+(?:\.\d+)?)s\]", re.IGNORECASE)
 EMPHASIS_RE = re.compile(r"\[EMPHASIS\]\s*", re.IGNORECASE)
+# Batch J 2026-05-29: strip `[CALLOUT: "TEXT"]` markers before TTS.
+# S08's beat-sheet parser also strips them from its per-beat
+# `script_text` field, but Kokoro reads `02_script/script.txt` raw,
+# so the markers reach the synthesizer and get spoken verbatim as
+# "callout dec 1 comma 2020" if we don't strip here too. The regex
+# tolerates straight + curly quotes and any whitespace around the
+# colon — same character classes as s08's _CALLOUT_RE.
+CALLOUT_STRIP_RE = re.compile(
+    r"\[\s*CALLOUT\s*:\s*[\"“‘]?[^\"”’\]]+[\"”’]?\s*\]",
+    re.IGNORECASE,
+)
 
 
 def run(episode: dict, queue: dict) -> str | None:
@@ -44,7 +55,21 @@ def run(episode: dict, queue: dict) -> str | None:
         return "no script.txt"
     raw_script = script_path.read_text()
 
-    # Capture beat positions before stripping markers.
+    # Strip CALLOUT and EMPHASIS markers BEFORE computing beat
+    # positions so beat_positions and speech_only stay consistent —
+    # mid-loop strips would drift the per-beat char_pos relative to
+    # the post-strip n_chars and skew voice_timing.json. The bracketed
+    # CALLOUT text lives in beat_sheet.json (set by S08) and is
+    # composited as a Pillow overlay by S12; it must NOT be read
+    # aloud (Batch J 2026-05-29 — Kokoro was speaking "callout dec one
+    # comma twenty twenty" verbatim).
+    raw_script = CALLOUT_STRIP_RE.sub("", raw_script)
+    raw_script = EMPHASIS_RE.sub("", raw_script)
+    # Collapse any double-spaces the strips leave behind, but preserve
+    # newlines so BEAT_RE.match() still anchors to line starts cleanly.
+    raw_script = re.sub(r"[ \t]+", " ", raw_script)
+
+    # Capture beat positions while stripping BEAT markers.
     beat_positions: list[tuple[int, int]] = []
     speech_chars: list[str] = []
     beat_counter = 0
@@ -59,9 +84,6 @@ def run(episode: dict, queue: dict) -> str | None:
         speech_chars.append(raw_script[i])
         i += 1
     speech_only = "".join(speech_chars)
-
-    # Strip emphasis markers
-    speech_only = EMPHASIS_RE.sub("", speech_only)
 
     # Apply pronunciation overrides
     overrides_path = (

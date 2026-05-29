@@ -51,15 +51,12 @@ quotes, names, founder dialogue, valuations, employee counts, or
 court findings not present in the ledger.
 
 CALLOUT MARKERS (MANDATORY — added Batch C 2026-05-26, hardened
-Batch H 2026-05-28):
+Batch H 2026-05-28, tightened Batch J 2026-05-29):
 
-You MUST emit between 3 and 6 inline markers of the form
-`[CALLOUT: "$9 BILLION"]` directly AFTER the sentence that contains
-the high-impact concrete fact. S12 composites the bracketed text as
-an on-screen overlay. The Quibi script that triggered this hardening
-emitted ZERO callouts despite naming $1.35B, $1.1B production budget,
-$100K-per-minute, 1.7M downloads, 500K subscribers — every one of
-those should have had a callout.
+You MUST emit between 3 and 6 inline markers (HARD CAP: 6 — never
+more) of the form `[CALLOUT: "$9 BILLION"]` directly AFTER the
+sentence that contains the high-impact concrete fact. S12 composites
+the bracketed text as an on-screen overlay.
 
 You MUST emit a callout after a sentence that contains ANY of:
   - a dollar amount of $1 million or more
@@ -74,30 +71,37 @@ If a sentence has multiple such facts, pick the most dramatic one for
 the callout. Do NOT emit more than one callout per beat. Do NOT
 emit fewer than three across the script — a final draft with zero
 or one or two callouts is a structural failure the S07 critic will
-flag for re-write.
+flag for re-write. Do NOT emit more than six total.
 
 Marker rules:
-- AT MOST one CALLOUT per beat.
+- AT MOST one CALLOUT per beat. HARD CAP of 6 across the entire script.
 - The CALLOUT text must be ≤ 20 characters total — must fit big on
   screen. Use abbreviations: "$1.35B" not "$1,350,000,000".
 - Format: "$X.XB", "$XM", "N MONTHS", "DEC 1, 2020", "$2B → $100M".
+- The CALLOUT text MUST contain at least one digit OR a dollar sign
+  OR a date abbreviation. WORD-ONLY callouts are BANNED.
+  WRONG: [CALLOUT: "TIKTOK ERA"], [CALLOUT: "BAD SUPER BOWL"],
+         [CALLOUT: "THE SHUTDOWN"]. RIGHT: [CALLOUT: "$1.35B"],
+         [CALLOUT: "175 DAYS"], [CALLOUT: "APR 2020"].
+- DEDUPLICATION: the same callout text cannot appear twice in the
+  script. If two beats reference the same number, only one gets a
+  CALLOUT; the other quotes the number in prose without a marker.
 - The marker itself is NOT narrated — only the bracketed text is
   composited as an overlay. Place it on its own line after the
   triggering sentence.
 
-EXAMPLES (these are the patterns the LLM should produce):
+Format examples (DO NOT copy the prose verbatim — derive your own
+sentences from the fact ledger; the format shown is how the marker
+attaches to a numeric sentence):
 
-  "The company burned through one point three five billion dollars
-  in seven months.
-  [CALLOUT: "$1.35B IN 7 MONTHS"]"
+  <one-sentence numeric claim from the ledger>
+  [CALLOUT: "$X.XB IN N MONTHS"]
 
-  "Quibi projected seven point four million subscribers in year one.
-  It delivered five hundred thousand.
-  [CALLOUT: "7.4M → 500K"]"
+  <one-sentence projected-vs-actual contrast from the ledger>
+  [CALLOUT: "PROJ → ACTUAL"]
 
-  "On December first, two thousand twenty, the company ceased to
-  exist.
-  [CALLOUT: "DEC 1, 2020"]"
+  <one-sentence dated event from the ledger>
+  [CALLOUT: "MON DD, YYYY"]
 
 ================================================================
 STRUCTURE — THE 7-ACT TEMPLATE  (mandatory; every act required)
@@ -158,15 +162,19 @@ ACT 1 — THE BEFORE          0:30 – 3:30      (~360 words)
            moment they acted.
 
 >>> RE-HOOK at ~1:30 (~180 words in): land ONE sentence that
-    forecloses the easy assumption. Examples:
-      - "Nobody at the table that night could have predicted
-         what was about to happen."
-      - "And then she noticed something that nobody else had
-         seen."
+    forecloses the easy assumption. PATTERN: name a specific
+    person + a specific moment from the ledger and reveal that
+    something subtle was about to shift. Use the ledger's actual
+    names, rooms, dates — never a stock phrasing. DO NOT WRITE
+    a sentence about "nobody at the table" or anyone "noticing
+    something nobody else had seen" — those phrasings are banned.
 >>> RE-HOOK at ~3:00 (~360 words in): close the act on tension.
-    Examples:
-      - "It was a terrible idea. And he was about to bet
-         everything on it."
+    PATTERN: a two-sentence cliff where the second sentence flips
+    the tone of the first. Bind both halves to ledger-specific
+    facts (the founder's name, the cheque size, the partner who
+    objected). DO NOT WRITE "it was a terrible idea" or any
+    variant of "he was about to bet everything on it" — those
+    phrasings are banned.
 
 (SPONSOR SLOT placeholder removed Batch I 2026-05-28. The writer
 LLM was treating the commented-out [SPONSOR_SLOT] token as a literal
@@ -200,9 +208,14 @@ ACT 2 — THE BET             3:30 – 6:00      (~300 words)
 ─────────────────────────────────────────────────────────────────
 Land Act 2 on tension. The company is growing — but a problem
 the founder didn't anticipate is about to surface. Last words
-of Act 2 should be a one-sentence cliff:
-  "And by the spring of [year], the company was about to face a
-   problem nobody at the table had ever seen before."
+of Act 2 should be a one-sentence cliff. PATTERN: time-stamp
+("by [season] of [year]"), then name the specific problem class
+in concrete ledger terms (a competitor's filing, a regulator's
+letter, a key hire's departure, a metric inversion). DO NOT
+WRITE any variant of "a problem nobody at the table had ever
+seen before" — that phrasing is banned. The cliff sentence
+must contain at least one specific number, date, or named
+party from the ledger.
 (This isn't a literal ad break in our pipeline — but treat the
 moment as if the viewer might leave here. Make them stay.)
 
@@ -224,22 +237,33 @@ ACT 3 — THE CRISIS          6:00 – 10:00     (~480 words)
             from collapse. Specific numbers required: "$X in the
             bank, Y days of runway, Z employees laid off."
 
->>> RE-HOOK at ~7:00 (~840 words in):
-      "What happened over the next six months would have killed
-       most companies."
->>> RE-HOOK at ~8:30 (~1020 words in):
-      "And that's when [the next thing went wrong]."
->>> RE-HOOK at ~9:30 (~1140 words in):
-      "By [specific date], they had [specific bad number]. And
-       it was about to get worse."
+>>> RE-HOOK at ~7:00 (~840 words in): PATTERN — escalation
+    forecast. Name a specific duration from the ledger ("the
+    next eleven weeks", "the period from January to April") and
+    tie it to a measurable cost. AVOID stock phrasings like
+    "would have killed most companies".
+>>> RE-HOOK at ~8:30 (~1020 words in): PATTERN — pivot into the
+    next wrong turn. Anchor it to a named decision in the ledger
+    rather than "and that's when [the next thing went wrong]"
+    style placeholders.
+>>> RE-HOOK at ~9:30 (~1140 words in): PATTERN — dated metric
+    inversion. Cite a specific calendar date + a specific
+    dropped-by number, then signal worse ahead in concrete terms.
+    DO NOT use a "by [date], they had [number]. And it was
+    about to get worse" template — write the sentence from
+    scratch against this fact.
 
 ─────────────────────────────────────────────────────────────────
 *** MID-ROLL TENSION LANDING #2 — 10:00 (~1200 words in) ***
 ─────────────────────────────────────────────────────────────────
 The darkest moment. The company is functionally dead. Land on a
-single brutal sentence:
-  "On [specific date], they had [specific number]. For all intents
-   and purposes, [Company] was already gone."
+single brutal sentence. PATTERN: a dated state-of-affairs
+clause + a present-tense judgement that the entity has effectively
+ended. The judgement must be tied to a specific ledger artifact
+(cash balance, share price, headcount, bankruptcy filing date).
+DO NOT WRITE "for all intents and purposes, [Company] was
+already gone" — that phrasing is banned. Construct the sentence
+from the ledger's own numbers and named events.
 
 ─────────────────────────────────────────────────────────────────
 ACT 3.5 — THE INVESTIGATION 10:00 – 12:30    (~300 words)
@@ -266,13 +290,18 @@ WHAT HAPPENED.
             the cover-up. The thing the founder said in
             deposition that contradicts what they said publicly.
 
->>> RE-HOOK at ~11:00 (~1320 words in):
-      "And inside that filing was a single sentence that explained
-       everything." (or similar — one sentence forward-tease into
-       the evidence quote.)
+>>> RE-HOOK at ~11:00 (~1320 words in): PATTERN — name the
+    specific document about to be quoted (the S-1 page, the
+    deposition exhibit, the leaked memo), then promise the
+    quote. AVOID "a single sentence that explained everything"
+    style stock phrasing — anchor the tease to the named
+    document and its date.
 >>> RE-HOOK at ~12:00 (~1440 words in): pivot toward Act 4.
-      "Which is when [Founder] made the call that should have
-       been impossible."
+    PATTERN — name the specific dated moment when the founder
+    (or board, or court) made the decision that closed the
+    investigation phase. DO NOT WRITE "made the call that should
+    have been impossible" or any variant — describe the actual
+    move from the ledger.
 
 Notes for Act 3.5:
 - This act is what differentiates a real documentary from a

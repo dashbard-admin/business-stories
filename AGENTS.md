@@ -208,7 +208,7 @@ Major blocks:
 - `channel` — branding (channel name, brand color, contact email).
 - `paths` — `${root}` is optional; defaults to the directory containing `config.yaml`.
 - `models` — logical model keys consumed by the LLM gateway. `mock_mode: true` makes every adapter return canned data.
-- `production` — duration / word-count targets, title-card styling, fade timings. *(retuned 2026-05-26 Batch A — 18-min midpoint, 2300-word target.)*
+- `production` — duration / word-count targets, title-card styling, fade timings. *(retuned 2026-05-26 Batch A — 18-min midpoint, 2300-word target. Batch J 2026-05-29 added `opening_title_card_seconds` + `closing_card_seconds` as the source of truth for the silence padding S11 prepends/appends to `voice_full.wav` — see §6 S11.)*
 - `quality_gates` — minimum source counts, beat counts, script word counts, audio LUFS bounds. *(beat/word windows widened 2026-05-26 Batch A.)*
 - `constraints` — `rolling_window_*` cooldowns for archetype/narrator/style.
 - `orchestrator` — lock staleness, max topic-discovery retries, per-invocation budget.
@@ -427,13 +427,20 @@ Writer LLM with `script_generate.txt`. **Seven-act retention template at 120 wpm
 - Act 4 (pivot, ~360w) — the decision that turned the arc (or the legal closure for decline stories).
 - Act 5 (lesson, ~300w) — present-day fact + takeaway + legacy + one clean outro line.
 
-`[CALLOUT: "$9 BILLION"]` markers are **mandatory** (3-6 per script, hardened Batch H 2026-05-28): emitted after high-impact concrete-number sentences; S12 composites them as on-screen overlays.
+`[CALLOUT: "$9 BILLION"]` markers are **mandatory** (3-6 per script, hardened Batch H 2026-05-28, tightened Batch J 2026-05-29). Batch J rules:
+- HARD CAP: max 6 across the entire script (Quibi v3 shipped 36).
+- Word-only callouts are BANNED. Each CALLOUT must contain at least one digit OR a dollar sign OR a date abbreviation. "TIKTOK ERA", "BAD SUPER BOWL", "THE SHUTDOWN" are explicitly listed as wrong in the prompt.
+- DEDUP: the same callout text cannot appear twice; the second occurrence quotes the number in prose without a marker.
+
+**Pattern-driven hook examples *(Batch J 2026-05-29)*:** the writer prompt no longer carries literal sentence templates for re-hooks or mid-roll cliffs. Pre-Batch J the LLM treated examples like "Nobody at the table that night could have predicted what was about to happen" and "It was a terrible idea. And he was about to bet everything on it." as substitution slots and copied them verbatim across episodes (Quibi v3 had at least five instances). Each example is replaced with a "PATTERN: ..." description plus an explicit "DO NOT WRITE [literal phrasing]" ban for the original example. The prompt still anchors the shape; the LLM must derive the sentence from the ledger.
 
 **Multi-pass length + forbidden-phrase retry loop** *(reworked Batch I.2 2026-05-28)*. `_generate_within_range` scores each draft by BOTH word-range fit AND clean-phrase status. Per-attempt logic:
 - Build a pressure block: length-budget nudge if previous attempt was out-of-range, full forbidden-list nudge if previous attempt had hits. Both can fire.
 - Temperature decays per `production.script_generation_temp_step` (default 0.05).
 - Selection priority: in_range+clean → return immediately. Else track best_in_range, best_clean, best_any.
 - After exhausting attempts: in_range+forbidden > clean+out_of_range > any. Never errors out for forbidden-phrase reasons; the rare ship-with-hits case is logged for operator review.
+
+**Post-retry substring substitution safety net *(Batch J 2026-05-29)*:** after the retry loop selects the best candidate but BEFORE `02_script/script.txt` is written, `_apply_substitutions()` runs `pipeline/lint/forbidden_substitutions.yaml` against the script. Each `{match, replace}` entry is case-insensitive substring; sentence-initial hits keep their leading capital via `_sub()`'s capitalization-preservation logic. Fired substitutions are logged at INFO level. The substitution table covers phrases that survive the retry loop (e.g. "a brilliant idea that failed" → "an ambitious idea that didn't survive the market") so they don't ship. This is purely a last-resort guardrail — the retry loop remains the preferred clean-up path.
 
 **Prompt log** *(added 2026-05-28)*: `02_script/script_prompt.txt` is overwritten on every attempt. After the loop returns, the file holds the prompt that produced the chosen draft (rewritten on fallback paths). Useful for diff-ing against the template + debugging.
 
@@ -475,15 +482,18 @@ Also renders `title.png` and `credits.png` for S12 to pick up.
 ### S10 — Kokoro TTS (`s10_kokoro_render.py`)
 Per-narrator voice render. Pronunciation overrides at `pipeline/lexicon/pronunciation_overrides.yaml` (Bezos, Theranos, Zuckerberg, Wirecard, EBITDA, IPO, etc.). Output: per-beat WAV chunks + `voice_full.wav`.
 
+**Marker stripping** *(hardened Batch J 2026-05-29)*: `CALLOUT_STRIP_RE`, `EMPHASIS_RE`, and `BEAT_RE` are applied to the raw script BEFORE the beat-position scan so beat positions and final speech text stay consistent — otherwise per-beat char_pos drifts vs. post-strip n_chars and skews `voice_timing.json`. Pre-Batch J the CALLOUT markers (`[CALLOUT: "$1.35B"]`) flowed straight into Kokoro and were spoken verbatim ("callout dollar one point three five bee"). The bracketed text now lives only in `beat_sheet.json` `callouts` (set by S08) and is composited as a Pillow overlay by S12.
+
 ### S11 — Audio Post (`s11_audio_post.py`)
-Voice + music bed + SFX *(SFX phase added Batch C 2026-05-27)*.
+Voice + music bed + SFX *(SFX phase added Batch C 2026-05-27, voice padding added Batch J 2026-05-29)*.
+- **Voice padding for title + closing cards *(Batch J 2026-05-29)*:** before any mixing, `voice_full.wav` is padded with `production.opening_title_card_seconds` of silence at the head and `production.closing_card_seconds + 1.0s` at the tail (via `ffmpeg_builder.pad_audio_silence`). The padded file `voice_padded.wav` becomes the mix input. Reason: S12 prepends a title card and appends a closing card around the per-beat clips, and S12's `concat_clips` uses `-shortest` which would truncate the video at audio length. Without padding, audio = voice_seconds < video = title + voice + closing, and the closing source-attribution card never made it into the rendered MP4. The +1s tail buffer absorbs ffmpeg rounding. With padding, audio ≥ video, the closing card ships, and — because there's no voice during the silent tail — the music bed's sidechain has nothing to duck against, so music swells to full level under the credits (the "uninterrupted music outro" the operator asked for).
 - Voice `dynaudnorm` pre-pass (configurable).
-- `music_library.pick_bed()` picks N tracks ≥ voice duration.
+- `music_library.pick_bed()` picks N tracks ≥ padded voice duration + music_start_offset + buffer.
 - ffmpeg concat with 4s crossfade between tracks.
-- **SFX Phase 2:** for each beat with a non-`silence` `sfx_cue`, `sfx_library.pick_cue()` returns a matching clip. `ffmpeg_builder.render_sfx_track()` pre-renders an `sfx_track.wav` of voice duration with all SFX placed at the beat-start offsets (beat-anchored per Q-C1; reads `voice_timing.json` for exact starts, falls back to cumulative `estimated_seconds`). Gain (default −18dB) is baked in.
+- **SFX Phase 2:** for each beat with a non-`silence` `sfx_cue`, `sfx_library.pick_cue()` returns a matching clip. `ffmpeg_builder.render_sfx_track()` pre-renders an `sfx_track.wav` of voice duration with all SFX placed at the beat-start offsets (beat-anchored per Q-C1; reads `voice_timing.json` for exact starts, falls back to cumulative `estimated_seconds`). Gain (default −18dB) is baked in. *(Batch J 2026-05-29: SFX cue offsets now shift by `voice_start_offset_seconds = head_pad` so cues land inside the padded mix, not under the silent title-card head.)*
 - Sidechain-duck music under voice. SFX rides on top of the mix at the configured gain (no ducking).
 - Loudnorm to −14 LUFS.
-- Output: `04_audio/final_mix.wav` + `mix_manifest.json` (now lists both `tracks_used` and `sfx_used`).
+- Output: `04_audio/final_mix.wav` + `mix_manifest.json` (now lists `tracks_used`, `sfx_used`, and Batch J 2026-05-29 padding fields: `voice_padding_head_seconds`, `voice_padding_tail_seconds`, `voice_padded_seconds`).
 
 ### S14 — Performance writeback *(added Batch E 2026-05-27, OUT-OF-BAND)*  (`s14_performance_writeback.py`)
 **Not in `STAGE_DISPATCH` / `STAGE_ORDER`.** Triggered manually via:
@@ -508,9 +518,9 @@ Runs after S12 with three phases:
 ### S12 — Video Assembly (`s12_video_assembly.py`)
 - Title card: FLUX-rendered `title.png` background, episode title composited via Pillow (yellow body, black stroke, random-corner placement, deterministic by episode id).
 - Per-beat clip: Ken Burns motion over the beat's image, fade in/out (`fade_in_seconds`/`fade_out_seconds`).
-- **Callout overlays *(added Batch C 2026-05-27)*:** when a beat has a non-empty `callouts` list (populated by S08 from inline `[CALLOUT: "..."]` markers in the script), `ffmpeg_builder.composite_callouts_onto_clip()` renders each callout as a Pillow text PNG (yellow + black stroke, same styling as the title card), then overlays it on the clip with timed visibility + fade in/out, anchored at the beat start (Q-C1: beat-anchored). Max callouts per beat configurable via `callouts.max_per_beat` (default 1).
+- **Callout overlays *(added Batch C 2026-05-27, cache fix Batch J 2026-05-29)*:** when a beat has a non-empty `callouts` list (populated by S08 from inline `[CALLOUT: "..."]` markers in the script), `ffmpeg_builder.composite_callouts_onto_clip()` renders each callout as a Pillow text PNG (yellow + black stroke, same styling as the title card), then overlays it on the clip with timed visibility + fade in/out, anchored at the beat start (Q-C1: beat-anchored). Max callouts per beat configurable via `callouts.max_per_beat` (default 1). **Cache-key fix (Batch J 2026-05-29)**: the per-beat loop now checks for `{beat_id}_callout.mp4` BEFORE the raw `{beat_id}.mp4`, so a beat whose raw clip was rendered in a previous S12 run (when no callouts existed) gets the overlay added on re-run. Pre-Batch J, the raw-clip cache hit short-circuited past the overlay path and callouts never appeared in the final video.
 - Concat all clips, mux voice + music + SFX + SRT + VTT.
-- Closing source-attribution card uses the FLUX-rendered `credits.png` as background.
+- Closing source-attribution card uses the FLUX-rendered `credits.png` as background. *(Closing-card append failure fixed Batch J 2026-05-29 — see S11 padding note; pre-Batch J the closing clip was rendered and appended to `clip_paths` but `concat_clips`' `-shortest` flag truncated the video at audio length, so the closing card never reached the rendered MP4.)*
 - **License attribution file *(added Batch C 2026-05-27)*:** writes `06_metadata/license_attributions.txt` combining music + SFX licence/attribution lines for paste into the YouTube description.
 - Output: `05_video/final.mp4` (or `final_preview.mp4` when `preview_mode`).
 
@@ -555,6 +565,7 @@ Pin one of these on a manual topic by setting `archetype` / `narrator` / `visual
 ## 9. Lint / lexicon
 
 - `pipeline/lint/forbidden_phrases.txt` — one phrase per line, case-insensitive substring match. S6's retry loop scores each draft against this list and prefers clean drafts over dirty ones (Batch I.2 2026-05-28). Lines starting with `#` are comments. *(Pruned Batch I.1 2026-05-28 — over-broad phrases like "the legacy of" and "the future of" were removed because they fired on legitimate prose; only unambiguous closer patterns remain: "and the rest, as they say, is history", "is a cautionary tale", "it teaches us that", "the lesson is clear", "a monument to hubris", "a brilliant idea that failed", etc.)*
+- `pipeline/lint/forbidden_substitutions.yaml` — **(Batch J 2026-05-29)** last-resort substring substitution table. The S06 retry loop tries to AVOID forbidden phrases by re-generating; this table fires AFTER the retry budget is spent. Each `{match, replace}` entry is case-insensitive substring; sentence-initial hits keep their leading capital. Operator edits when a forbidden phrase ships despite the retry — Quibi v3 shipped "a brilliant idea that failed" after exhausting attempts, which motivated this guardrail. Loaded + applied by `_load_substitutions()` + `_apply_substitutions()` in `pipeline/stages/s06_script_generation.py` immediately before `02_script/script.txt` is written. Substitutions are LOGGED at INFO level so the operator can see which fired.
 - `pipeline/lexicon/pronunciation_overrides.yaml` — Kokoro pronunciation map. Format: `"Word": "PRO-nun-see-AY-shun"`. Used by S10 to fix proper nouns Kokoro mangles by default.
 
 ---
@@ -619,6 +630,7 @@ Resets `S5` AND every later stage to `pending`, points `current_stage` at `S5`, 
 | `tts.backend` kokoro → elevenlabs | `S10` |
 | Narrator persona edited in `narrators.yaml` | `S6` |
 | Callout styling changed in `config.yaml` | `S12` |
+| `opening_title_card_seconds` / `closing_card_seconds` changed | `S11` (re-pads voice, re-mixes, re-renders) |
 | Visual style YAML edited (V1.yaml / V2.yaml) | `S9` |
 | Thumbnail layout edited in `thumbnails.py` | `S13` |
 
@@ -769,4 +781,16 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-28 — Batch I + I.1 + I.2 + assorted hot-fixes since Batch H. Notable changes: SPONSOR_SLOT placeholder removed (LLM was emitting it literally); orphan-beat-marker stripping + dual-stream detection in S06; forbidden-phrase check folded into the same retry budget as length (no more `needs_human` for forbidden phrases); `02_script/script_prompt.txt` written per attempt; `clear_blockers` advances to next stage on `--approve` (was looping); new `--rerun-from EP_ID STAGE_ID` CLI for config-flip-invalidates-stage scenarios; `asset_hunt.max_pd_assets` config knob replaces hardcoded 50/80 caps. Felix N5 remains the only enabled narrator during testing.*
+*This file last updated: 2026-05-29 — Batch J: script render bugs + voice/CALLOUT discipline.*
+
+*Batch J ship list:*
+- **S10 CALLOUT strip** — `CALLOUT_STRIP_RE` is now applied to `script.txt` BEFORE the beat-position scan, so Kokoro no longer reads `[CALLOUT: "DEC 1, 2020"]` aloud as "callout dec one comma twenty twenty". EMPHASIS strip moved to the same spot for the same beat-timing-consistency reason.
+- **S12 callout-overlay cache fix** — the per-beat loop now checks for `{beat_id}_callout.mp4` BEFORE the raw `{beat_id}.mp4`, so a beat whose raw clip was rendered in a previous S12 run gets the overlay added on re-run. Pre-Batch J the cache short-circuited past the overlay path.
+- **S11 voice padding for cards** — `pipeline/ffmpeg_builder.py:pad_audio_silence()` prepends `production.opening_title_card_seconds` of silence and appends `production.closing_card_seconds + 1.0s`. The padded `voice_padded.wav` becomes the mix input so S12's `-shortest` mux no longer truncates the video at audio length. This fixes the missing closing source-attribution card AND gives the music bed a no-voice tail where it swells to full level (the operator's "music keeps playing through credits" ask). SFX cue offsets shift by `voice_start_offset_seconds = head_pad` so cues land inside the padded mix, not under the silent title-card head.
+- **Script prompt — copyable example sentences removed** — Quibi v3 had at least five literal "Nobody at the table could have predicted...", "It was a terrible idea. And he was about to bet everything on it.", "And by the spring of...", "Which is when [Founder] made the call that should have been impossible." instances. Each example sentence in `pipeline/prompts/script_generate.txt` is now a "PATTERN: ..." description with an explicit "DO NOT WRITE [literal phrasing]" ban on the previous example, so the LLM must derive sentences from the ledger.
+- **CALLOUT spec tightened** — hard cap 6 (Quibi v3 had 36); word-only callouts banned (must contain a digit, dollar sign, or date abbreviation); explicit dedup rule (same CALLOUT text cannot appear twice).
+- **Post-S06 substring substitution** — new `pipeline/lint/forbidden_substitutions.yaml` + `_load_substitutions()`/`_apply_substitutions()` in S06 apply case-insensitive substring replacements AFTER the retry loop selects the best candidate but before `script.txt` is written. "a brilliant idea that failed", "the lesson is clear", "the takeaway is", "rocked the world", etc. all have safer replacements. Sentence-initial hits keep their leading capital. Logged at INFO level.
+- **`config.yaml` `closing_card_seconds` comment expanded** — comment now spells out the recommended 5-10s range, the S11-padding mechanism that makes the card actually ship, and the music-swell side-effect during the silent tail. Default still 5s.
+- *(Length pressure block intentionally not changed — operator handles the 15-25 min target range via `target_words` + `wpm_effective` knobs in config.yaml.)*
+
+*Carry-over from Batch I + I.1 + I.2 (still current):* SPONSOR_SLOT placeholder removed (LLM was emitting it literally); orphan-beat-marker stripping + dual-stream detection in S06; forbidden-phrase check folded into the same retry budget as length (no more `needs_human` for forbidden phrases); `02_script/script_prompt.txt` written per attempt; `clear_blockers` advances to next stage on `--approve` (was looping); `--rerun-from EP_ID STAGE_ID` CLI for config-flip-invalidates-stage scenarios; `asset_hunt.max_pd_assets` config knob replaces hardcoded 50/80 caps. Felix N5 remains the only enabled narrator during testing.*

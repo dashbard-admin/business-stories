@@ -436,6 +436,20 @@ def run(episode: dict, queue: dict) -> str | None:
                         len(beats), len(merged_beats))
             beats = merged_beats
 
+    # ----- post-retry substitution safety net (Batch J 2026-05-29) -----
+    # The retry loop tries to avoid forbidden_phrases.txt hits by
+    # re-generating, but a script can still ship with a phrase that
+    # survived the budget. forbidden_substitutions.yaml maps each
+    # surviving phrase to a safer replacement so the bad phrasing
+    # never reaches S10 TTS / S12 captions. The substitution is the
+    # LAST guardrail — preferred fix is always a clean re-generate.
+    sub_table = _load_substitutions()
+    if sub_table:
+        script, sub_log = _apply_substitutions(script, sub_table)
+        if sub_log:
+            logger.info("S06 forbidden-phrase substitutions applied: %s",
+                        ", ".join(f'{m}→{r}' for m, r in sub_log))
+
     (ws / "02_script").mkdir(exist_ok=True)
     (ws / "02_script" / "script.txt").write_text(script)
 
@@ -475,6 +489,63 @@ def _load_forbidden() -> list[str]:
 def _find_forbidden(text: str, phrases: list[str]) -> list[str]:
     t = text.lower()
     return [p for p in phrases if p in t]
+
+
+# -------------------- forbidden-phrase substitution (Batch J) --------------------
+
+def _load_substitutions() -> list[tuple[str, str]]:
+    """Load `pipeline/lint/forbidden_substitutions.yaml` into a list of
+    (match_lower, replacement) tuples. Returns [] if the file is
+    missing or malformed — substitution is purely additive and should
+    never block S06 on a parse failure."""
+    path = (Path(__file__).resolve().parent.parent
+            / "lint" / "forbidden_substitutions.yaml")
+    if not path.exists():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text()) or {}
+    except Exception as e:
+        logger.warning("forbidden_substitutions.yaml parse failed: %s", e)
+        return []
+    pairs: list[tuple[str, str]] = []
+    for entry in (data.get("substitutions") or []):
+        m = (entry or {}).get("match")
+        r = (entry or {}).get("replace")
+        if isinstance(m, str) and isinstance(r, str) and m.strip():
+            pairs.append((m.lower(), r))
+    return pairs
+
+
+def _apply_substitutions(
+    text: str, table: list[tuple[str, str]],
+) -> tuple[str, list[tuple[str, str]]]:
+    """Apply case-insensitive substring substitutions. Returns the
+    rewritten text plus a log of (match, replacement) pairs that
+    actually fired. Leading-capital matches keep their leading
+    capital in the replacement so sentence-initial hits don't drop
+    to lowercase mid-sentence."""
+    log: list[tuple[str, str]] = []
+    out = text
+    for match_lower, repl in table:
+        # Case-insensitive find. We rebuild `out` repeatedly because
+        # a substitution can change the indices.
+        pattern = re.compile(re.escape(match_lower), re.IGNORECASE)
+        if not pattern.search(out):
+            continue
+
+        def _sub(m: re.Match[str]) -> str:
+            original = m.group(0)
+            # Preserve leading capitalization: if the original starts
+            # uppercase, capitalize the replacement's first letter.
+            if original[:1].isupper() and repl:
+                return repl[:1].upper() + repl[1:]
+            return repl
+
+        new_out, n = pattern.subn(_sub, out)
+        if n > 0:
+            out = new_out
+            log.append((match_lower, repl))
+    return out, log
 
 
 # -------------------- beat re-distribution --------------------

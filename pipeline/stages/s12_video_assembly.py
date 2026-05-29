@@ -127,76 +127,87 @@ def run(episode: dict, queue: dict) -> str | None:
                     "(production.opening_title_card_seconds=0)")
 
     # ----- per-beat clips -----
+    co_cfg = cfg.callouts
+    callouts_globally_enabled = bool(co_cfg.get("enabled", True))
     for b in beats:
         beat_id = b["beat_id"]
         clip_path = clips_dir / f"{beat_id}.mp4"
+        overlay_path = clips_dir / f"{beat_id}_callout.mp4"
 
-        if _clip_is_valid(clip_path):
+        # Per-beat callout list (from S08) drives whether the chosen
+        # clip is the raw ken_burns render or the overlay-composited
+        # version. Compute this BEFORE the cache shortcut so a clip
+        # that was rendered without overlay in a previous S12 run
+        # still gets the overlay added — Batch J 2026-05-29 fix.
+        cs = b.get("callouts") or []
+        co_cap = int(co_cfg.get("max_per_beat", 1))
+        cs = cs[:co_cap]
+        needs_callouts = bool(cs) and callouts_globally_enabled
+
+        # Cache shortcut: if the overlay version exists and we need
+        # callouts, use it. If we don't need callouts and the raw
+        # version exists, use that. Otherwise (re-)render below.
+        if needs_callouts and _clip_is_valid(overlay_path):
+            clip_paths.append(overlay_path)
+            continue
+        if (not needs_callouts) and _clip_is_valid(clip_path):
             clip_paths.append(clip_path)
             continue
-        if clip_path.exists():
-            logger.warning("beat %s: cached clip %s invalid; re-rendering",
-                           beat_id, clip_path.name)
+        # Invalidate any partial/0-byte caches before re-render.
+        for stale in (clip_path, overlay_path):
+            if stale.exists() and not _clip_is_valid(stale):
+                logger.warning("beat %s: cached clip %s invalid; "
+                               "re-rendering", beat_id, stale.name)
+                try:
+                    stale.unlink()
+                except Exception:
+                    pass
+
+        # ----- raw ken_burns clip (always required) -----
+        if not _clip_is_valid(clip_path):
+            image_path: Path | None = None
+            if "pd_asset_path" in b:
+                image_path = ws / b["pd_asset_path"]
+            elif "flux_asset_path" in b:
+                image_path = ws / b["flux_asset_path"]
+            else:
+                disk_path = ws / "03_assets" / "flux" / f"{beat_id}.png"
+                if disk_path.exists() and disk_path.stat().st_size > 1000:
+                    image_path = disk_path
+                    b["flux_asset_path"] = str(disk_path.relative_to(ws))
+                    logger.warning("beat %s missing image path; "
+                                   "recovered from disk", beat_id)
+            if image_path is None:
+                return f"beat {beat_id} has no image"
+            if not image_path.exists():
+                return f"image missing for beat {beat_id}: {image_path}"
+
+            t = timing_by_beat.get(beat_id)
+            duration = (t["duration_seconds"]
+                        if t and t["duration_seconds"] > 0.5
+                        else b.get("estimated_seconds", 5.0))
+
+            motion = b.get("ken_burns_motion", "slow_zoom_in")
             try:
-                clip_path.unlink()
-            except Exception:
-                pass
+                ken_burns_clip(
+                    image_path, float(duration), motion, clip_path,
+                    fade_in_seconds=fade_in,
+                    fade_out_seconds=fade_out,
+                )
+            except Exception as e:
+                return f"ken burns render failed for {beat_id}: {e}"
 
-        image_path: Path | None = None
-        if "pd_asset_path" in b:
-            image_path = ws / b["pd_asset_path"]
-        elif "flux_asset_path" in b:
-            image_path = ws / b["flux_asset_path"]
-        else:
-            disk_path = ws / "03_assets" / "flux" / f"{beat_id}.png"
-            if disk_path.exists() and disk_path.stat().st_size > 1000:
-                image_path = disk_path
-                b["flux_asset_path"] = str(disk_path.relative_to(ws))
-                logger.warning("beat %s missing image path; recovered from disk",
-                               beat_id)
-        if image_path is None:
-            return f"beat {beat_id} has no image"
-        if not image_path.exists():
-            return f"image missing for beat {beat_id}: {image_path}"
-
-        t = timing_by_beat.get(beat_id)
-        duration = (t["duration_seconds"]
-                    if t and t["duration_seconds"] > 0.5
-                    else b.get("estimated_seconds", 5.0))
-
-        motion = b.get("ken_burns_motion", "slow_zoom_in")
-        try:
-            ken_burns_clip(
-                image_path, float(duration), motion, clip_path,
-                fade_in_seconds=fade_in,
-                fade_out_seconds=fade_out,
-            )
-        except Exception as e:
-            return f"ken burns render failed for {beat_id}: {e}"
-
-        # ----- callout overlays (Batch C 2026-05-26) -----
-        # When config.callouts.enabled and the beat has a non-empty
-        # `callouts` list (populated by S08 from the writer's inline
-        # [CALLOUT: ...] markers), composite the text over the clip.
-        # Falls back to the raw ken_burns clip on overlay failure.
-        cs = b.get("callouts") or []
-        co_cfg = cfg.callouts
-        if cs and bool(co_cfg.get("enabled", True)):
-            cap = int(co_cfg.get("max_per_beat", 1))
-            cs = cs[:cap]
-            overlay_path = clips_dir / f"{beat_id}_callout.mp4"
+        # ----- callout overlay (Batch C 2026-05-26, cache fix J 2026-05-29) -----
+        if needs_callouts:
             ok = composite_callouts_onto_clip(
                 clip_path, overlay_path, cs,
                 callout_cfg=co_cfg,
             )
             if ok:
-                # Replace the raw clip path with the overlayed version
-                # so concat picks it up.
                 clip_paths.append(overlay_path)
                 continue
-            else:
-                logger.warning("S12 callout compositing failed for %s; "
-                               "using raw clip", beat_id)
+            logger.warning("S12 callout compositing failed for %s; "
+                           "using raw clip", beat_id)
 
         clip_paths.append(clip_path)
 

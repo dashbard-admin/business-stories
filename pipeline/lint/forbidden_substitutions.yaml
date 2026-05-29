@@ -1,0 +1,57 @@
+# Forbidden-phrase substitution table (Batch J 2026-05-29)
+#
+# Last-resort safety net. The S06 retry loop already tries to avoid
+# forbidden_phrases.txt entries by re-generating; this table fires
+# AFTER the retry budget is spent, replacing any unfixable phrases
+# in the final script with safer alternatives so they don't ship.
+#
+# Matching is case-insensitive substring. Each substitution preserves
+# the leading capitalization of the match (so a sentence-initial hit
+# stays capitalised, mid-sentence hits stay lowercase). The replacement
+# is inserted exactly as written here — keep replacements grammatical
+# in their typical context.
+#
+# Editing rules:
+#   - Add entries for any phrase that has shipped despite being in
+#     forbidden_phrases.txt — the script that motivated this file
+#     was Quibi v3 with "a brilliant idea that failed" landing
+#     after the retry loop exhausted.
+#   - Avoid match strings shorter than 4 words: short fragments
+#     fire on legitimate prose ("the future of" appeared mid-claim
+#     in Batch I.1 and was removed for false positives).
+#   - The replacement does NOT need to be the same length; the
+#     surrounding prose absorbs the shift.
+
+substitutions:
+  - match: "a brilliant idea that failed"
+    replace: "an ambitious idea that didn't survive the market"
+  - match: "and the rest, as they say, is history"
+    replace: "what followed is part of the public record"
+  - match: "the lesson is clear"
+    replace: "the evidence is on record"
+  - match: "it teaches us that"
+    replace: "the record shows that"
+  - match: "the moral here"
+    replace: "what stands out"
+  - match: "the takeaway is"
+    replace: "what the record shows is"
+  - match: "a monument to hubris"
+    replace: "a study in misplaced confidence"
+  - match: "it is a stark reminder"
+    replace: "it is documented evidence"
+  - match: "the truth about"
+    replace: "the documented record of"
+  - match: "the real reason"
+    replace: "the documented reason"
+  - match: "rocked the world"
+    replace: "drew global attention"
+  - match: "rocked the industry"
+    replace: "reshaped the industry"
+  - match: "took the world by storm"
+    replace: "spread rapidly"
+  - match: "rocketed to success"
+    replace: "grew rapidly"
+  - match: "groundbreaking innovation"
+    replace: "novel approach"
+  - match: "value proposition"
+    replace: "selling point"
