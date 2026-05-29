@@ -129,6 +129,14 @@ def run(episode: dict, queue: dict) -> str | None:
     # ----- per-beat clips -----
     co_cfg = cfg.callouts
     callouts_globally_enabled = bool(co_cfg.get("enabled", True))
+    # Batch K 2026-05-29: beat_sheet.json mtime is the upstream signal
+    # for both the raw clip (image path / timing changed) and the
+    # overlay clip (callouts list changed). If beat_sheet has been
+    # rewritten since a cached clip was produced, that cache is stale
+    # and must re-render. Pre-Batch-K, callouts added to beat_sheet
+    # by a later S08 rerun never made it into the video because S12
+    # short-circuited on the pre-callout raw clip cache.
+    beat_sheet_path = ws / "02_script" / "beat_sheet.json"
     for b in beats:
         beat_id = b["beat_id"]
         clip_path = clips_dir / f"{beat_id}.mp4"
@@ -143,6 +151,20 @@ def run(episode: dict, queue: dict) -> str | None:
         co_cap = int(co_cfg.get("max_per_beat", 1))
         cs = cs[:co_cap]
         needs_callouts = bool(cs) and callouts_globally_enabled
+
+        # Invalidate caches whose upstream beat_sheet is newer than
+        # the cached clip (Batch K 2026-05-29).
+        for stale in (clip_path, overlay_path):
+            if _clip_is_valid(stale) and _any_newer(
+                [beat_sheet_path], stale
+            ):
+                logger.info("S12 beat %s: cache stale "
+                            "(beat_sheet newer than %s); re-rendering",
+                            beat_id, stale.name)
+                try:
+                    stale.unlink()
+                except Exception:
+                    pass
 
         # Cache shortcut: if the overlay version exists and we need
         # callouts, use it. If we don't need callouts and the raw
@@ -214,14 +236,36 @@ def run(episode: dict, queue: dict) -> str | None:
     # ----- optional closing source-attribution card -----
     if closing_card_seconds > 0:
         closing_clip = clips_dir / "zz_closing.mp4"
+        closing_png = ws / "05_video" / "closing_card.png"
+        flux_credits_png = ws / "03_assets" / "flux" / "credits.png"
+        # Batch K 2026-05-29: invalidate the cached closing clip when
+        # any upstream input (the FLUX credits backdrop, the source
+        # inventory used for the attribution lines, or the asset
+        # manifest) has been modified since the clip was last
+        # rendered. Pre-Batch-K, a stale zz_closing.mp4 would survive
+        # arbitrary upstream changes — that is how final3.mp4 shipped
+        # a closing card with no SOURCES & ATTRIBUTION text overlay.
+        upstream_inputs = [
+            flux_credits_png,
+            ws / "00_research" / "source_inventory.json",
+            ws / "03_assets" / "asset_manifest.json",
+        ]
+        if _clip_is_valid(closing_clip) and _any_newer(
+            upstream_inputs, closing_clip
+        ):
+            logger.info("S12 closing card: cache stale "
+                        "(upstream input newer than zz_closing.mp4); "
+                        "re-rendering")
+            try:
+                closing_clip.unlink()
+            except Exception:
+                pass
         if not _clip_is_valid(closing_clip):
             if closing_clip.exists():
                 try:
                     closing_clip.unlink()
                 except Exception:
                     pass
-            closing_png = ws / "05_video" / "closing_card.png"
-            flux_credits_png = ws / "03_assets" / "flux" / "credits.png"
             _render_closing_card(
                 out_path=closing_png,
                 backdrop=flux_credits_png if flux_credits_png.exists() else None,
@@ -296,6 +340,28 @@ def _clip_is_valid(path: Path) -> bool:
         return get_duration_seconds(path) > 0.0
     except Exception:
         return False
+
+
+def _any_newer(inputs: list[Path], cached: Path) -> bool:
+    """True if any existing input in `inputs` has a modification time
+    newer than `cached`'s mtime. Used by S12's per-beat and closing
+    clip cache invalidators (Batch K 2026-05-29). Missing inputs are
+    skipped — they can't make the cache stale on their own. If
+    `cached` doesn't exist this returns False (caller should already
+    have ruled out the cache as invalid via `_clip_is_valid`)."""
+    if not cached.exists():
+        return False
+    try:
+        cached_mtime = cached.stat().st_mtime
+    except OSError:
+        return True  # can't stat cache → treat as stale
+    for p in inputs:
+        try:
+            if p.exists() and p.stat().st_mtime > cached_mtime:
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont:

@@ -351,9 +351,18 @@ def run(episode: dict, queue: dict) -> str | None:
                 b["script_text"] = stripped
                 b["callouts"] = callouts
                 callout_total += len(callouts)
-    if callouts_enabled and callout_total:
-        logger.info("S08 callouts: parsed %d markers across beats",
-                    callout_total)
+    # Batch K 2026-05-29: log the parsed count unconditionally so the
+    # operator can tell "S08 found 0 [CALLOUT: ...] markers" from
+    # "S08 didn't run". final3.mp4 had no visible callout overlays
+    # despite the script having 36 callout candidates — this log
+    # makes the gap between S08's parse and S12's composite visible.
+    if callouts_enabled:
+        beats_with_callouts = sum(1 for b in beats if b.get("callouts"))
+        logger.info(
+            "S08 callouts: parsed %d markers across %d beats "
+            "(cap %d per beat)",
+            callout_total, beats_with_callouts, callouts_max,
+        )
 
     for b in beats:
         b.setdefault("estimated_seconds", _estimate_seconds(b.get("script_text", "")))
