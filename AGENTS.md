@@ -432,6 +432,8 @@ Writer LLM with `script_generate.txt`. **Seven-act retention template at 120 wpm
 - Act 4 (pivot, ~360w) — the decision that turned the arc (or the legal closure for decline stories).
 - Act 5 (lesson, ~300w) — present-day fact + takeaway + legacy + one clean outro line.
 
+**BEAT 1 hook quality bar *(Batch M.1 2026-05-30)*:** Act 0 now explicitly requires the first 15 seconds to create a concrete mystery, contradiction, or consequence. A neutral fact is not enough, even if it has a date, filing, valuation, or court action. The opening must make the viewer ask "How did that happen?" or "Why does that matter?"
+
 `[CALLOUT: "$9 BILLION"]` markers are **mandatory** (3-6 per script, hardened Batch H 2026-05-28, tightened Batch J 2026-05-29). Batch J rules:
 - HARD CAP: max 6 across the entire script (Quibi v3 shipped 36).
 - Word-only callouts are BANNED. Each CALLOUT must contain at least one digit OR a dollar sign OR a date abbreviation. "TIKTOK ERA", "BAD SUPER BOWL", "THE SHUTDOWN" are explicitly listed as wrong in the prompt.
@@ -792,7 +794,12 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-30 — visual storyboard continuity for FLUX prompts.*
+*This file last updated: 2026-05-30 — stronger BEAT 1 hook rule.*
+
+### Batch M.1 — First-15-Seconds Hook — 2026-05-30
+- **S6 script prompt now has a BEAT 1 quality bar** — the first 15 seconds must create a concrete mystery, contradiction, or consequence. A ledger-specific but neutral opening fact no longer qualifies as a hook unless it makes the viewer ask "How did that happen?" or "Why does that matter?"
+
+*Previous: 2026-05-30 — visual storyboard continuity for FLUX prompts.*
 
 ### Batch M — Visual Story Alignment — 2026-05-30
 - **S08 now builds a scene-level visual continuity plan** — beats are grouped into `SCENE_NN` blocks with `story_world`, recurring props, and per-world exclusions. FLUX prompts are rewritten as movie shots with a narrative purpose tied to the beat narration.

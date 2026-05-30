@@ -114,6 +114,16 @@ visual transitions noted; the beat-count target is {target_beats}.
 ─────────────────────────────────────────────────────────────────
 ACT 0 — THE HOOK            0:00 – 0:30      (~60 words)
 ─────────────────────────────────────────────────────────────────
+BEAT 1 QUALITY BAR — this is the most important retention beat in
+the entire script. Within the first 15 seconds, create a concrete
+mystery, contradiction, or consequence that the viewer needs
+resolved. A legally specific fact is NOT enough by itself. The
+opening must make the viewer ask either "How did that happen?" or
+"Why does that matter?" If the first three lines merely state a
+date, filing, acquisition, valuation, bankruptcy, or court action
+without a strange consequence or unresolved tension, the hook has
+failed.
+
 0:00-0:08  The CONTRAST SHOT: a massive present-day fact OR the
            most arresting single moment from the story. Open on
            a SPECIFIC number or image. Examples of openings:
@@ -122,7 +132,9 @@ ACT 0 — THE HOOK            0:00 – 0:30      (~60 words)
                 in the bank and Z days of runway."
            Whatever you open with MUST come from the fact ledger
            and must contain at least one concrete number, date,
-           or named place in the first sentence.
+           or named place in the first sentence. It must also
+           contain a contradiction, mystery, or consequence — not
+           just a neutral fact.
 0:08-0:20  THE "BUT" — what makes the origin unbelievable.
            Name the contradiction between where the company
            ended up and where it started.
