@@ -240,8 +240,8 @@ Cron-friendly wrapper. **Critical contract**: the python process must detach so 
 nohup python3 -m pipeline.hermes_orchestrator "$@" </dev/null >>"${LOGFILE}" 2>&1 &
 ```
 
-### `run_full_auto_approve.sh` *(added 2026-05-30)*
-Foreground operator runner for one complete video build. It calls `python3 -m pipeline.hermes_orchestrator` synchronously in a loop, runs `--approve EP_ID` whenever the selected episode reaches `needs_human`, and exits when `05_video/final.mp4` exists. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it refuses to advance a different earlier runnable episode. Logs to `logs/full_auto.<timestamp>.log`.
+### `run_full_auto_approve.sh` *(added 2026-05-30; stdin hardening 2026-05-30)*
+Foreground operator runner for one complete video build. It calls `python3 -m pipeline.hermes_orchestrator` synchronously in a loop, runs `--approve EP_ID` whenever the selected episode reaches `needs_human`, and exits when `05_video/final.mp4` exists. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it targets that episode via `--run-episode EP_ID`. Logs to `logs/full_auto.<timestamp>.log`. The runner redirects stdin to `/dev/null` for orchestrator subprocesses so long SSH/agent launches can't leave Python inheriting a bad stdin descriptor during auto-approval.
 
 ### `README.md`
 Operator-facing quickstart. Less detail than this AGENTS.md; intended for the project owner, not for an AI agent reading the codebase cold.
@@ -794,7 +794,12 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-30 — stronger BEAT 1 hook rule.*
+*This file last updated: 2026-05-30 — full-auto runner stdin hardening.*
+
+### Batch M.2 — Full-Auto Approval Hardening — 2026-05-30
+- **`run_full_auto_approve.sh` now gives orchestrator subprocesses safe stdin** — the runner redirects stdin to `/dev/null` and routes `--enqueue`, `--approve`, and `--run-episode` through a helper. This fixes auto-approval loops that reached a gate such as S09 visual brand-safety, then crashed Python at startup with `OSError: [Errno 9] Bad file descriptor` before `--approve` could clear the gate.
+
+*Previous: 2026-05-30 — stronger BEAT 1 hook rule.*
 
 ### Batch M.1 — First-15-Seconds Hook — 2026-05-30
 - **S6 script prompt now has a BEAT 1 quality bar** — the first 15 seconds must create a concrete mystery, contradiction, or consequence. A ledger-specific but neutral opening fact no longer qualifies as a hook unless it makes the viewer ask "How did that happen?" or "Why does that matter?"
