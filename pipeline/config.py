@@ -200,8 +200,11 @@ class Config:
             "base_url": "https://api.x.ai/v1",
             "endpoint_path": "/images/generations",
             "timeout_seconds": 180,
-            "resolution": "2k",
+            "resolution": "1k",
             "aspect_ratio": "16:9",
+            "upscale_to_project_resolution": True,
+            "upscale_width": 1920,
+            "upscale_height": 1080,
         }
         return {**defaults, **(self.raw.get("grok") or {})}
 

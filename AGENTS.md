@@ -209,13 +209,13 @@ Major blocks:
 - `channel` — branding (channel name, brand color, contact email).
 - `paths` — `${root}` is optional; defaults to the directory containing `config.yaml`.
 - `models` — logical model keys consumed by the LLM gateway. `mock_mode: true` makes every adapter return canned data.
-- `production` — duration / word-count targets, title-card styling, fade timings. *(retuned 2026-05-26 Batch A — 18-min midpoint, 2300-word target. Batch J 2026-05-29 added `opening_title_card_seconds` + `closing_card_seconds` as the source of truth for the silence padding S11 prepends/appends to `voice_full.wav` — see §6 S11.)*
+- `production` — duration / word-count targets, title-card styling, fade timings. *(retuned 2026-05-26 Batch A — 18-min midpoint, 2300-word target. Batch J 2026-05-29 added title/closing-card audio padding; Batch M.3 2026-05-30 keeps `opening_title_card_seconds: 1` and adds `closing_card_enabled` so credits can be hidden without losing the configured duration.)*
 - `quality_gates` — minimum source counts, beat counts, script word counts, audio LUFS bounds. *(beat/word windows widened 2026-05-26 Batch A.)*
 - `constraints` — `rolling_window_*` cooldowns for archetype/narrator/style.
 - `orchestrator` — lock staleness, max topic-discovery retries, per-invocation budget.
 - `search` — SearXNG endpoint + tuning.
 - `music_library` — bed-track config + voice dynaudnorm settings.
-- `grok` — xAI image-regeneration endpoint and model. **API key in env only**.
+- `grok` — xAI image-regeneration endpoint/model/resolution + local upscale settings. **API key in env only**.
 - `flux_cli` — CLI binary + render dims (1920×1080, 24 steps).
 - `asset_hunt` — master toggle for S5 (currently `false` — comic-style channel, FLUX-only).
 - `generic_stash` — Tier-2 image fallback thresholds.
@@ -296,7 +296,7 @@ Qwen3-VL adapter. Two operations:
 - `caption(image_path)` → short comic-panel-style caption. Used by S5 Phase 5 (generic stash) and S5 Phase 0/1 (PD asset captions for downstream semantic match in S8).
 
 ### 5.9 `grok.py`
-xAI image-regeneration client. Used by S9 when the VLM flags a FLUX render for malformed text or anatomy issues. **POSTs JSON** to `/v1/images/generations` with `{model, prompt, resolution: "2k", aspect_ratio: "16:9", n: 1}` — text-to-image only, no reference image. Handles both URL and base64 response shapes via `_write_response_image`. API key from `XAI_API_KEY` / `GROK_API_KEY` env (preferred) or `config.grok.api_key` (back-compat only — keep empty).
+xAI image-regeneration client. Used by S9 when the VLM flags a FLUX render for malformed text or anatomy issues. **POSTs JSON** to `/v1/images/generations` with `{model, prompt, resolution, aspect_ratio, n: 1}` — text-to-image only, no reference image. Batch M.3 2026-05-30 defaults to cheaper `resolution: "1k"` / `aspect_ratio: "16:9"` and then locally upscales any returned image below `grok.upscale_width × grok.upscale_height` (default 1920×1080) via Pillow. Handles both URL and base64 response shapes via `_write_response_image`. API key from `XAI_API_KEY` / `GROK_API_KEY` env (preferred) or `config.grok.api_key` (back-compat only — keep empty).
 
 ### 5.10 `trends.py` *(added 2026-05-26)*
 S1 demand-validation primitives. All probes go through SearXNG (same backend as S2 source gathering — no new infrastructure).
@@ -488,7 +488,9 @@ For each beat that routes to FLUX, the stage:
 
 S09 stores `image_qa.prompt_hash` and `image_qa.visual_prompt_version` *(Batch M 2026-05-30)*. If S08 regenerates a new storyboard prompt, S09 detects the prompt hash change and re-renders instead of silently reusing old passing images.
 
-Also renders `title.png` and `credits.png` for S12 to pick up.
+Grok backup cost control *(Batch M.3 2026-05-30)*: `config.yaml > grok.resolution` is now `1k`; `grok._upscale_if_needed()` upscales returned images below 1920×1080 locally. Images already at or above target resolution are left untouched.
+
+Also renders `title.png` for S12 to pick up; `credits.png` is rendered only when `production.closing_card_enabled` is true and `closing_card_seconds > 0`.
 
 ### S10 — Kokoro TTS (`s10_kokoro_render.py`)
 Per-narrator voice render. Pronunciation overrides at `pipeline/lexicon/pronunciation_overrides.yaml` (Bezos, Theranos, Zuckerberg, Wirecard, EBITDA, IPO, etc.). Output: per-beat WAV chunks + `voice_full.wav`.
@@ -499,7 +501,7 @@ Per-narrator voice render. Pronunciation overrides at `pipeline/lexicon/pronunci
 
 ### S11 — Audio Post (`s11_audio_post.py`)
 Voice + music bed + SFX *(SFX phase added Batch C 2026-05-27, voice padding added Batch J 2026-05-29)*.
-- **Voice padding for title + closing cards *(Batch J 2026-05-29)*:** before any mixing, `voice_full.wav` is padded with `production.opening_title_card_seconds` of silence at the head and `production.closing_card_seconds + 1.0s` at the tail (via `ffmpeg_builder.pad_audio_silence`). The padded file `voice_padded.wav` becomes the mix input. Reason: S12 prepends a title card and appends a closing card around the per-beat clips, and S12's `concat_clips` uses `-shortest` which would truncate the video at audio length. Without padding, audio = voice_seconds < video = title + voice + closing, and the closing source-attribution card never made it into the rendered MP4. The +1s tail buffer absorbs ffmpeg rounding. With padding, audio ≥ video, the closing card ships, and — because there's no voice during the silent tail — the music bed's sidechain has nothing to duck against, so music swells to full level under the credits (the "uninterrupted music outro" the operator asked for).
+- **Voice padding for title + closing cards *(Batch J 2026-05-29; closing toggle Batch M.3 2026-05-30)*:** before any mixing, `voice_full.wav` is padded with `production.opening_title_card_seconds` of silence at the head and, only when `production.closing_card_enabled` is true, `production.closing_card_seconds + 1.0s` at the tail (via `ffmpeg_builder.pad_audio_silence`). The padded file `voice_padded.wav` becomes the mix input. Reason: S12 prepends a title card and can append a closing card around the per-beat clips, and S12's `concat_clips` uses `-shortest` which would otherwise truncate the video at audio length. With `closing_card_enabled: false`, S11 does not add the credits-tail silence and S12 does not append the credits clip.
 - Voice `dynaudnorm` pre-pass (configurable).
 - `music_library.pick_bed()` picks N tracks ≥ padded voice duration + music_start_offset + buffer.
 - ffmpeg concat with 4s crossfade between tracks.
@@ -533,7 +535,7 @@ Runs after S12 with three phases:
 - Per-beat clip: Ken Burns motion over the beat's image, fade in/out (`fade_in_seconds`/`fade_out_seconds`).
 - **Callout overlays *(added Batch C 2026-05-27, cache fixes Batch J/K 2026-05-29, no-cache + loud diagnostics Batch L 2026-05-29)*:** when a beat has a non-empty `callouts` list (populated by S08 from inline `[CALLOUT: "..."]` markers in the script), `ffmpeg_builder.composite_callouts_onto_clip()` renders each callout as a Pillow text PNG (yellow + black stroke, same styling as the title card), then overlays it on the clip with timed visibility + fade in/out, anchored at the beat start (Q-C1: beat-anchored). Max callouts per beat configurable via `callouts.max_per_beat` (default 1). **No-cache for `{beat_id}_callout.mp4` (Batch L 2026-05-29)**: every `*_callout.mp4` is purged at S12 entry and re-composited from the raw `{beat_id}.mp4`. The cache savings on a ~1-2s overlay render were dwarfed by the cache-staleness bugs they caused — final3.mp4 and final4.mp4 both shipped without overlays because the Batch J cache-key fix and Batch K mtime invalidator only handled "upstream artifact changed", not "S12 / composite code changed since the cached clip was made". The raw `{beat_id}.mp4` Ken Burns clips stay cached (expensive supersample renders) with the Batch K `_any_newer(inputs, cached)` mtime invalidator keyed on `beat_sheet.json`. **Loud diagnostics (Batch L 2026-05-29)**: every `return False` path in `composite_callouts_onto_clip` now carries a specific `logger.warning` (empty list / Pillow font fallthrough to bitmap default / all-empty text / ffmpeg returned but output 0-byte / unhandled exception). On success the function logs `composite_callouts: BEAT_NN_callout.mp4 ← N overlays via BEAT_NN.mp4 (font=<path> @ <px>)` so the operator can grep the daily log to confirm the overlay path ran.
 - Concat all clips, mux voice + music + SFX + SRT + VTT.
-- Closing source-attribution card uses the FLUX-rendered `credits.png` as background. *(Closing-card append failure fixed Batch J 2026-05-29 — see S11 padding note; pre-Batch J the closing clip was rendered and appended to `clip_paths` but `concat_clips`' `-shortest` flag truncated the video at audio length, so the closing card never reached the rendered MP4. **No-cache for `zz_closing.mp4` (Batch L 2026-05-29)**: the closing clip is purged at S12 entry and re-rendered every run. Same reason as the per-beat overlay clips above — a ~3-5s render whose content depends on Python overlay code (`_render_closing_card`) that we change frequently, where stale caches caused two shipped videos in a row to display the credits backdrop with no yellow source-attribution text. The Batch K mtime invalidator (credits.png / source_inventory.json / asset_manifest.json) is superseded for closing clips by this purge but remains as the per-beat invalidator. **`_render_closing_card` sanity log (Batch L 2026-05-29)**: after `img.save()` the function emits `closing card: backdrop=<path-or-NONE>, body_lines=<N> (of <M> total), title_font=<path>, body_font=<path>, png_size=<bytes>` — operator greps the daily log to confirm the text-draw path ran. If `title_font` is `PIL_default` the candidate list exhausted and text rendered at ~10 px bitmap size, which is essentially invisible at 1080p — that's the operator's signal to install a TrueType font on the runtime host.)*
+- Closing source-attribution card uses the FLUX-rendered `credits.png` as background when `production.closing_card_enabled: true`. *(Closing-card append failure fixed Batch J 2026-05-29 — see S11 padding note. Batch M.3 2026-05-30 defaults `closing_card_enabled: false`, so S09 skips credits.png rendering, S11 skips tail padding, and S12 omits the closing clip. Re-enable by setting `closing_card_enabled: true`; `closing_card_seconds` remains the display duration. **No-cache for `zz_closing.mp4` (Batch L 2026-05-29)** remains relevant when enabled.)*
 - **License attribution file *(added Batch C 2026-05-27)*:** writes `06_metadata/license_attributions.txt` combining music + SFX licence/attribution lines for paste into the YouTube description.
 - Output: `05_video/final.mp4` (or `final_preview.mp4` when `preview_mode`).
 
@@ -643,7 +645,7 @@ Resets `S5` AND every later stage to `pending`, points `current_stage` at `S5`, 
 | `tts.backend` kokoro → elevenlabs | `S10` |
 | Narrator persona edited in `narrators.yaml` | `S6` |
 | Callout styling changed in `config.yaml` | `S12` |
-| `opening_title_card_seconds` / `closing_card_seconds` changed | `S11` (re-pads voice, re-mixes, re-renders) |
+| `opening_title_card_seconds` / `closing_card_enabled` / `closing_card_seconds` changed | `S11` (re-pads voice, re-mixes, re-renders) |
 | Visual style YAML edited (V1.yaml / V2.yaml) | `S9` |
 | Thumbnail layout edited in `thumbnails.py` | `S13` |
 
@@ -794,7 +796,15 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-30 — full-auto runner stdin hardening.*
+*This file last updated: 2026-05-30 — Grok 1K upscale, credits toggle, ribbon top-right orientation.*
+
+### Batch M.3 — Video Cost And Card Tweaks — 2026-05-30
+- **Corner ribbon callouts now render in the top-right only** — `corner_ribbon` placement is pinned to the top-right corner, angled northwest-to-southeast, for validation before adding other corners.
+- **Opening title card is kept at 1 second** — `production.opening_title_card_seconds` remains `1` so the title appears briefly without consuming the cold-open retention window.
+- **Grok backup renders request 1K and upscale locally** — `grok.resolution: "1k"` saves API cost; `grok._upscale_if_needed()` resizes results below 1920×1080 to the project frame size with Pillow and skips images already at or above target resolution.
+- **Credits/closing card is hidden by config** — `production.closing_card_enabled: false` skips S09 `credits.png`, S11 tail padding, and S12 closing-clip append. Set it to `true` to restore the existing `closing_card_seconds` behavior.
+
+*Previous: 2026-05-30 — full-auto runner stdin hardening.*
 
 ### Batch M.2 — Full-Auto Approval Hardening — 2026-05-30
 - **`run_full_auto_approve.sh` now gives orchestrator subprocesses safe stdin** — the runner redirects stdin to `/dev/null` and routes `--enqueue`, `--approve`, and `--run-episode` through a helper. This fixes auto-approval loops that reached a gate such as S09 visual brand-safety, then crashed Python at startup with `OSError: [Errno 9] Bad file descriptor` before `--approve` could clear the gate.
@@ -820,7 +830,7 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 *Previous: 2026-05-29 — corner-ribbon callouts + per-callout font variation.*
 
 ### Post-Batch-L fix — 2026-05-29
-- **Callout variants include a diagonal corner ribbon and deterministic font variation** — `corner_ribbon` renders a red/yellow diagonal Pillow ribbon in the upper-left corner. `composite_callouts_onto_clip()` now picks a deterministic font per callout from Impact, Helvetica/Helvetica Neue, Georgia Bold, Arial Bold/Black, and Linux fallbacks, so repeated overlays vary without making reruns non-reproducible.
+- **Callout variants include a diagonal corner ribbon and deterministic font variation** — `corner_ribbon` now renders a red/yellow diagonal Pillow ribbon in the top-right corner only while placement is being validated. `composite_callouts_onto_clip()` picks a deterministic font per callout from Impact, Helvetica/Helvetica Neue, Georgia Bold, Arial Bold/Black, and Linux fallbacks, so repeated overlays vary without making reruns non-reproducible.
 - **S12 beat-clip cache now validates against `voice_timing.json` durations** — EP003 `final7.mp4` showed audio outrunning panels because old raw beat clips survived after a shorter TTS rerun; the final mux used `-shortest`, so the video ended around BEAT_57 and never reached credits. S12 now invalidates cached raw/overlay beat clips when `voice_timing.json` is newer OR their duration differs from the current beat duration by >0.35s, and runs a pre-mux video/audio timeline drift guard (>8s returns `needs_human` instead of silently shipping a truncated final).
 - **Callout PNG overlay inputs now use `-loop 1` plus `overlay=shortest=1`** — EP003 produced 33 valid `*_callout.mp4` clips but no visible text because `composite_callouts_onto_clip()` fed each Pillow PNG as a one-frame ffmpeg input. The alpha fade began at 0 on that single frame, so ffmpeg wrote a valid transparent overlay clip. Looping the PNG input gives the fade filter frames across the 2.5s hold window; `shortest=1` keeps the looped PNG stream from extending output beyond the source clip.
 - **Callouts are now sentence-anchored and variant-styled** — S08 stores `sentence_index` for each `[CALLOUT: ...]` marker; S12 also infers this from `script.txt` for older beat sheets so an S12-only rerun can repair EP003. S12 converts sentence position to clip-local `offset_seconds` using the same word-weighted timing model as subtitles, with `callouts.sentence_lead_seconds` as a small lead. It also assigns deterministic visual variants (`comic_pop_lower`, `stamp_red_angle`, `ticker_slide_left`, `paper_strip_typeon`, `money_pulse`, `corner_badge`, `corner_ribbon`) based on callout text + beat id; `composite_callouts_onto_clip()` renders matching Pillow card styles and simple ffmpeg motion/scale effects.

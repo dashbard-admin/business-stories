@@ -659,7 +659,7 @@ def composite_callouts_onto_clip(
                 x_expr = "W-w-W*0.06"
                 y_expr = "H-h-H*0.12"
             elif position == "corner_ribbon":
-                x_expr = "W*0.005"
+                x_expr = "W-w-W*0.005"
                 y_expr = "H*0.055"
             else:
                 x_expr = "(W-w)/2"

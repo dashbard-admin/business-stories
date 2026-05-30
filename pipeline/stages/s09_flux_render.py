@@ -9,9 +9,10 @@ highest-scoring attempt is kept even if every attempt is rejected.
 In addition to the per-beat renders, this stage produces:
   - 03_assets/flux/title.png      — the title-card panel
   - 03_assets/flux/credits.png    — the closing source-attribution panel
+                                      only when closing card is enabled
 
-Both use the locked visual style and a panel description derived from
-the incident metadata (company + hero + conflict).
+These use the locked visual style and a panel description derived
+from the incident metadata (company + hero + conflict).
 
 Idempotency mirrors maritime S9:
   - pass/borderline verdict on an existing file → skip (true no-op)
@@ -20,7 +21,7 @@ Idempotency mirrors maritime S9:
 
 Inputs:  02_script/beat_sheet.json
 Outputs: 03_assets/flux/BEAT_NN.png  +  image_qa per beat in beat_sheet.json
-         03_assets/flux/title.png    +  03_assets/flux/credits.png
+         03_assets/flux/title.png    +  optional 03_assets/flux/credits.png
 """
 
 from __future__ import annotations
@@ -112,8 +113,16 @@ def run(episode: dict, queue: dict) -> str | None:
     # ----- title + credits cards (rendered first so S12 can pick them up
     # even if the per-beat loop bails mid-way) -----
     _render_title_card(ws=ws, episode=episode, cfg=cfg, flux=flux, flux_dir=flux_dir)
-    _render_credits_card(ws=ws, episode=episode, cfg=cfg, flux=flux, flux_dir=flux_dir,
-                         manifest=manifest)
+    prod_cfg = cfg.production
+    closing_card_enabled = bool(prod_cfg.get("closing_card_enabled", True))
+    closing_card_seconds = float(prod_cfg.get("closing_card_seconds", 0))
+    if closing_card_enabled and closing_card_seconds > 0:
+        _render_credits_card(
+            ws=ws, episode=episode, cfg=cfg, flux=flux, flux_dir=flux_dir,
+            manifest=manifest,
+        )
+    else:
+        logger.info("S09 credits card render skipped (closing card disabled)")
 
     rendered = 0
     failed = 0

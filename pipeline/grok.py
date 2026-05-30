@@ -6,6 +6,10 @@ malformed / illegible text. We POST the original FLUX prompt
 to xAI's image-generation endpoint and receive a corrected image
 back, then write it to disk.
 
+Batch M.3 defaults to cheaper 1K Grok generations, then locally
+upscales any returned image below the project frame size to
+1920x1080 with Pillow.
+
 The endpoint shape defaults to OpenAI-compatible JSON
 (POST /v1/images/generations with `model`, `prompt`, `resolution`,
 `aspect_ratio`, `n`). Both base64-JSON and URL response shapes are
@@ -25,6 +29,7 @@ import os
 from pathlib import Path
 
 import requests
+from PIL import Image, ImageOps
 
 from .config import load_config
 
@@ -64,8 +69,13 @@ class Grok:
         self.base_url: str = (gc.get("base_url") or "").rstrip("/")
         self.endpoint_path: str = gc.get("endpoint_path", "/images/generations")
         self.timeout: int = int(gc.get("timeout_seconds", 180))
-        self.resolution: str = gc.get("resolution", "2k")
+        self.resolution: str = gc.get("resolution", "1k")
         self.aspect_ratio: str = gc.get("aspect_ratio", "16:9")
+        self.upscale_to_project_resolution: bool = bool(
+            gc.get("upscale_to_project_resolution", True)
+        )
+        self.upscale_width: int = int(gc.get("upscale_width", 1920))
+        self.upscale_height: int = int(gc.get("upscale_height", 1080))
         self._mock = cfg.mock_mode
 
     # ------------------------------------------------------------------
@@ -122,7 +132,7 @@ class Grok:
             {
               "model": "<grok-imagine-image | -quality>",
               "prompt": "...",
-              "resolution": "2k",
+              "resolution": "1k",
               "aspect_ratio": "16:9",
               "n": 1
             }
@@ -135,7 +145,10 @@ class Grok:
         (in case xAI ever adds it as an option).
         """
         if self._mock:
-            return self._mock_correct(out_path)
+            result = self._mock_correct(out_path)
+            if result:
+                self._upscale_if_needed(result)
+            return result
         if not self.available:
             logger.warning("grok unavailable (%s); skipping regeneration",
                            self.unavailability_reason())
@@ -164,6 +177,7 @@ class Grok:
 
         if r.status_code == 200:
             if self._write_response_image(r, out_path):
+                self._upscale_if_needed(out_path)
                 logger.info("grok regenerated -> %s "
                             "(model=%s, resolution=%s, aspect=%s)",
                             out_path.name, self.model,
@@ -214,6 +228,39 @@ class Grok:
                 logger.warning("grok image download failed: %s", e)
                 return False
         return False
+
+    def _upscale_if_needed(self, path: Path) -> None:
+        """Upscale cheaper Grok outputs to the project's 1920x1080 frame.
+
+        The xAI API can return 1K 16:9 images. S12 expects 1920x1080
+        source panels, so resize locally when either dimension is below
+        target. Images already at or above target are left untouched.
+        """
+        if not self.upscale_to_project_resolution:
+            return
+        try:
+            with Image.open(path) as img:
+                w, h = img.size
+                target = (self.upscale_width, self.upscale_height)
+                if w >= target[0] and h >= target[1]:
+                    logger.info(
+                        "grok upscale skipped for %s (%dx%d >= %dx%d)",
+                        path.name, w, h, target[0], target[1],
+                    )
+                    return
+                fitted = ImageOps.fit(
+                    img.convert("RGB"),
+                    target,
+                    method=Image.Resampling.LANCZOS,
+                    centering=(0.5, 0.5),
+                )
+                fitted.save(path)
+                logger.info(
+                    "grok upscaled locally: %s %dx%d -> %dx%d",
+                    path.name, w, h, target[0], target[1],
+                )
+        except Exception as e:
+            logger.warning("grok local upscale failed for %s: %s", path.name, e)
 
     def _mock_correct(self, out: Path) -> Path | None:
         """Mock-mode regeneration — render a solid colour panel with a

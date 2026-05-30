@@ -75,7 +75,11 @@ def run(episode: dict, queue: dict) -> str | None:
     # asked for.
     prod_cfg = cfg.production
     head_pad = max(0.0, float(prod_cfg.get("opening_title_card_seconds", 0)))
-    closing_card = max(0.0, float(prod_cfg.get("closing_card_seconds", 0)))
+    closing_card_enabled = bool(prod_cfg.get("closing_card_enabled", True))
+    closing_card = (
+        max(0.0, float(prod_cfg.get("closing_card_seconds", 0)))
+        if closing_card_enabled else 0.0
+    )
     # +1.0s tail buffer absorbs ffmpeg rounding so -shortest doesn't
     # nibble the last frame of the closing card.
     tail_pad = closing_card + (1.0 if closing_card > 0 else 0.0)
