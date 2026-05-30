@@ -22,6 +22,7 @@ import traceback
 
 from .config import load_config
 from .state import (
+    STAGE_ORDER,
     clear_blockers,
     enqueue_episodes,
     enqueue_manual_episode,
@@ -90,6 +91,87 @@ def run_one_invocation() -> int:
                 return 0
 
             episode, stage_id = pick
+            incident_name = (episode.get("incident") or {}).get(
+                "company_name", "<unset>"
+            )
+            logger.info(
+                "running %s for episode %s (topic=%s)",
+                _stage_label(stage_id), episode["id"], incident_name,
+            )
+
+            if (time.time() - started) > max_runtime:
+                logger.warning("budget exhausted before stage; deferring")
+                return 0
+
+            try:
+                reason = dispatch_stage(stage_id, episode, queue)
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                tb = traceback.format_exc()
+                logger.error("stage %s raised:\n%s", _stage_label(stage_id), tb)
+                mark_stage_failed(queue, episode["id"], stage_id,
+                                  f"exception: {tb.splitlines()[-1][:200]}")
+                save_queue(queue)
+                return 2
+
+            if reason is None:
+                mark_stage_done(queue, episode["id"], stage_id)
+                logger.info("stage %s done for %s",
+                            _stage_label(stage_id), episode["id"])
+            else:
+                mark_stage_failed(queue, episode["id"], stage_id, reason)
+                logger.warning("stage %s needs_human for %s: %s",
+                               _stage_label(stage_id), episode["id"], reason)
+
+            save_queue(queue)
+            return 0
+    except RuntimeError as e:
+        logger.warning("lock contention: %s", e)
+        return 0
+
+
+def run_one_invocation_for_episode(episode_id: str) -> int:
+    """Run one pending stage for a specific episode, bypassing queue order.
+
+    Normal cron invocations intentionally run the queue head. Foreground
+    operator tooling sometimes needs to continue a named episode while an
+    older episode remains pending/blocked in the queue.
+    """
+    cfg = load_config()
+    lock_path = cfg.state_dir / "locks" / "orchestrator.lock"
+    stale = cfg.orchestrator["stale_lock_hours"] * 3600
+    max_runtime = cfg.orchestrator["per_invocation_max_runtime_seconds"]
+
+    started = time.time()
+
+    try:
+        with file_lock(lock_path, stale_seconds=stale):
+            queue = load_queue()
+            episode = find_episode(queue, episode_id)
+            if episode is None:
+                print(f"--run-episode: no such episode {episode_id}",
+                      file=sys.stderr)
+                return 2
+            if episode.get("blockers"):
+                logger.info("%s is blocked; approve before running",
+                            episode_id)
+                return 0
+
+            stage_id = None
+            for sid in STAGE_ORDER:
+                stage = episode["stages"][sid]
+                if stage["status"] == "pending":
+                    stage_id = sid
+                    break
+                if stage["status"] == "needs_human":
+                    logger.info("%s needs human at %s; approve before running",
+                                episode_id, sid)
+                    return 0
+            if stage_id is None:
+                logger.info("%s has no pending stages", episode_id)
+                return 0
+
             incident_name = (episode.get("incident") or {}).get(
                 "company_name", "<unset>"
             )
@@ -233,6 +315,14 @@ def cli() -> int:
         ),
     )
     parser.add_argument(
+        "--run-episode", metavar="EP_ID",
+        help=(
+            "run one pending stage for the named episode, bypassing "
+            "normal queue-head order. Used by foreground automation; "
+            "plain cron/default invocations still run the queue head."
+        ),
+    )
+    parser.add_argument(
         "--rerun-from", nargs=2, metavar=("EP_ID", "STAGE_ID"),
         help=(
             "reset the named stage AND every later stage on the named "
@@ -346,6 +436,9 @@ def cli() -> int:
 
     if args.approve:
         return _approve_cmd(args.approve)
+
+    if args.run_episode:
+        return run_one_invocation_for_episode(args.run_episode)
 
     if args.rerun_from:
         ep_id, stage_id = args.rerun_from

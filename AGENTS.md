@@ -358,6 +358,7 @@ Single CLI entry point. Holds the global file lock for the duration of one stage
 - `--no-validate` — with `--inject-topic`, skip the SearXNG demand-validation gate.
 - `--preview` *(added Batch B 2026-05-26)* — modifier flag (use with `--enqueue` or `--inject-topic`). Tags the new episode as `preview_mode=True`. S06 generates only Act 0 + Act 5 (~360 words, ~8 beats); S12 outputs `05_video/final_preview.mp4`. Tone-check render, ~10 min of compute vs. the full 3-4 hours.
 - `--approve EP_ID` *(added Batch B 2026-05-26)* — clear any S07 brand-safety gate or S08 in-flight gate on the named episode so it can advance.
+- `--run-episode EP_ID` *(added 2026-05-30)* — run one pending stage for the named episode, bypassing normal queue-head order. Intended for `run_full_auto_approve.sh EP_ID`; the default no-flag cron invocation still runs the queue head.
 - `--rerender EP_ID BEAT_ID [--from-edited-prompt]` *(added Batch B 2026-05-26)* — re-run S09 FLUX render for a single beat. Existing render + any Grok-corrected version archived to `03_assets/quarantine/` first. `--from-edited-prompt` re-reads the beat's FLUX prompt fresh from beat_sheet.json (operator edited it).
 - `--narrator N_ID` / `--archetype A_ID` / `--visual-style V_ID` *(added Batch G 2026-05-28)* — modifier flags (use with `--enqueue` or `--inject-topic`). Pin the corresponding A/N/V dimension on the new episode(s), overriding the cooldown engine + `suits_story_kinds` gate. Useful for trialling a specific narrator voice (e.g. `--narrator N5` for the Sardonic Outsider) on a topic the gate wouldn't normally assign them to. Validated against `config.yaml` — typos exit cleanly.
 - `--rerun-from EP_ID STAGE_ID` *(added 2026-05-28)* — reset the named stage AND every later stage back to `pending` so the orchestrator re-runs them. Use after a config-flag flip that invalidates an earlier stage's output: `asset_hunt.enabled false→true` (rerun-from S5), `sfx_library.enabled false→true` (S11), `tts.backend kokoro→elevenlabs` (S10), narrator persona edit (S6), callout styling change (S12). Accepts `S5` / `s5` / `5`. Does NOT delete on-disk artifacts — those get overwritten when each stage runs.
@@ -787,10 +788,10 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-30 — root full-auto runner for final.mp4 generation.*
+*This file last updated: 2026-05-30 — targeted full-auto runner fix.*
 
 ### Full-auto local runner — 2026-05-30
-- **`run_full_auto_approve.sh` runs the queue head continuously until S12 creates `05_video/final.mp4`** — unlike `run_orchestrator.sh`, it does not detach; it calls `python3 -m pipeline.hermes_orchestrator` synchronously in a loop, auto-runs `--approve EP_ID` whenever the selected episode hits a `needs_human` gate, and writes a combined operator log to `logs/full_auto.<timestamp>.log`. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it refuses to advance a different earlier runnable episode. Environment knobs: `MAX_ITERATIONS`, `SLEEP_SECONDS`, and `PYTHON_BIN`.
+- **`run_full_auto_approve.sh` runs the selected episode continuously until S12 creates `05_video/final.mp4`** — unlike `run_orchestrator.sh`, it does not detach; it calls `python3 -m pipeline.hermes_orchestrator --run-episode EP_ID` synchronously in a loop, auto-runs `--approve EP_ID` whenever the selected episode hits a `needs_human` gate, and writes a combined operator log to `logs/full_auto.<timestamp>.log`. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it can continue that episode even if an older queue item exists. Environment knobs: `MAX_ITERATIONS`, `SLEEP_SECONDS`, and `PYTHON_BIN`.
 
 *Previous: 2026-05-29 — corner-ribbon callouts + per-callout font variation.*
 
