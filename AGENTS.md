@@ -158,6 +158,7 @@ business_success_stories/
 ├── .env / .env.example          ← secrets (gitignored / template)
 ├── pyproject.toml               ← dependencies
 ├── run_orchestrator.sh          ← cron entry point; detaches python
+├── run_full_auto_approve.sh     ← foreground all-stage runner; auto-approves gates until final.mp4
 ├── pipeline/                    ← all code
 │   ├── __init__.py              ← SSL bootstrap + .env loader
 │   ├── hermes_orchestrator.py   ← CLI + lock + stage dispatch
@@ -238,6 +239,9 @@ Cron-friendly wrapper. **Critical contract**: the python process must detach so 
 ```bash
 nohup python3 -m pipeline.hermes_orchestrator "$@" </dev/null >>"${LOGFILE}" 2>&1 &
 ```
+
+### `run_full_auto_approve.sh` *(added 2026-05-30)*
+Foreground operator runner for one complete video build. It calls `python3 -m pipeline.hermes_orchestrator` synchronously in a loop, runs `--approve EP_ID` whenever the selected episode reaches `needs_human`, and exits when `05_video/final.mp4` exists. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it refuses to advance a different earlier runnable episode. Logs to `logs/full_auto.<timestamp>.log`.
 
 ### `README.md`
 Operator-facing quickstart. Less detail than this AGENTS.md; intended for the project owner, not for an AI agent reading the codebase cold.
@@ -783,7 +787,12 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-29 — corner-ribbon callouts + per-callout font variation.*
+*This file last updated: 2026-05-30 — root full-auto runner for final.mp4 generation.*
+
+### Full-auto local runner — 2026-05-30
+- **`run_full_auto_approve.sh` runs the queue head continuously until S12 creates `05_video/final.mp4`** — unlike `run_orchestrator.sh`, it does not detach; it calls `python3 -m pipeline.hermes_orchestrator` synchronously in a loop, auto-runs `--approve EP_ID` whenever the selected episode hits a `needs_human` gate, and writes a combined operator log to `logs/full_auto.<timestamp>.log`. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it refuses to advance a different earlier runnable episode. Environment knobs: `MAX_ITERATIONS`, `SLEEP_SECONDS`, and `PYTHON_BIN`.
+
+*Previous: 2026-05-29 — corner-ribbon callouts + per-callout font variation.*
 
 ### Post-Batch-L fix — 2026-05-29
 - **Callout variants include a diagonal corner ribbon and deterministic font variation** — `corner_ribbon` renders a red/yellow diagonal Pillow ribbon in the upper-left corner. `composite_callouts_onto_clip()` now picks a deterministic font per callout from Impact, Helvetica/Helvetica Neue, Georgia Bold, Arial Bold/Black, and Linux fallbacks, so repeated overlays vary without making reruns non-reproducible.
