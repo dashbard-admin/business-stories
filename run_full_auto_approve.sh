@@ -65,15 +65,6 @@ print("\t".join([
 PY
 }
 
-next_runnable_id() {
-  "${PYTHON_BIN}" - <<'PY'
-from pipeline.state import load_queue, next_pending_episode
-queue = load_queue()
-pick = next_pending_episode(queue)
-print(pick[0]["id"] if pick else "")
-PY
-}
-
 if [[ -z "${EP_ID}" ]]; then
   read -r EP_ID _stage _blocked _final _path _count < <(queue_state "")
   if [[ "${EP_ID}" == "NONE" ]]; then
@@ -117,14 +108,7 @@ for ((iteration = 1; iteration <= MAX_ITERATIONS; iteration++)); do
     exit 2
   fi
 
-  runnable_id="$(next_runnable_id)"
-  if [[ -n "${runnable_id}" && "${runnable_id}" != "${EP_ID}" ]]; then
-    echo "Next runnable episode is ${runnable_id}, not ${EP_ID}; refusing to advance the wrong episode."
-    echo "Run without an episode id to process the queue head, or clear earlier queued work first."
-    exit 2
-  fi
-
-  if ! "${PYTHON_BIN}" -m pipeline.hermes_orchestrator; then
+  if ! "${PYTHON_BIN}" -m pipeline.hermes_orchestrator --run-episode "${EP_ID}"; then
     echo "orchestrator returned non-zero; checking queue state on next loop"
   fi
   sleep "${SLEEP_SECONDS}"
