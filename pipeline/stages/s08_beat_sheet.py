@@ -121,9 +121,8 @@ def _diversify_ken_burns_motion(beats: list[dict], *, episode_seed: int) -> None
 
     Strategy: walk beats in order, cycle through the 5 motions, with a
     deterministic offset seeded by episode_id so re-runs reproduce the
-    same sequence. Hero-centric intents (founder_portrait, courtroom)
-    keep `slow_zoom_in` because that motion reads best on faces; the
-    others rotate."""
+    same sequence. Hero-centric founder portraits keep face-friendly
+    motions; the others rotate."""
     import random
     rng = random.Random(episode_seed)
     # Shuffle the motion order once per episode so episodes don't all
@@ -176,16 +175,14 @@ def _enforce_hook_beat_intents(beats: list[dict]) -> None:
     rewrite to the safest available alternative. This is a hard
     constraint, not a hint.
 
-    Doesn't touch the beats' `specific_visual_description` — only the
-    `visual_intent` tag. S09 may still render a document-heavy scene
-    if that's what the description asks for, but at least the
-    routing-by-intent (e.g. PD asset matching in Pass 1) won't pull
-    a document into the hook."""
+    Batch M 2026-05-30: do NOT turn legal/document hooks into
+    founder_portraits. That made legal stories open on unrelated
+    founder/app imagery. Keep cinematic document hooks as documents;
+    only rewrite flat chart/montage hooks."""
     for b in beats[:3]:
         intent = (b.get("visual_intent") or "").strip().lower()
-        if intent in _HOOK_BANNED_INTENTS:
-            # Replace with the most universally-usable hook intent.
-            b["visual_intent"] = "founder_portrait"
+        if intent in {"chart_abstraction", "montage_panel"}:
+            b["visual_intent"] = "document_or_headline"
             b["_hook_intent_overridden"] = intent
 
 
@@ -261,6 +258,217 @@ def _attach_act_and_style(
                 b["effective_visual_style"] = "V2"
         else:
             b["effective_visual_style"] = locked_style
+
+
+# ----------------------------------------------------------------------
+# Batch M 2026-05-30: narrative visual continuity
+# ----------------------------------------------------------------------
+
+_LEGAL_TERMS = {
+    "bankruptcy", "court", "filing", "petition", "judgment", "restitution",
+    "liquidation", "trust", "fraud", "ponzi", "wire fraud", "mail fraud",
+    "shapiro", "woodbridge", "mercer", "investor", "investors", "sentence",
+    "sentenced", "prison", "debtor", "settlement", "claim", "claims",
+}
+_PRODUCT_TERMS = {
+    "twitter", "vine", "costolo", "app", "video", "creator", "creators",
+    "tiktok", "algorithm", "feed", "short-form", "monetize", "advertising",
+    "product", "platform", "acquisition", "acquired",
+}
+_BRIDGE_TERMS = {
+    "same name", "share a name", "two companies", "not the same",
+    "confusion", "confused", "legal entity", "entity", "entities",
+    "name was stolen", "corporate records", "registry", "record remains",
+}
+
+
+def _story_world_for_beat(beat: dict) -> str:
+    text = " ".join([
+        beat.get("script_text") or "",
+        beat.get("specific_visual_description") or "",
+        beat.get("flux_fallback_prompt") or "",
+    ]).lower()
+    legal_score = sum(1 for t in _LEGAL_TERMS if t in text)
+    product_score = sum(1 for t in _PRODUCT_TERMS if t in text)
+    bridge_score = sum(1 for t in _BRIDGE_TERMS if t in text)
+    if bridge_score or (legal_score and product_score):
+        return "name_confusion_bridge"
+    if legal_score > product_score:
+        return "legal_fraud"
+    if product_score > 0:
+        return "product_platform"
+    if (beat.get("act") or "") == "5":
+        return "closing_resolution"
+    return "business_context"
+
+
+def _scene_label(world: str) -> str:
+    return {
+        "legal_fraud": "The bankruptcy file",
+        "product_platform": "The dying video app",
+        "name_confusion_bridge": "Two names collide",
+        "closing_resolution": "The record that remains",
+        "business_context": "The market pressure",
+    }.get(world, "The business story")
+
+
+def _recurring_props(world: str) -> list[str]:
+    return {
+        "legal_fraud": [
+            "red fraud case folder with no readable label",
+            "Delaware bankruptcy court file",
+            "investor packet",
+            "amber desk lamp",
+        ],
+        "product_platform": [
+            "cracked smartphone with six blank video tiles",
+            "green product folder with no readable label",
+            "dim startup office monitors",
+            "empty creator workspace",
+        ],
+        "name_confusion_bridge": [
+            "red fraud folder with no readable label",
+            "green product folder with no readable label",
+            "evidence board with red string",
+            "blurred corporate registry printouts",
+        ],
+        "closing_resolution": [
+            "two separated folders, one red and one green",
+            "closed court archive box",
+            "empty office chair",
+            "fading nameplate with no legible letters",
+        ],
+        "business_context": [
+            "conference-room projector glow",
+            "muted financial evidence board",
+            "empty desks",
+            "single desk lamp",
+        ],
+    }.get(world, ["evidence folder", "desk lamp", "empty office"])
+
+
+def _visual_must_not(world: str) -> list[str]:
+    base = [
+        "no readable text",
+        "no legible logos",
+        "no random decorative vine leaves",
+        "no unrelated music or record imagery",
+    ]
+    if world == "legal_fraud":
+        return base + [
+            "no smartphone",
+            "no app interface",
+            "no startup pitch room",
+            "no founder glamour portrait",
+        ]
+    if world == "product_platform":
+        return base + [
+            "no courtroom",
+            "no gavel",
+            "no prison bars",
+            "no bankruptcy paperwork as the main subject",
+        ]
+    if world == "name_confusion_bridge":
+        return base + [
+            "no single giant app logo",
+            "no generic founder keynote",
+        ]
+    return base
+
+
+def _movie_shot_prompt(beat: dict, scene: dict) -> str:
+    """Rewrite a beat prompt as a movie shot tied to the scene spine."""
+    script = (beat.get("script_text") or "").strip()
+    desc = (beat.get("specific_visual_description") or "").strip()
+    world = beat.get("story_world") or scene["story_world"]
+    props = ", ".join(scene.get("recurring_props") or _recurring_props(world))
+    must_not = ", ".join(scene.get("must_not_show") or _visual_must_not(world))
+    intent = (beat.get("visual_intent") or "").strip()
+
+    if intent == "chart_abstraction":
+        desc = (
+            "A grounded investigation-board shot instead of a floating "
+            "abstract chart: folders, pinned blurred papers, colored string, "
+            "and one simple unlabeled line or timeline shape in the scene."
+        )
+    elif intent == "montage_panel":
+        desc = (
+            "A physical montage wall inside the same investigation room, "
+            "using pinned photos, folders, and blurred documents rather than "
+            "free-floating symbolic shapes."
+        )
+
+    if world == "legal_fraud":
+        camera = "tight investigative close-up or over-the-shoulder legal desk shot"
+        purpose = (
+            "make the viewer feel the fraud is being uncovered through court "
+            "records and money trails"
+        )
+    elif world == "product_platform":
+        camera = "cinematic startup-office product shot"
+        purpose = (
+            "make the viewer understand the fading short-form video product "
+            "and Twitter-era strategy"
+        )
+    elif world == "name_confusion_bridge":
+        camera = "split-focus investigative shot connecting two evidence folders"
+        purpose = (
+            "make the viewer understand that two legally different companies "
+            "are being confused because they share a name"
+        )
+    elif world == "closing_resolution":
+        camera = "quiet final-frame archive shot"
+        purpose = "make the viewer feel the legal record outlived the product"
+    else:
+        camera = "restrained business-documentary scene shot"
+        purpose = "support the current beat without adding unrelated story details"
+
+    script_hint = re.sub(r"\s+", " ", script)[:260]
+    return (
+        f"Movie shot: {camera}. Scene: {scene['scene_title']}. "
+        f"Narrative purpose: {purpose}. Recurring props in frame: {props}. "
+        f"Beat narration context: {script_hint}. Specific composition: {desc}. "
+        f"Must not show: {must_not}."
+    )
+
+
+def _apply_visual_continuity_plan(beats: list[dict]) -> list[dict]:
+    """Group beats into scenes and rewrite FLUX prompts around a visual spine.
+
+    The goal is for the video to read as one investigation movie, not 70
+    independent symbolic panels. Scene IDs are deterministic and stored in
+    beat_sheet.json for S09/S12 auditability.
+    """
+    scenes: list[dict] = []
+    current: dict | None = None
+    scene_idx = 0
+    for i, beat in enumerate(beats):
+        world = _story_world_for_beat(beat)
+        if (
+            current is None
+            or current["story_world"] != world
+            or len(current["beat_ids"]) >= 6
+        ):
+            scene_idx += 1
+            current = {
+                "scene_id": f"SCENE_{scene_idx:02d}",
+                "scene_title": _scene_label(world),
+                "story_world": world,
+                "recurring_props": _recurring_props(world),
+                "must_not_show": _visual_must_not(world),
+                "beat_ids": [],
+            }
+            scenes.append(current)
+        current["beat_ids"].append(beat.get("beat_id"))
+        beat["scene_id"] = current["scene_id"]
+        beat["scene_title"] = current["scene_title"]
+        beat["story_world"] = world
+        beat["recurring_props"] = current["recurring_props"]
+        beat["visual_must_not"] = current["must_not_show"]
+        beat["movie_shot_prompt"] = _movie_shot_prompt(beat, current)
+        beat["flux_fallback_prompt"] = beat["movie_shot_prompt"]
+        beat["visual_prompt_version"] = "storyboard_v1_2026-05-30"
+    return scenes
 
 
 def run(episode: dict, queue: dict) -> str | None:
@@ -404,6 +612,16 @@ def run(episode: dict, queue: dict) -> str | None:
     _attach_act_and_style(beats, story_kind=story_kind,
                           locked_style=episode["visual_style"])
 
+    # ----- Visual continuity / storyboard spine (Batch M 2026-05-30) -----
+    # Rewrite FLUX-bound beat descriptions into scene-aware movie shots.
+    # This keeps the image sequence aligned to the narration instead of
+    # letting each beat become an isolated symbolic illustration.
+    scene_plan = _apply_visual_continuity_plan(beats)
+    logger.info(
+        "S08 visual continuity: %d scenes across %d beats",
+        len(scene_plan), len(beats),
+    )
+
     target_min = cfg.production["target_duration_seconds"] - cfg.production["duration_tolerance_seconds"]
     target_max = cfg.production["target_duration_seconds"] + cfg.production["duration_tolerance_seconds"]
     total = sum(b["estimated_seconds"] for b in beats)
@@ -440,7 +658,7 @@ def run(episode: dict, queue: dict) -> str | None:
     iqa = cfg.image_qa
     SIM_THRESHOLD = float(iqa.get("pd_direct_use_threshold", 0.20))
     MAX_REUSES_PER_ASSET = int(iqa.get("pd_max_reuses_per_asset", 30))
-    REFERENCE_THRESHOLD = float(iqa.get("pd_reference_threshold", 0.20))
+    REFERENCE_THRESHOLD = max(float(iqa.get("pd_reference_threshold", 0.20)), 0.52)
     REFERENCE_STRENGTH = float(iqa.get("pd_reference_strength", 0.1))
     USE_IMAGE_REFERENCE = bool(iqa.get("pd_image_reference_enabled", False))
     asset_use_count: dict[int, int] = {}
@@ -499,7 +717,9 @@ def run(episode: dict, queue: dict) -> str | None:
             if len(row) == 0:
                 continue
             best = int(np.argmax(row))
-            if row[best] >= REFERENCE_THRESHOLD:
+            if row[best] >= REFERENCE_THRESHOLD and _asset_reference_allowed(
+                b, pd_assets[best], float(row[best])
+            ):
                 b["reference_asset_id"] = pd_assets[best]["id"]
                 b["reference_asset_path"] = pd_assets[best]["local_path"]
                 b["reference_description"] = (
@@ -580,7 +800,9 @@ def run(episode: dict, queue: dict) -> str | None:
     # etc. Loaded from 00_research/iconic_assets.json (emitted by S01
     # or hand-authored). Injected into every FLUX prompt so the
     # generated panels visually identify as belonging to the episode's
-    # subject company rather than as generic business imagery.
+    # subject company rather than as generic business imagery. Batch M:
+    # these cues are gated below by story_world/intent so legal scenes
+    # don't turn into generic app-logo panels.
     iconic_preamble = ""
     iconic_path = ws / "00_research" / "iconic_assets.json"
     if iconic_path.exists():
@@ -610,19 +832,26 @@ def run(episode: dict, queue: dict) -> str | None:
         # consistent character across beats. Cross-beat consistency,
         # not photorealistic likeness — base FLUX can't do faces
         # from text alone.
-        if iconography and _beat_shows_hero(b, founder_tokens):
+        if iconography and _allow_hero_iconography(b, founder_tokens):
             beat_prompt = f"{iconography} {beat_prompt}"
             hero_inject_count += 1
 
-        # Iconic-asset preamble (one line in front of every prompt).
-        if iconic_preamble:
-            beat_prompt = f"{iconic_preamble}. {beat_prompt}"
+        # Iconic-asset cues are intentionally gated. Batch M: injecting
+        # them into every beat made legal/fraud scenes fill with app
+        # phones and leaf logos. Product cues belong only in product or
+        # name-confusion beats, and even there as subtle scene context.
+        if iconic_preamble and _allow_iconic_cues(b):
+            beat_prompt = (
+                f"Subtle product-era context only; do not make the logo "
+                f"or phone UI the main subject unless this beat explicitly "
+                f"calls for it. {iconic_preamble}. {beat_prompt}"
+            )
 
         # Path A — text grounding: weave PD reference description into prompt
         ref_desc = (b.get("reference_description") or "").strip()
         if ref_desc:
             beat_prompt = (
-                f"Subject reference (from photographic record): {ref_desc}. "
+                f"Highly matched subject reference: {ref_desc}. "
                 f"{beat_prompt}"
             )
 
@@ -665,6 +894,7 @@ def run(episode: dict, queue: dict) -> str | None:
     (ws / "02_script" / "beat_sheet.json").write_text(
         json.dumps({
             "beats": beats,
+            "visual_continuity_plan": scene_plan,
             "total_estimated_seconds": sum(b["estimated_seconds"] for b in beats),
             "matched_pd_count": pd_matched,
             "flux_needed_count": flux_needed,
@@ -701,16 +931,90 @@ def run(episode: dict, queue: dict) -> str | None:
 # fires unconditionally on these.
 _HERO_CENTRIC_INTENTS = {
     "founder_portrait",
-    "boardroom_meeting",
-    "courtroom_scene",
 }
+
+
+def _allow_iconic_cues(beat: dict) -> bool:
+    world = (beat.get("story_world") or "").strip()
+    intent = (beat.get("visual_intent") or "").strip()
+    if world == "legal_fraud":
+        return False
+    if intent in {"document_or_headline", "courtroom_scene"}:
+        return False
+    return world == "product_platform" and intent in {
+        "product_reveal",
+        "founder_portrait",
+    }
+
+
+def _allow_hero_iconography(beat: dict, founder_tokens: set[str]) -> bool:
+    world = (beat.get("story_world") or "").strip()
+    intent = (beat.get("visual_intent") or "").strip()
+    if world == "legal_fraud":
+        return False
+    if intent != "founder_portrait":
+        return False
+    if world == "name_confusion_bridge":
+        text = (beat.get("script_text") or "").lower()
+        return bool(founder_tokens) and any(t in text for t in founder_tokens)
+    return _beat_shows_hero(beat, founder_tokens)
+
+
+def _asset_reference_allowed(beat: dict, asset: dict, score: float) -> bool:
+    """Guard FLUX text references against weak/off-topic PD assets.
+
+    Semantic similarity alone matched "Vine Inc." beats to vinyl records,
+    P-Vine music logos, and sheet music because they shared surface words.
+    References now need a high score plus intent/story-world sanity.
+    """
+    if score < 0.52:
+        return False
+    desc = " ".join([
+        str(asset.get("caption") or ""),
+        str(asset.get("description") or ""),
+        str(asset.get("title") or ""),
+    ]).lower()
+    if not desc.strip():
+        return False
+    blocked = {
+        "vinyl", "record", "records", "music", "song", "album",
+        "sheet music", "piano", "label branding", "ornate header",
+    }
+    if any(term in desc for term in blocked):
+        return False
+
+    world = (beat.get("story_world") or "").strip()
+    intent = (beat.get("visual_intent") or "").strip()
+    if world == "legal_fraud":
+        return any(
+            term in desc
+            for term in (
+                "court", "legal", "filing", "document", "bankruptcy",
+                "judge", "lawyer", "prison", "investor", "office",
+            )
+        )
+    if intent == "founder_portrait":
+        return any(
+            term in desc
+            for term in ("portrait", "person", "man", "woman", "founder", "ceo")
+        )
+    if world == "product_platform":
+        return any(
+            term in desc
+            for term in ("phone", "app", "office", "startup", "video", "screen")
+        )
+    if world == "name_confusion_bridge":
+        return any(
+            term in desc
+            for term in ("document", "filing", "office", "logo", "phone", "screen")
+        )
+    return score >= 0.68
 
 
 def _beat_shows_hero(beat: dict, founder_tokens: set[str]) -> bool:
     """Decide whether to prepend the character iconography to this
     beat's FLUX prompt. True iff:
-      - the beat's visual_intent is one of the hero-centric intents
-        (founder_portrait, boardroom_meeting, courtroom_scene), OR
+      - the beat's visual_intent is hero-centric, OR
       - any meaningful token of the founder's name appears in the
         beat's visual description / fallback prompt (case-insensitive).
     """
