@@ -78,16 +78,16 @@ production:
   # regardless of step.
   script_generation_temp_step: 0.01
 
-  # Opening title card (prepended before Act 0). The script_generate
-  # prompt is explicit: NO INTRO, NO LOGO, NO "WELCOME BACK". Default
-  # is 0 (disabled) so the first frame is Act 0's cold open. Set to
-  # 2-8 if you want a brand stamp at the cost of the cold-open 15s
-  # retention window.
+  # Opening title card (prepended before Act 0). Keep this short so
+  # the Act 0 hook still owns the first 15 seconds.
   opening_title_card_seconds: 1
 
-  # Closing source-attribution card (appended after Act 5). Default 5
-  # seconds — enough for the operator's source citations to read,
-  # short enough not to compete with Act 5's editorial closing.
+  # Closing source-attribution card (appended after Act 5). Hidden for
+  # now; set closing_card_enabled: true to re-enable later.
+  closing_card_enabled: false
+  # Default display duration when enabled. 5 seconds is enough for the
+  # operator's source citations to read, short enough not to compete
+  # with Act 5's editorial closing.
   # Recommended range 5-10s. Batch J 2026-05-29: S11 now appends
   # closing_card_seconds + 1.0s of silence to voice_full.wav so audio
   # covers the full title+voice+closing video timeline; without that
@@ -95,7 +95,7 @@ production:
   # length and the closing card never made it into the rendered MP4.
   # During the silent tail the music bed swells (no voice to
   # sidechain against), giving you the "music outro through credits"
-  # behaviour. Set to 0 to disable entirely.
+  # behaviour. Set closing_card_enabled=false to disable entirely.
   closing_card_seconds: 5
 
   # Per-clip fade in / fade out. Applied to EVERY clip in S12 (title,
@@ -429,13 +429,12 @@ grok:
                                         # ask it to regenerate from the
                                         # same prompt.
   timeout_seconds: 180
-  resolution: "2k"                      # Grok defaults to 1K — explicitly
-                                        # request 2K. Combined with 16:9
-                                        # aspect_ratio this produces 2048x1152
-                                        # which downsamples cleanly to the
-                                        # 1920x1080 the rest of the pipeline
-                                        # expects.
+  resolution: "1k"                      # Request cheaper 1K generations.
   aspect_ratio: "16:9"
+  upscale_to_project_resolution: true   # If Grok returns below 1920x1080,
+                                        # upscale locally before S12.
+  upscale_width: 1920
+  upscale_height: 1080
   # Operator-editable prompt template lives at
   # pipeline/prompts/grok_text_correction.txt. The {flux_prompt}
   # placeholder is replaced with the exact prompt FLUX rendered from.

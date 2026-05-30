@@ -19,6 +19,11 @@ mkdir -p "${LOGDIR}"
 TS="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 LOGFILE="${LOGDIR}/full_auto.${TS}.log"
 exec > >(tee -a "${LOGFILE}") 2>&1
+# Long foreground runs may be launched from shells/agents whose stdin
+# disappears later. Python can fail during startup if it inherits that
+# bad descriptor, so default every subprocess to /dev/null unless a
+# heredoc explicitly provides stdin.
+exec </dev/null
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 MAX_ITERATIONS="${MAX_ITERATIONS:-80}"
@@ -26,6 +31,10 @@ SLEEP_SECONDS="${SLEEP_SECONDS:-2}"
 EP_ID="${1:-}"
 
 echo "full-auto runner log: ${LOGFILE}"
+
+orchestrator() {
+  "${PYTHON_BIN}" -m pipeline.hermes_orchestrator "$@" </dev/null
+}
 
 queue_state() {
   "${PYTHON_BIN}" - "$1" <<'PY'
@@ -69,7 +78,7 @@ if [[ -z "${EP_ID}" ]]; then
   read -r EP_ID _stage _blocked _final _path _count < <(queue_state "")
   if [[ "${EP_ID}" == "NONE" ]]; then
     echo "No queued episode found; enqueueing one episode."
-    "${PYTHON_BIN}" -m pipeline.hermes_orchestrator --enqueue 1
+    orchestrator --enqueue 1
     read -r EP_ID _stage _blocked _final _path _count < <(queue_state "")
   fi
 fi
@@ -98,7 +107,7 @@ for ((iteration = 1; iteration <= MAX_ITERATIONS; iteration++)); do
 
   if [[ "${blocked}" == "true" ]]; then
     echo "auto-approving ${blocker_count} blocker(s) for ${EP_ID}"
-    "${PYTHON_BIN}" -m pipeline.hermes_orchestrator --approve "${EP_ID}" || true
+    orchestrator --approve "${EP_ID}" || true
     sleep "${SLEEP_SECONDS}"
     continue
   fi
@@ -108,7 +117,7 @@ for ((iteration = 1; iteration <= MAX_ITERATIONS; iteration++)); do
     exit 2
   fi
 
-  if ! "${PYTHON_BIN}" -m pipeline.hermes_orchestrator --run-episode "${EP_ID}"; then
+  if ! orchestrator --run-episode "${EP_ID}"; then
     echo "orchestrator returned non-zero; checking queue state on next loop"
   fi
   sleep "${SLEEP_SECONDS}"

@@ -4,14 +4,14 @@ For each beat:
   1. Look up the image (PD asset path or FLUX asset path on the beat).
   2. Render a Ken Burns clip of the beat's duration with the
      specified motion.
-Then prepend a title-card clip + append a closing source-attribution
-clip, concat with final_mix.wav, and generate SRT + VTT captions
-aligned to voice_timing.json.
+Then prepend a title-card clip and optionally append a closing
+source-attribution clip, concat with final_mix.wav, and generate
+SRT + VTT captions aligned to voice_timing.json.
 
 Title and closing cards use the FLUX-rendered backdrops from S09
-(03_assets/flux/title.png and credits.png) when available, with text
-composited over them via Pillow. If the FLUX renders aren't on disk
-the cards fall back to a programmatic Pillow design.
+(03_assets/flux/title.png and optional credits.png) when available,
+with text composited over them via Pillow. If the FLUX renders aren't
+on disk the cards fall back to a programmatic Pillow design.
 
 Inputs:  02_script/beat_sheet.json
          04_audio/voice_timing.json
@@ -118,13 +118,14 @@ def run(episode: dict, queue: dict) -> str | None:
     fade_in = float(cfg.production.get("fade_in_seconds", 0.0))
     fade_out = float(cfg.production.get("fade_out_seconds", 0.0))
 
-    # The new 6-act writer prompt is explicit: NO INTRO, NO LOGO,
-    # NO "WELCOME BACK". The first frame should be Act 0's cold open.
-    # `production.opening_title_card_seconds` defaults to 0 (disabled).
-    # Set to 2-8 in config.yaml to re-enable a brand stamp at the cost
-    # of the cold-open 15s retention window.
+    # The writer prompt is explicit: the title card should stay short
+    # enough that Act 0's cold open still owns the first 15 seconds.
     title_card_seconds = float(cfg.production.get("opening_title_card_seconds", 0))
-    closing_card_seconds = float(cfg.production.get("closing_card_seconds", 5))
+    closing_card_enabled = bool(cfg.production.get("closing_card_enabled", True))
+    closing_card_seconds = (
+        float(cfg.production.get("closing_card_seconds", 5))
+        if closing_card_enabled else 0.0
+    )
 
     clip_paths: list[Path] = []
 
@@ -342,6 +343,11 @@ def run(episode: dict, queue: dict) -> str | None:
                 return f"closing card render failed: {e}"
         clip_paths.append(closing_clip)
         logger.info("S12 closing card: %.1fs", closing_card_seconds)
+    else:
+        logger.info(
+            "S12 closing card: disabled "
+            "(production.closing_card_enabled=false or seconds=0)"
+        )
 
     # ----- concat -----
     # Preview mode (Batch B 2026-05-26): produces final_preview.mp4
