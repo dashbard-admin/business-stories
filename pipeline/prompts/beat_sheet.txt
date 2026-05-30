@@ -44,6 +44,25 @@ DO NOT echo the beat's prose back. The script text is already on
 disk; the caller will join it back into each entry by beat_id. Keep
 your output focused on the VISUAL plan and asset hints.
 
+CRITICAL — MAKE THE IMAGES FEEL LIKE ONE NARRATIVE MOVIE.
+Each beat is not a standalone poster. Treat the sequence as a
+storyboard with recurring locations, props, and camera language.
+Prefer concrete investigative / product / courtroom scenes over
+generic symbolic illustrations. A good beat image should answer:
+"what must the viewer understand from this exact narration line?"
+
+Use recurring story props instead of repeating generic brand logos:
+- legal / fraud beats: court folders, bankruptcy files, investor
+  packets, case boxes, lawyer desks, evidence boards
+- product / platform beats: old smartphone, six blank video tiles,
+  empty creator workspace, dim startup office, silent monitors
+- name-confusion beats: two differently colored folders, red string,
+  blurred registry printouts, split legal/product evidence boards
+
+Do not overuse phones, leaf logos, pitch rooms, or founder portraits.
+Use them only when the narration is actually about the product,
+Twitter strategy, creators, or the protagonist's decision.
+
 CRITICAL — FLUX CANNOT RENDER LEGIBLE TEXT.
 The image generator (FLUX via CLI) reliably produces glyph-scribble
 when asked for words, sentences, headlines, signage, brand logos

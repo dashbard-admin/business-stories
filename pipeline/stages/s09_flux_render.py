@@ -30,6 +30,7 @@ import logging
 import re
 import shutil
 import yaml
+import hashlib
 from pathlib import Path
 
 from ..config import load_config
@@ -39,6 +40,10 @@ from ..state import find_episode_workspace
 from ..vlm import VLM, ImageVerdict
 
 logger = logging.getLogger("hermes.stage.s09")
+
+
+def _prompt_hash(prompt: str) -> str:
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
 
 
 def _is_good_enough(verdict: ImageVerdict, strict_borderline: bool) -> bool:
@@ -124,18 +129,32 @@ def run(episode: dict, queue: dict) -> str | None:
         beat_id = b["beat_id"]
         out_path = flux_dir / f"{beat_id}.png"
         fr = b["flux_render_request"]
+        prompt_hash = _prompt_hash(fr["prompt"])
 
         existing_qa = b.get("image_qa") or {}
         existing_verdict = (existing_qa.get("verdict") or "").lower()
         has_image = out_path.exists() and out_path.stat().st_size > 100
+        stored_prompt_hash = existing_qa.get("prompt_hash")
+        prompt_changed = bool(stored_prompt_hash and stored_prompt_hash != prompt_hash)
 
         if has_image and existing_verdict in ("pass", "borderline", "unjudged"):
-            if b.get("flux_asset_path") != str(out_path.relative_to(ws)):
-                b["flux_asset_path"] = str(out_path.relative_to(ws))
-                _persist()
-            continue
+            if not prompt_changed:
+                if b.get("flux_asset_path") != str(out_path.relative_to(ws)):
+                    b["flux_asset_path"] = str(out_path.relative_to(ws))
+                    _persist()
+                continue
+            logger.info(
+                "S09 %s prompt changed since existing render; re-rendering",
+                beat_id,
+            )
 
-        if has_image and not existing_qa and vlm:
+        if has_image and not existing_qa and b.get("visual_prompt_version"):
+            logger.info(
+                "S09 %s has existing pixels but no QA for storyboard prompt; "
+                "re-rendering",
+                beat_id,
+            )
+        elif has_image and not existing_qa and vlm:
             verdict = vlm.critique_image(out_path, fr["prompt"])
             if verdict:
                 _log_verdict(beat_id, "existing", 0, 0, verdict)
@@ -145,6 +164,8 @@ def run(episode: dict, queue: dict) -> str | None:
                     **verdict.to_dict(),
                     "attempts": 0,
                     "seed": compute_seed(fr["prompt"], seed_offset=0),
+                    "prompt_hash": prompt_hash,
+                    "visual_prompt_version": b.get("visual_prompt_version"),
                 }
                 _persist()
                 continue
@@ -156,6 +177,8 @@ def run(episode: dict, queue: dict) -> str | None:
                     "verdict": "unjudged", "attempts": 0,
                     "reasoning": "VLM unavailable",
                     "seed": compute_seed(fr["prompt"], seed_offset=0),
+                    "prompt_hash": prompt_hash,
+                    "visual_prompt_version": b.get("visual_prompt_version"),
                 }
                 _persist()
                 continue
@@ -282,6 +305,8 @@ def run(episode: dict, queue: dict) -> str | None:
         b["image_qa"] = {
             "attempts": len(attempts),
             "seed": chosen_seed,
+            "prompt_hash": prompt_hash,
+            "visual_prompt_version": b.get("visual_prompt_version"),
             **(chosen_verdict.to_dict()
                if chosen_verdict
                else {"verdict": "unjudged", "reasoning": "VLM unavailable"}),
