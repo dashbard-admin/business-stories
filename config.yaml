@@ -57,6 +57,13 @@ production:
                                     # cadence at 120 wpm. Changing this
                                     # invalidates the hook timing the
                                     # writer prompt is calibrated for.
+  enforce_tts_wpm_effective: true   # S10 time-stretches rendered TTS
+                                    # to match wpm_effective, because
+                                    # Kokoro can speak much faster than
+                                    # the prompt's documentary cadence.
+  conclusion_music_tail_seconds: 5  # After the final voiced beat, hold
+                                    # the last panel while music plays
+                                    # with no voice.
 
   # Operator-tunable retry budget for S06 script generation
   # (2026-05-28). Each attempt = one full writer-LLM call (~30-60s)
@@ -91,14 +98,9 @@ production:
   # Default display duration when enabled. 5 seconds is enough for the
   # operator's source citations to read, short enough not to compete
   # with Act 5's editorial closing.
-  # Recommended range 5-10s. Batch J 2026-05-29: S11 now appends
-  # closing_card_seconds + 1.0s of silence to voice_full.wav so audio
-  # covers the full title+voice+closing video timeline; without that
-  # padding, S12's `-shortest` mux truncated the video at voice
-  # length and the closing card never made it into the rendered MP4.
-  # During the silent tail the music bed swells (no voice to
-  # sidechain against), giving you the "music outro through credits"
-  # behaviour. Set closing_card_enabled=false to disable entirely.
+  # Recommended range 5-10s. When enabled, S11 adds this much tail
+  # silence plus a small rounding buffer so S12's `-shortest` mux
+  # does not trim the card.
   closing_card_seconds: 5
 
   # Per-clip fade in / fade out. Applied to EVERY clip in S12 (title,

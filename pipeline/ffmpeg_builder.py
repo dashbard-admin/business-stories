@@ -812,6 +812,39 @@ def extract_audio(video_path: Path, out_path: Path) -> None:
     _run(cmd)
 
 
+def time_stretch_audio(src: Path, dst: Path, target_seconds: float) -> None:
+    """Tempo-stretch audio to a target duration while preserving pitch.
+
+    Uses ffmpeg's `atempo` filter. Very large slow-down/speed-up ratios
+    are split into a comma chain because individual `atempo` filters are
+    most portable inside the 0.5-2.0 range.
+    """
+    current = get_duration_seconds(src)
+    target = max(0.1, float(target_seconds))
+    if current <= 0:
+        raise RuntimeError(f"cannot stretch zero-duration audio: {src}")
+    tempo = current / target
+    chain: list[float] = []
+    remaining = tempo
+    while remaining < 0.5:
+        chain.append(0.5)
+        remaining /= 0.5
+    while remaining > 2.0:
+        chain.append(2.0)
+        remaining /= 2.0
+    chain.append(remaining)
+    filters = ",".join(f"atempo={x:.6f}" for x in chain)
+    cmd = [
+        require_ffmpeg(), "-y",
+        "-i", str(src),
+        "-af", filters,
+        "-c:a", "pcm_s16le",
+        "-ar", "24000",
+        str(dst),
+    ]
+    _run(cmd)
+
+
 # -------------------- voice padding (Batch J 2026-05-29) --------------------
 
 def pad_audio_silence(

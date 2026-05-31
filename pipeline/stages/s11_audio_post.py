@@ -80,9 +80,12 @@ def run(episode: dict, queue: dict) -> str | None:
         max(0.0, float(prod_cfg.get("closing_card_seconds", 0)))
         if closing_card_enabled else 0.0
     )
+    conclusion_tail = max(
+        0.0, float(prod_cfg.get("conclusion_music_tail_seconds", 0))
+    )
     # +1.0s tail buffer absorbs ffmpeg rounding so -shortest doesn't
     # nibble the last frame of the closing card.
-    tail_pad = closing_card + (1.0 if closing_card > 0 else 0.0)
+    tail_pad = conclusion_tail + closing_card + (1.0 if closing_card > 0 else 0.0)
 
     if head_pad > 0 or tail_pad > 0:
         voice_padded = ws / "04_audio" / "voice_padded.wav"
@@ -92,7 +95,7 @@ def run(episode: dict, queue: dict) -> str | None:
             voice_padded_seconds = voice_seconds + head_pad + tail_pad
             logger.info(
                 "S11 voice padded: +%.1fs head / +%.1fs tail "
-                "(total %.1fs for title+voice+closing cover)",
+                "(total %.1fs for title+voice+tail/closing cover)",
                 head_pad, tail_pad, voice_padded_seconds,
             )
         except Exception as e:
@@ -206,6 +209,7 @@ def run(episode: dict, queue: dict) -> str | None:
         # Added Batch J 2026-05-29.
         "voice_padding_head_seconds": round(head_pad, 3),
         "voice_padding_tail_seconds": round(tail_pad, 3),
+        "conclusion_music_tail_seconds": round(conclusion_tail, 3),
         "voice_padded_seconds": round(voice_padded_seconds, 3),
         "tracks_used": [
             {

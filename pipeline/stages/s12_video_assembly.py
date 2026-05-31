@@ -127,18 +127,21 @@ def run(episode: dict, queue: dict) -> str | None:
         float(cfg.production.get("closing_card_seconds", 5))
         if closing_card_enabled else 0.0
     )
+    conclusion_tail_seconds = max(
+        0.0, float(cfg.production.get("conclusion_music_tail_seconds", 0))
+    )
 
     clip_paths: list[Path] = []
 
     # ----- optional opening title card -----
     if title_card_seconds > 0:
         title_clip = clips_dir / "00_title.mp4"
+        if title_clip.exists():
+            try:
+                title_clip.unlink()
+            except Exception:
+                pass
         if not _clip_is_valid(title_clip):
-            if title_clip.exists():
-                try:
-                    title_clip.unlink()
-                except Exception:
-                    pass
             title_card_png = ws / "05_video" / "title_card.png"
             flux_title_png = ws / "03_assets" / "flux" / "title.png"
             prod = cfg.production
@@ -159,10 +162,10 @@ def run(episode: dict, queue: dict) -> str | None:
             )
             try:
                 ken_burns_clip(
-                    title_card_png, title_card_seconds, "slow_zoom_in",
+                    title_card_png, title_card_seconds, "hold_still",
                     title_clip,
-                    fade_in_seconds=fade_in,
-                    fade_out_seconds=fade_out,
+                    fade_in_seconds=0.0,
+                    fade_out_seconds=0.0,
                 )
             except Exception as e:
                 return f"title card render failed: {e}"
@@ -250,18 +253,11 @@ def run(episode: dict, queue: dict) -> str | None:
 
         # ----- raw ken_burns clip (always required) -----
         if not _clip_is_valid(clip_path):
-            image_path: Path | None = None
-            if "pd_asset_path" in b:
-                image_path = ws / b["pd_asset_path"]
-            elif "flux_asset_path" in b:
-                image_path = ws / b["flux_asset_path"]
-            else:
-                disk_path = ws / "03_assets" / "flux" / f"{beat_id}.png"
-                if disk_path.exists() and disk_path.stat().st_size > 1000:
-                    image_path = disk_path
-                    b["flux_asset_path"] = str(disk_path.relative_to(ws))
-                    logger.warning("beat %s missing image path; "
-                                   "recovered from disk", beat_id)
+            image_path = _image_path_for_beat(ws, b)
+            if image_path and "flux_asset_path" not in b and "pd_asset_path" not in b:
+                b["flux_asset_path"] = str(image_path.relative_to(ws))
+                logger.warning("beat %s missing image path; "
+                               "recovered from disk", beat_id)
             if image_path is None:
                 return f"beat {beat_id} has no image"
             if not image_path.exists():
@@ -290,6 +286,34 @@ def run(episode: dict, queue: dict) -> str | None:
                            "using raw clip", beat_id)
 
         clip_paths.append(clip_path)
+
+    # ----- optional music-only conclusion tail -----
+    if conclusion_tail_seconds > 0 and beats:
+        tail_clip = clips_dir / "zz_conclusion_tail.mp4"
+        last_beat = beats[-1]
+        last_image = _image_path_for_beat(ws, last_beat)
+        if last_image is None or not last_image.exists():
+            return f"conclusion tail image missing for {last_beat.get('beat_id')}"
+        if _clip_is_valid(tail_clip) and (
+            _any_newer([last_image, timing_path], tail_clip)
+            or _duration_mismatch(tail_clip, conclusion_tail_seconds)
+        ):
+            try:
+                tail_clip.unlink()
+            except Exception:
+                pass
+        if not _clip_is_valid(tail_clip):
+            try:
+                ken_burns_clip(
+                    last_image, conclusion_tail_seconds, "hold_still",
+                    tail_clip,
+                    fade_in_seconds=0.0,
+                    fade_out_seconds=0.0,
+                )
+            except Exception as e:
+                return f"conclusion tail render failed: {e}"
+        clip_paths.append(tail_clip)
+        logger.info("S12 conclusion music tail: %.1fs", conclusion_tail_seconds)
 
     # ----- optional closing source-attribution card -----
     if closing_card_seconds > 0:
@@ -419,6 +443,20 @@ def _clip_is_valid(path: Path) -> bool:
         return get_duration_seconds(path) > 0.0
     except Exception:
         return False
+
+
+def _image_path_for_beat(ws: Path, beat: dict) -> Path | None:
+    """Resolve the image used to render one beat."""
+    if "pd_asset_path" in beat:
+        return ws / beat["pd_asset_path"]
+    if "flux_asset_path" in beat:
+        return ws / beat["flux_asset_path"]
+    beat_id = beat.get("beat_id")
+    if beat_id:
+        disk_path = ws / "03_assets" / "flux" / f"{beat_id}.png"
+        if disk_path.exists() and disk_path.stat().st_size > 1000:
+            return disk_path
+    return None
 
 
 def _align_beats_to_voice_timing(beats: list[dict], timing: dict) -> list[dict]:
