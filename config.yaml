@@ -651,8 +651,9 @@ image_qa:
 
 # -------------------- assignment dimensions --------------------
 # Per the single-category decision, no `suits_domains` or `suits_eras`
-# fields. Every narrator/style is eligible for every topic;
-# constraints.pick_assignment() relies only on rolling-window cooldown.
+# fields. Archetypes, narrators, and visual styles can still declare
+# `suits_story_kinds`; constraints.pick_assignment() filters by those
+# first, then applies rolling-window cooldown.
 
 archetypes:
   # suits_story_kinds added Batch H 2026-05-28. The cooldown engine
@@ -776,5 +777,23 @@ narrators:
 visual_styles:
   - id: V1
     name: "Classic Comic"
+    suits_story_kinds:
+      - origin
+      - disruption
+      - pivot
+      - underdog_comeback
+      - founder_drama
+      - rise_and_fall
   - id: V2
     name: "Noir Comic"
+    suits_story_kinds:
+      - rise_and_fall
+      - founder_drama
+      - scandal_postmortem
+  - id: V3
+    name: "Sunlit Editorial Comic"
+    suits_story_kinds:
+      - origin
+      - disruption
+      - pivot
+      - underdog_comeback

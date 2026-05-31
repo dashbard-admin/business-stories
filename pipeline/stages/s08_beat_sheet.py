@@ -858,10 +858,10 @@ def run(episode: dict, queue: dict) -> str | None:
                         stash_assigned, len(stash_use_count))
 
     # ----- FLUX fallback for unmatched beats -----
-    # Per-beat style lookup (Batch F 2026-05-27). Pre-load BOTH V1 and
-    # V2 style YAMLs so we can pick whichever the beat's
-    # `effective_visual_style` field requests. Beats with no
-    # effective_visual_style fall back to the episode-locked style.
+    # Per-beat style lookup (Batch F 2026-05-27). Load whichever style
+    # YAML the beat's `effective_visual_style` field requests. Beats
+    # with no effective_visual_style fall back to the episode-locked
+    # style.
     style_cache: dict[str, dict] = {episode["visual_style"]: style_yaml}
     def _load_style(sid: str) -> dict:
         if sid in style_cache:

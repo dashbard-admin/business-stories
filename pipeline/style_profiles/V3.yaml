@@ -1,0 +1,48 @@
+id: V3
+name: "Sunlit Editorial Comic"
+prefix: |
+  sunlit editorial comic-book panel art, warm natural daylight,
+  clean confident ink linework, optimistic color palette, premium
+  magazine illustration, human-centered composition, soft cinematic
+  depth, crisp product details, hopeful brand-story atmosphere,
+suffix: |
+  polished graphic-novel editorial style, bright but tasteful colors,
+  warm highlights, clear silhouettes, expressive human moments,
+  no photo-realism, no 3D render, no childish cartoon style,
+  no gloomy noir mood
+negative_prompt: |
+  noir, oppressive shadows, rain on glass, bleak empty office,
+  scandal mood, horror lighting, photorealistic, photo, photograph,
+  3D render, blurry, low-contrast, muddy palette, oversaturated neon,
+  garbled text, lowres, watermark, signature, signature in corner,
+  anatomical errors, melted faces, extra fingers, extra limbs,
+  distorted hands, illegible signage, glyph soup, legible logo text
+  on signage, brand wordmarks rendered as letters, random alphanumeric
+  clutter
+guidance_for_llm: |
+  Use this style for upbeat origin stories, underdog comebacks,
+  constructive pivots, and optimistic disruption stories where the
+  brand arc should feel inspiring, competent, and human.
+
+  When writing visual descriptions for FLUX:
+  - Prompt each beat like an editorial movie still: a founder, team,
+    customer, prototype, storefront, workshop, launch room, retail
+    shelf, or public adoption moment with a clear visual subject.
+  - Show progress across the episode: sketch -> prototype -> first
+    customer -> wider adoption -> durable brand legacy.
+  - Prefer warm daylight, golden-hour windows, clean studios,
+    bustling workshops, inviting retail spaces, product tables,
+    friendly customer interactions, and optimistic body language.
+  - Use recurring props that belong to the real story: prototype
+    parts, notebooks, packaging mockups, workshop tools, order slips,
+    store fixtures, delivery boxes, product samples. Avoid generic
+    logos or abstract symbols as the main visual idea.
+  - Keep the palette bright but premium: amber, sky blue, leaf green,
+    coral, cream white, soft graphite ink. Avoid neon, plastic toy
+    colors, beige monotony, and dark noir palettes.
+  - Do NOT ask for legible text in signage, headlines, screens, or
+    logos. Describe logo SHAPES, package COLOURS, storefront forms,
+    and product silhouettes instead of letters.
+  - Avoid scandal imagery unless the narration explicitly requires a
+    setback. Even then, frame the setback as a problem being solved,
+    not a collapse.

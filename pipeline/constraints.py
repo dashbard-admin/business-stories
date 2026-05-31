@@ -4,16 +4,17 @@ Given the rolling window of recent assignments, choose archetype,
 narrator, and visual style for the next episode such that none collides
 with the configured cooldown.
 
-Batch G 2026-05-28: pick_assignment now honors per-narrator
-`suits_story_kinds` (declared in config.yaml's narrators block). When
-`story_kind` is provided, narrators whose suits_story_kinds list
-excludes that story_kind are filtered out BEFORE the cooldown filter.
-A narrator with NO suits_story_kinds field is treated as universal
-(legacy behaviour preserved for N1-N4). If filtering leaves zero
-candidates AND zero are eligible by cooldown either, fall back to the
-least-recently-used narrator across the unfiltered pool.
+Batch G 2026-05-28: pick_assignment honors per-narrator
+`suits_story_kinds` (declared in config.yaml's narrators block).
+Batch H did the same for archetypes. Batch N.7 extends the same
+semantics to visual styles so upbeat-only styles are not assigned to
+collapse stories.
 
-Archetype + visual_style picks are unchanged.
+When `story_kind` is provided, entries whose suits_story_kinds list
+excludes that story_kind are filtered out BEFORE the cooldown filter.
+Entries with NO suits_story_kinds field are treated as universal. If
+filtering leaves zero candidates, fall back to the unfiltered pool for
+that dimension.
 """
 
 from __future__ import annotations
@@ -59,7 +60,7 @@ def pick_assignment(
 
     arch_ids = _eligible_archetypes(cfg.archetypes, story_kind)
     narr_ids = _eligible_narrators(cfg.narrators, story_kind)
-    vis_ids = [v["id"] for v in cfg.visual_styles]
+    vis_ids = _eligible_visual_styles(cfg.visual_styles, story_kind)
 
     arch = _pick(arch_ids, rolling_window.get("archetypes", []), cd_a, rng)
     narr = _pick(narr_ids, rolling_window.get("narrators", []), cd_n, rng)
@@ -137,6 +138,36 @@ def _eligible_archetypes(
             "no archetype suits story_kind=%r; using full pool", story_kind,
         )
         return [a["id"] for a in archetypes]
+    return eligible
+
+
+def _eligible_visual_styles(
+    visual_styles: list[dict],
+    story_kind: str | None,
+) -> list[str]:
+    """Filter visual styles by suits_story_kinds.
+
+    Styles without suits_story_kinds are universal. If filtering
+    produces an empty pool, fall back to all visual styles so a
+    malformed config cannot block topic discovery.
+    """
+    if not story_kind:
+        return [v["id"] for v in visual_styles]
+    sk = story_kind.strip().lower()
+    eligible: list[str] = []
+    for v in visual_styles:
+        suits = v.get("suits_story_kinds")
+        if not suits:
+            eligible.append(v["id"])
+            continue
+        if any(s.strip().lower() == sk for s in suits):
+            eligible.append(v["id"])
+    if not eligible:
+        import logging
+        logging.getLogger("hermes.constraints").warning(
+            "no visual style suits story_kind=%r; using full pool", story_kind,
+        )
+        return [v["id"] for v in visual_styles]
     return eligible
 
 
