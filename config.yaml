@@ -684,10 +684,9 @@ archetypes:
 
 narrators:
   # `enabled: false` removes the narrator from the cooldown engine's
-  # pool entirely. Used during testing to lock the channel to one
-  # voice. Flip back to true to restore for production rotation.
-  # Added Batch H 2026-05-28: testing Felix (N5) exclusively before
-  # going into production with the full rotation.
+  # pool entirely. N5/N6/N7/N8 are currently enabled for the
+  # wit-driven production rotation; N1-N4 remain available but
+  # disabled until needed.
   - id: N1
     name: "Marcus Reed - Business Editor"
     voice: "am_michael"
@@ -738,7 +737,7 @@ narrators:
     pitch_shift: 0.0
     breath_pause_ms: 280
     tone: "dry, observational, wry, deadpan"
-    enabled: true                  # ONLY enabled narrator during testing
+    enabled: true
     suits_story_kinds:
       - scandal_postmortem
       - rise_and_fall
@@ -752,7 +751,7 @@ narrators:
     pitch_shift: 0.0
     breath_pause_ms: 200
     tone: "curious, irreverent, simplicity-first, fast"
-    enabled: false
+    enabled: true
     suits_story_kinds:
       - disruption
       - pivot
@@ -766,12 +765,26 @@ narrators:
     pitch_shift: 0.0
     breath_pause_ms: 220
     tone: "confident, fast, jargon-fluent, insider-cynical"
-    enabled: false
+    enabled: true
     suits_story_kinds:
       - rise_and_fall
       - founder_drama
       - pivot
       - scandal_postmortem
+      - disruption
+
+  - id: N8
+    name: "Felix Carter - Sardonic Outsider Female Voice"
+    voice: "bf_emma"
+    speed: 1.00
+    pitch_shift: 0.0
+    breath_pause_ms: 280
+    tone: "dry, observational, wry, deadpan"
+    enabled: true
+    suits_story_kinds:
+      - scandal_postmortem
+      - rise_and_fall
+      - founder_drama
       - disruption
 
 visual_styles:

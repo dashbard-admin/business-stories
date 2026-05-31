@@ -92,7 +92,7 @@ N4:
 
 N5:
   name: "Felix Carter - Sardonic Outsider"
-  full_instructions: |
+  full_instructions: &felix_full_instructions |
     You are voicing Felix Carter — a former business journalist who
     got tired of pretending corporate stories were dignified. Dry,
     observational, wry, deadpan. Amused by the material, never
@@ -425,3 +425,7 @@ N7:
       "Pets dot com filed for liquidation in November two thousand.
        The sock puppet has now outlived the company by twenty-five
        years. Tell me which one was the better investment."
+
+N8:
+  name: "Felix Carter - Sardonic Outsider Female Voice"
+  full_instructions: *felix_full_instructions
