@@ -556,6 +556,10 @@ callouts:
   # high-contrast text overlay (yellow body + black stroke, same
   # styling as the title card).
   enabled: true
+  min_total: 3                     # S06 repair pass backfills markers
+                                  # when the writer under-delivers.
+  target_total: 5
+  max_total: 6
   max_per_beat: 1                 # Q-C2 confirmed: cap at 1,
                                   # configurable. Raise carefully —
                                   # spamming dilutes the effect.

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 import logging
 import sys
 import time
@@ -28,6 +29,7 @@ from .state import (
     enqueue_manual_episode,
     file_lock,
     find_episode,
+    find_episode_workspace,
     load_queue,
     mark_stage_done,
     mark_stage_failed,
@@ -309,9 +311,30 @@ def cli() -> int:
     parser.add_argument(
         "--approve", metavar="EP_ID",
         help=(
-            "clear any S07 brand-safety gate or S08 in-flight gate on "
-            "the named episode so it can advance to the next stage. "
-            "Use after reviewing the flag file or beat sheet."
+            "clear any needs_human gate on the named episode so it "
+            "can advance to the next stage. Use after reviewing the "
+            "stage artifact."
+        ),
+    )
+    parser.add_argument(
+        "--auto-correct-s07", metavar="EP_ID",
+        help=(
+            "apply all suggested_rewrite entries from "
+            "02_script/brand_safety_flags.json to script.txt, then "
+            "clear the S07 gate."
+        ),
+    )
+    parser.add_argument(
+        "--auto-correct-s08", metavar="EP_ID",
+        help=(
+            "apply any original/replacement suggestions found in S08 "
+            "review artifacts to beat_sheet.json, then clear the S08 gate."
+        ),
+    )
+    parser.add_argument(
+        "--auto-approve-s09", metavar="EP_ID",
+        help=(
+            "clear only the S09 visual brand-safety human-review gate."
         ),
     )
     parser.add_argument(
@@ -444,6 +467,15 @@ def cli() -> int:
 
     if args.approve:
         return _approve_cmd(args.approve)
+
+    if args.auto_correct_s07:
+        return _auto_correct_s07_cmd(args.auto_correct_s07)
+
+    if args.auto_correct_s08:
+        return _auto_correct_s08_cmd(args.auto_correct_s08)
+
+    if args.auto_approve_s09:
+        return _approve_stage_cmd(args.auto_approve_s09, "S9")
 
     if args.run_episode:
         return run_one_invocation_for_episode(args.run_episode)
@@ -718,6 +750,186 @@ def _approve_cmd(episode_id: str) -> int:
             return 2
     except RuntimeError as e:
         print(f"--approve: lock contention: {e}", file=sys.stderr)
+        return 2
+
+
+def _approve_stage_cmd(episode_id: str, stage_id: str) -> int:
+    cfg = load_config()
+    lock_path = cfg.state_dir / "locks" / "orchestrator.lock"
+    stale = cfg.orchestrator["stale_lock_hours"] * 3600
+    try:
+        with file_lock(lock_path, stale_seconds=stale):
+            queue = load_queue()
+            ep = find_episode(queue, episode_id)
+            if ep is None:
+                print(f"--auto-approve: no such episode {episode_id}",
+                      file=sys.stderr)
+                return 2
+            cleared = clear_blockers(queue, episode_id, stage_filter=stage_id)
+            save_queue(queue)
+            if cleared:
+                print(f"approved {episode_id}: {stage_id} gate cleared; "
+                      f"current_stage={ep['current_stage']}")
+                return 0
+            print(f"--auto-approve: no {stage_id} gate to clear for {episode_id}")
+            return 0
+    except RuntimeError as e:
+        print(f"--auto-approve: lock contention: {e}", file=sys.stderr)
+        return 2
+
+
+def _auto_correct_s07_cmd(episode_id: str) -> int:
+    cfg = load_config()
+    lock_path = cfg.state_dir / "locks" / "orchestrator.lock"
+    stale = cfg.orchestrator["stale_lock_hours"] * 3600
+    try:
+        with file_lock(lock_path, stale_seconds=stale):
+            queue = load_queue()
+            ep = find_episode(queue, episode_id)
+            ws = find_episode_workspace(episode_id)
+            if ep is None or ws is None:
+                print(f"--auto-correct-s07: no such episode/workspace {episode_id}",
+                      file=sys.stderr)
+                return 2
+            script_path = ws / "02_script" / "script.txt"
+            flags_path = ws / "02_script" / "brand_safety_flags.json"
+            if not script_path.exists() or not flags_path.exists():
+                print("--auto-correct-s07: missing script.txt or "
+                      "brand_safety_flags.json", file=sys.stderr)
+                return 2
+            from .stages.s07_script_critique import _apply_rewrite
+
+            script = script_path.read_text()
+            data = json.loads(flags_path.read_text())
+            applied: list[dict] = []
+            for flag in data.get("flags") or []:
+                original = (
+                    flag.get("sentence")
+                    or flag.get("original")
+                    or flag.get("flagged_text")
+                    or ""
+                ).strip()
+                replacement = (
+                    flag.get("suggested_rewrite")
+                    or flag.get("replacement")
+                    or ""
+                ).strip()
+                if not original or not replacement:
+                    continue
+                script, status = _apply_rewrite(script, original, replacement)
+                applied.append({
+                    "original": original,
+                    "replacement": replacement,
+                    "status": status,
+                })
+            if not applied:
+                print("--auto-correct-s07: no suggested rewrites found")
+                return 1
+            script_path.write_text(script)
+            (ws / "02_script" / "brand_safety_autocorrect.json").write_text(
+                json.dumps({"applied": applied}, indent=2)
+            )
+            clear_blockers(queue, episode_id, stage_filter="S7")
+            save_queue(queue)
+            ok = sum(1 for a in applied if a["status"] in ("exact", "normalized"))
+            print(f"auto-corrected S07 for {episode_id}: {ok}/{len(applied)} "
+                  f"rewrite(s) applied; current_stage={ep['current_stage']}")
+            return 0 if ok else 1
+    except RuntimeError as e:
+        print(f"--auto-correct-s07: lock contention: {e}", file=sys.stderr)
+        return 2
+
+
+def _collect_rewrite_suggestions(obj) -> list[dict]:
+    found: list[dict] = []
+    if isinstance(obj, dict):
+        original = (
+            obj.get("original") or obj.get("sentence")
+            or obj.get("flagged_text") or obj.get("current")
+        )
+        replacement = (
+            obj.get("replacement") or obj.get("suggested_rewrite")
+            or obj.get("rewrite") or obj.get("suggested_text")
+        )
+        if isinstance(original, str) and isinstance(replacement, str):
+            found.append({
+                "original": original.strip(),
+                "replacement": replacement.strip(),
+            })
+        for value in obj.values():
+            found.extend(_collect_rewrite_suggestions(value))
+    elif isinstance(obj, list):
+        for item in obj:
+            found.extend(_collect_rewrite_suggestions(item))
+    return found
+
+
+def _apply_json_string_rewrite(obj, original: str, replacement: str) -> bool:
+    changed = False
+    if isinstance(obj, dict):
+        for key, value in list(obj.items()):
+            if isinstance(value, str) and original in value:
+                obj[key] = value.replace(original, replacement, 1)
+                changed = True
+            elif isinstance(value, (dict, list)):
+                changed = _apply_json_string_rewrite(
+                    value, original, replacement
+                ) or changed
+    elif isinstance(obj, list):
+        for value in obj:
+            if isinstance(value, (dict, list)):
+                changed = _apply_json_string_rewrite(
+                    value, original, replacement
+                ) or changed
+    return changed
+
+
+def _auto_correct_s08_cmd(episode_id: str) -> int:
+    cfg = load_config()
+    lock_path = cfg.state_dir / "locks" / "orchestrator.lock"
+    stale = cfg.orchestrator["stale_lock_hours"] * 3600
+    try:
+        with file_lock(lock_path, stale_seconds=stale):
+            queue = load_queue()
+            ep = find_episode(queue, episode_id)
+            ws = find_episode_workspace(episode_id)
+            if ep is None or ws is None:
+                print(f"--auto-correct-s08: no such episode/workspace {episode_id}",
+                      file=sys.stderr)
+                return 2
+            beat_sheet_path = ws / "02_script" / "beat_sheet.json"
+            if not beat_sheet_path.exists():
+                print("--auto-correct-s08: missing beat_sheet.json",
+                      file=sys.stderr)
+                return 2
+            data = json.loads(beat_sheet_path.read_text())
+            suggestions = [
+                s for s in _collect_rewrite_suggestions(data)
+                if s.get("original") and s.get("replacement")
+                and s["original"] != s["replacement"]
+            ]
+            applied: list[dict] = []
+            for s in suggestions:
+                changed = _apply_json_string_rewrite(
+                    data, s["original"], s["replacement"]
+                )
+                applied.append({
+                    **s,
+                    "status": "exact" if changed else "miss",
+                })
+            if applied:
+                beat_sheet_path.write_text(json.dumps(data, indent=2))
+                (ws / "02_script" / "beat_sheet_autocorrect.json").write_text(
+                    json.dumps({"applied": applied}, indent=2)
+                )
+            clear_blockers(queue, episode_id, stage_filter="S8")
+            save_queue(queue)
+            ok = sum(1 for a in applied if a["status"] == "exact")
+            print(f"auto-corrected S08 for {episode_id}: {ok}/{len(applied)} "
+                  f"rewrite(s) applied; current_stage={ep['current_stage']}")
+            return 0
+    except RuntimeError as e:
+        print(f"--auto-correct-s08: lock contention: {e}", file=sys.stderr)
         return 2
 
 
