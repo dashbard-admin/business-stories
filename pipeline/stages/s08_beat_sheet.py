@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import deque
 
 import yaml
 
@@ -400,12 +401,42 @@ def _visual_must_not(world: str) -> list[str]:
     return base
 
 
+def _select_scene_props(
+    props: list[str],
+    recent_props: set[str],
+    *,
+    beat_num: int,
+    props_per_beat: int,
+) -> list[str]:
+    """Pick a small rotating prop subset while avoiding recent repeats."""
+    clean = [p for p in props if str(p).strip()]
+    if not clean:
+        return []
+    target = max(1, min(int(props_per_beat), len(clean)))
+    start = max(0, beat_num - 1) % len(clean)
+    ordered = clean[start:] + clean[:start]
+
+    chosen = [p for p in ordered if p not in recent_props][:target]
+    if len(chosen) < target:
+        for p in ordered:
+            if p not in chosen:
+                chosen.append(p)
+                if len(chosen) >= target:
+                    break
+    return chosen
+
+
 def _movie_shot_prompt(beat: dict, scene: dict) -> str:
     """Rewrite a beat prompt as a movie shot tied to the scene spine."""
     script = (beat.get("script_text") or "").strip()
     desc = (beat.get("specific_visual_description") or "").strip()
     world = beat.get("story_world") or scene["story_world"]
-    props = ", ".join(scene.get("recurring_props") or _recurring_props(world))
+    props = ", ".join(
+        beat.get("active_recurring_props")
+        or scene.get("recurring_props")
+        or _recurring_props(world)
+    )
+    avoid_recent = ", ".join(beat.get("avoid_recent_props") or [])
     must_not = ", ".join(scene.get("must_not_show") or _visual_must_not(world))
     intent = (beat.get("visual_intent") or "").strip()
 
@@ -448,15 +479,28 @@ def _movie_shot_prompt(beat: dict, scene: dict) -> str:
         purpose = "support the current beat without adding unrelated story details"
 
     script_hint = re.sub(r"\s+", " ", script)[:260]
+    avoid_recent_clause = (
+        f" Avoid recently used continuity props from the previous slide: "
+        f"{avoid_recent}."
+        if avoid_recent else ""
+    )
     return (
         f"Movie shot: {camera}. Scene: {scene['scene_title']}. "
-        f"Narrative purpose: {purpose}. Recurring props in frame: {props}. "
+        f"Narrative purpose: {purpose}. Use only these selected continuity "
+        f"props in frame: {props}."
+        f"{avoid_recent_clause} "
         f"Beat narration context: {script_hint}. Specific composition: {desc}. "
         f"Must not show: {must_not}."
     )
 
 
-def _apply_visual_continuity_plan(beats: list[dict]) -> list[dict]:
+def _apply_visual_continuity_plan(
+    beats: list[dict],
+    *,
+    props_per_beat: int = 2,
+    prop_cooldown_beats: int = 1,
+    avoid_recently_used_props: bool = True,
+) -> list[dict]:
     """Group beats into scenes and rewrite FLUX prompts around a visual spine.
 
     The goal is for the video to read as one investigation movie, not 70
@@ -466,6 +510,7 @@ def _apply_visual_continuity_plan(beats: list[dict]) -> list[dict]:
     scenes: list[dict] = []
     current: dict | None = None
     scene_idx = 0
+    recent_prop_sets: deque[set[str]] = deque(maxlen=max(0, prop_cooldown_beats))
     for i, beat in enumerate(beats):
         world = _story_world_for_beat(beat)
         if (
@@ -483,15 +528,31 @@ def _apply_visual_continuity_plan(beats: list[dict]) -> list[dict]:
                 "beat_ids": [],
             }
             scenes.append(current)
+        recent_props = (
+            set().union(*recent_prop_sets)
+            if avoid_recently_used_props and recent_prop_sets
+            else set()
+        )
+        active_props = _select_scene_props(
+            current["recurring_props"],
+            recent_props,
+            beat_num=_beat_id_to_int(beat.get("beat_id", "")) or i + 1,
+            props_per_beat=props_per_beat,
+        )
+        avoid_props = sorted(recent_props.intersection(current["recurring_props"]))
         current["beat_ids"].append(beat.get("beat_id"))
         beat["scene_id"] = current["scene_id"]
         beat["scene_title"] = current["scene_title"]
         beat["story_world"] = world
         beat["recurring_props"] = current["recurring_props"]
+        beat["active_recurring_props"] = active_props
+        beat["avoid_recent_props"] = avoid_props
         beat["visual_must_not"] = current["must_not_show"]
         beat["movie_shot_prompt"] = _movie_shot_prompt(beat, current)
         beat["flux_fallback_prompt"] = beat["movie_shot_prompt"]
-        beat["visual_prompt_version"] = "storyboard_v1_2026-05-30"
+        beat["visual_prompt_version"] = "storyboard_v2_prop_cooldown_2026-05-31"
+        if prop_cooldown_beats > 0:
+            recent_prop_sets.append(set(active_props))
     return scenes
 
 
@@ -641,10 +702,21 @@ def run(episode: dict, queue: dict) -> str | None:
     # Rewrite FLUX-bound beat descriptions into scene-aware movie shots.
     # This keeps the image sequence aligned to the narration instead of
     # letting each beat become an isolated symbolic illustration.
-    scene_plan = _apply_visual_continuity_plan(beats)
+    vc_cfg = cfg.raw.get("visual_continuity") or {}
+    scene_plan = _apply_visual_continuity_plan(
+        beats,
+        props_per_beat=int(vc_cfg.get("props_per_beat", 2)),
+        prop_cooldown_beats=int(vc_cfg.get("prop_cooldown_beats", 1)),
+        avoid_recently_used_props=bool(
+            vc_cfg.get("avoid_recently_used_props", True)
+        ),
+    )
     logger.info(
-        "S08 visual continuity: %d scenes across %d beats",
+        "S08 visual continuity: %d scenes across %d beats "
+        "(props_per_beat=%d, cooldown=%d)",
         len(scene_plan), len(beats),
+        int(vc_cfg.get("props_per_beat", 2)),
+        int(vc_cfg.get("prop_cooldown_beats", 1)),
     )
 
     target_min = cfg.production["target_duration_seconds"] - cfg.production["duration_tolerance_seconds"]

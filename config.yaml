@@ -458,6 +458,14 @@ flux_cli:
   # prompt as "... -- avoid: <neg>" since the CLI has no separate flag.
   fold_negative_into_prompt: true
 
+visual_continuity:
+  # S08 storyboard prompt controls. Keep signature props recurring
+  # across the episode, but do not ask FLUX to include every prop in
+  # every panel.
+  props_per_beat: 2
+  prop_cooldown_beats: 1              # Avoid props used in the previous slide.
+  avoid_recently_used_props: true
+
 asset_hunt:
   # Master switch for S05 (PD Asset Hunt). When false, S05 writes an
   # empty asset_manifest.json and returns immediately — no Wikimedia
