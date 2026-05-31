@@ -301,6 +301,7 @@ class Config:
             "shorts_enabled": True,
             "shorts_count": 3,
             "shorts_target_seconds": 30.0,
+            "shorts_exclude_callout_beats": True,
             "shorts_burn_subtitles": True,
             "show_channel_logo": True,
         }

@@ -66,10 +66,17 @@ def pick_windows(
     template = template_path.read_text()
 
     beats = beat_sheet.get("beats", [])
+    exclude_callouts = bool(cfg.packaging.get("shorts_exclude_callout_beats", True))
+    callout_beat_ids = {
+        b.get("beat_id", "") for b in beats
+        if exclude_callouts and (b.get("callouts") or [])
+    }
     # Build a compact beat table the LLM can pick from.
     beat_lines: list[str] = []
     for b in beats:
         bid = b.get("beat_id", "")
+        if bid in callout_beat_ids:
+            continue
         text = (b.get("script_text") or "")[:200].replace("\n", " ")
         beat_lines.append(f"{bid}: {text}")
     beats_dump = "\n".join(beat_lines)
@@ -81,6 +88,16 @@ def pick_windows(
             bid = b.get("beat_id", "")
             if bid:
                 starts_by_id[bid] = float(b.get("start_seconds", 0.0))
+    callout_intervals: list[tuple[float, float, str]] = []
+    if exclude_callouts and voice_timing:
+        for b in voice_timing.get("beats", []):
+            bid = b.get("beat_id", "")
+            if bid in callout_beat_ids:
+                callout_intervals.append((
+                    float(b.get("start_seconds", 0.0)),
+                    float(b.get("end_seconds", 0.0)),
+                    bid,
+                ))
 
     prompt = template.format(
         n=n,
@@ -100,8 +117,13 @@ def pick_windows(
 
     raw = result.get("windows") or result.get("clips") or []
     windows: list[ShortWindow] = []
-    for i, w in enumerate(raw[:n], start=1):
+    for w in raw:
+        if len(windows) >= n:
+            break
         start_bid = w.get("start_beat_id") or w.get("from_beat_id")
+        if start_bid in callout_beat_ids:
+            logger.info("shorts: skipped %s because it has callouts", start_bid)
+            continue
         # Prefer the LLM-provided start_seconds, fall back to looking
         # up the start_beat_id in voice_timing.
         start = w.get("start_seconds")
@@ -111,8 +133,18 @@ def pick_windows(
             continue
         start = float(start)
         end = start + target_seconds
+        if exclude_callouts and any(
+            start < c_end and end > c_start
+            for c_start, c_end, _bid in callout_intervals
+        ):
+            logger.info(
+                "shorts: skipped window %.1f-%.1f because it overlaps "
+                "a callout beat",
+                start, end,
+            )
+            continue
         windows.append(ShortWindow(
-            rank=i,
+            rank=len(windows) + 1,
             start_seconds=start,
             end_seconds=end,
             title_hint=(w.get("title_hint") or "")[:60],
@@ -183,6 +215,8 @@ def cut_short(
         "-ss", f"{start_seconds:.3f}",
         "-i", str(src_mp4),
         "-t", f"{duration_seconds:.3f}",
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
         "-vf", vf,
         "-c:v", "libx264", "-preset", "medium", "-crf", "20",
         "-pix_fmt", "yuv420p",

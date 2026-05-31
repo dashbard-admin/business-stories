@@ -37,6 +37,7 @@ from ..ffmpeg_builder import (
     concat_clips,
     get_duration_seconds,
     ken_burns_clip,
+    pad_audio_silence,
 )
 from ..music_library import MusicLibrary
 from ..sfx_library import SFXLibrary
@@ -129,6 +130,12 @@ def run(episode: dict, queue: dict) -> str | None:
     )
     conclusion_tail_seconds = max(
         0.0, float(cfg.production.get("conclusion_music_tail_seconds", 0))
+    )
+    append_like_subscribe = bool(
+        cfg.production.get("append_like_subscribe_clip", False)
+    )
+    like_subscribe_clip = _resolve_config_path(
+        cfg.production.get("like_subscribe_clip_path"), cfg.root
     )
 
     clip_paths: list[Path] = []
@@ -374,15 +381,38 @@ def run(episode: dict, queue: dict) -> str | None:
             "(production.closing_card_enabled=false or seconds=0)"
         )
 
+    # ----- optional generic like/subscribe outro clip -----
+    like_clip_duration = 0.0
+    if append_like_subscribe:
+        if like_subscribe_clip and like_subscribe_clip.exists():
+            try:
+                like_clip_duration = get_duration_seconds(like_subscribe_clip)
+                clip_paths.append(like_subscribe_clip)
+                logger.info(
+                    "S12 like/subscribe outro appended: %s (%.1fs)",
+                    like_subscribe_clip, like_clip_duration,
+                )
+            except Exception as e:
+                return f"like/subscribe clip invalid: {like_subscribe_clip}: {e}"
+        else:
+            return f"like/subscribe clip missing: {like_subscribe_clip}"
+
     # ----- concat -----
     # Preview mode (Batch B 2026-05-26): produces final_preview.mp4
     # to signal it's a tone-check render, not for upload.
     preview_mode = bool(episode.get("preview_mode"))
     final_name = "final_preview.mp4" if preview_mode else "final.mp4"
     final_mp4 = ws / "05_video" / final_name
+    audio_for_mux = final_mix
+    if like_clip_duration > 0:
+        audio_for_mux = ws / "04_audio" / "final_mix_s12_outro_padded.wav"
+        try:
+            pad_audio_silence(final_mix, audio_for_mux, 0.0, like_clip_duration)
+        except Exception as e:
+            return f"like/subscribe audio padding failed: {e}"
     try:
         video_timeline_seconds = sum(get_duration_seconds(p) for p in clip_paths)
-        audio_seconds = get_duration_seconds(final_mix)
+        audio_seconds = get_duration_seconds(audio_for_mux)
         drift = video_timeline_seconds - audio_seconds
         if abs(drift) > 8.0:
             return (
@@ -397,7 +427,7 @@ def run(episode: dict, queue: dict) -> str | None:
     except Exception as e:
         logger.warning("S12 timeline preflight skipped: %s", e)
     try:
-        concat_clips(clip_paths, final_mix, final_mp4)
+        concat_clips(clip_paths, audio_for_mux, final_mp4)
     except Exception as e:
         return f"final concat failed: {e}"
     if preview_mode:
@@ -457,6 +487,14 @@ def _image_path_for_beat(ws: Path, beat: dict) -> Path | None:
         if disk_path.exists() and disk_path.stat().st_size > 1000:
             return disk_path
     return None
+
+
+def _resolve_config_path(value, root: Path) -> Path | None:
+    if not value:
+        return None
+    text = str(value)
+    text = text.replace("${root}", str(root))
+    return Path(text).expanduser()
 
 
 def _align_beats_to_voice_timing(beats: list[dict], timing: dict) -> list[dict]:
