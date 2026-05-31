@@ -387,7 +387,7 @@ def cli() -> int:
     parser.add_argument(
         "--authorize-youtube", action="store_true",
         help=(
-            "one-time OAuth dance for the YouTube Analytics API. "
+            "one-time OAuth dance for YouTube analytics and uploads. "
             "Requires YOUTUBE_OAUTH_CLIENT_ID + "
             "YOUTUBE_OAUTH_CLIENT_SECRET in .env. Opens a browser; "
             "paste the auth code back. Token cached to "
@@ -410,6 +410,36 @@ def cli() -> int:
             "into 06_metadata/youtube_performance.json and updating "
             "state/performance_history.json. Manual run only — not "
             "in the per-cron stage flow."
+        ),
+    )
+    parser.add_argument(
+        "--build-youtube-package", metavar="EP_ID",
+        help=(
+            "build a reviewable YouTube upload package for EP_ID under "
+            "06_metadata/youtube_upload_package. Copies long-form video, "
+            "captions, thumbnail, Shorts, and metadata, but does not upload."
+        ),
+    )
+    parser.add_argument(
+        "--upload-youtube-package", metavar="EP_ID",
+        help=(
+            "upload a previously built YouTube package for EP_ID. Requires "
+            "--approve-youtube-upload in the same command."
+        ),
+    )
+    parser.add_argument(
+        "--approve-youtube-upload", action="store_true",
+        help=(
+            "explicit approval flag required with --upload-youtube-package. "
+            "Without this flag the upload command refuses to run."
+        ),
+    )
+    parser.add_argument(
+        "--youtube-privacy",
+        choices=("private", "unlisted", "public"),
+        help=(
+            "optional privacy override for --upload-youtube-package; "
+            "defaults to upload.default_privacy_status from config.yaml."
         ),
     )
     parser.add_argument("--status", action="store_true",
@@ -503,6 +533,40 @@ def cli() -> int:
     if args.analyse_performance:
         from .stages.s14_performance_writeback import run as s14_run
         return s14_run()
+
+    if args.build_youtube_package:
+        from .youtube_upload import build_upload_package
+        try:
+            result = build_upload_package(args.build_youtube_package)
+        except Exception as e:
+            print(f"--build-youtube-package: {e}", file=sys.stderr)
+            return 2
+        print(f"youtube package: {result.package_dir}")
+        print(f"manifest: {result.manifest_path}")
+        print(
+            f"contents: long_form={result.long_form_ready}, "
+            f"shorts={result.shorts_ready}"
+        )
+        return 0
+
+    if args.upload_youtube_package:
+        from .youtube_upload import upload_approved_package
+        try:
+            result = upload_approved_package(
+                args.upload_youtube_package,
+                approve=bool(args.approve_youtube_upload),
+                privacy_status=args.youtube_privacy,
+            )
+        except Exception as e:
+            print(f"--upload-youtube-package: {e}", file=sys.stderr)
+            return 2
+        long_form = result.get("long_form") or {}
+        print(f"uploaded long-form: {long_form.get('url')}")
+        shorts = result.get("shorts") or []
+        print(f"uploaded shorts: {len(shorts)}")
+        for s in shorts:
+            print(f"- {s.get('url')}")
+        return 0
 
     if args.status:
         q = load_queue()

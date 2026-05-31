@@ -8,7 +8,8 @@ from what worked.
 Setup (one-time):
   1. Create an OAuth client in Google Cloud Console (Desktop app type).
      Enable the YouTube Data API v3 and YouTube Analytics API on the
-     same project.
+     same project. Upload packaging also uses this token, so the
+     authorization scopes include upload/manage access.
   2. Put the client ID + secret in .env:
        YOUTUBE_OAUTH_CLIENT_ID=...
        YOUTUBE_OAUTH_CLIENT_SECRET=...
@@ -18,8 +19,11 @@ Setup (one-time):
      The refresh token gets cached at state/youtube_oauth_token.json
      (gitignored — it's a per-machine credential).
 
-After each upload, bind the episode to its uploaded video id:
+After a manual upload, bind the episode to its uploaded video id:
   python -m pipeline.hermes_orchestrator --set-video-id EP_017 <yt_video_id>
+
+Automatic uploads through --upload-youtube-package bind the long-form
+video id back to the queue automatically.
 
 Then run the writeback (manual per Q-E1 confirmed):
   python -m pipeline.hermes_orchestrator --analyse-performance
@@ -46,6 +50,8 @@ logger = logging.getLogger("hermes.youtube_analytics")
 OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/yt-analytics.readonly",
     "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/youtube",
+    "https://www.googleapis.com/auth/youtube.upload",
 ]
 
 

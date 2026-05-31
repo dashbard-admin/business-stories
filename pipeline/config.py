@@ -78,7 +78,19 @@ class Config:
 
     @property
     def upload(self) -> dict[str, Any]:
-        return self.raw.get("upload", {"mode": "manual"})
+        defaults = {
+            "mode": "package_then_approve",
+            "schedule_offset_hours": 36,
+            "default_privacy_status": "private",
+            "category_id": "27",
+            "default_language": "en",
+            "long_form_playlist_id": "",
+            "shorts_playlist_id": "",
+            "made_for_kids": False,
+            "tags": [],
+            "shorts_hashtags": ["Shorts"],
+        }
+        return {**defaults, **(self.raw.get("upload") or {})}
 
     @property
     def search(self) -> dict[str, Any]:

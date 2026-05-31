@@ -175,6 +175,7 @@ business_success_stories/
 │   ├── trends.py                ← S1 demand validation (YouTube + news counts)
 │   ├── music_library.py         ← operator-curated music bed picker
 │   ├── generic_stash.py         ← Tier-2 generic image fallback
+│   ├── youtube_upload.py        ← upload package builder + approved uploader
 │   ├── ffmpeg_builder.py        ← ffmpeg pipeline assembly
 │   ├── lexicon/
 │   │   └── pronunciation_overrides.yaml   ← Kokoro pronunciation map
@@ -331,7 +332,10 @@ Whisper.cpp wrapper for Shorts subtitles only. `transcribe(wav_path)` returns wo
 Picks 3 dramatic 30-second windows via `prompts/shorts_select.txt`, cuts each as 1080×1920 vertical with hard-burned subtitles (Q-D1: configurable via `cfg.packaging.shorts_burn_subtitles`). Reads `voice_timing.json` to resolve `start_beat_id` → seconds. With `cfg.packaging.shorts_exclude_callout_beats: true` (default), beats with Pillow callouts are excluded from the LLM candidate table and any returned window that overlaps a callout beat is skipped. The ffmpeg cutter explicitly maps `0:a:0?`, so Shorts inherit audio from `05_video/final.mp4` when the source has audio. Output: `05_video/shorts/short_NN.mp4` + `manifest.json`.
 
 ### 5.4g `youtube_analytics.py` *(added Batch E 2026-05-27)*
-YouTube Data + Analytics API client. OAuth installed-app flow via `authorize_oauth()` (one-time browser dance, refresh token cached at `state/youtube_oauth_token.json`). `YouTubeAnalytics().fetch_episode(video_id)` returns an `EpisodePerformance` dataclass with views, likes, CTR, AVD, retention curve, peak drop position, top traffic sources, impressions. Mock mode returns a canned response so the feedback loop is exercisable without real OAuth.
+YouTube Data + Analytics API client. OAuth installed-app flow via `authorize_oauth()` (one-time browser dance, refresh token cached at `state/youtube_oauth_token.json`). Scopes now include Analytics readback plus YouTube upload/playlist/caption/thumbnail access because `youtube_upload.py` shares the same token; re-run `--authorize-youtube` after pulling this change if the cached token is older/read-only. `YouTubeAnalytics().fetch_episode(video_id)` returns an `EpisodePerformance` dataclass with views, likes, CTR, AVD, retention curve, peak drop position, top traffic sources, impressions. Mock mode returns a canned response so the feedback loop is exercisable without real OAuth.
+
+### 5.4i `youtube_upload.py` *(added Batch N.9 2026-06-01)*
+Two-stage upload workflow. Stage 1 is local and safe: `build_upload_package(episode_id)` copies `05_video/final.mp4`, captions, chosen thumbnail, Shorts, and metadata into `06_metadata/youtube_upload_package/`, then writes `package_manifest.json` and `PACKAGE_SUMMARY.md` for review. Stage 2 is explicit: `upload_approved_package(episode_id, approve=True)` uploads the long-form video, thumbnail, caption file, and each Short to YouTube, optionally adding videos to configured playlists. It refuses to run unless the CLI includes `--approve-youtube-upload`. Successful long-form uploads update the queue record's `youtube_video_id`; Shorts IDs go to `youtube_shorts_video_ids`.
 
 ### 5.4h `performance_summary.py` *(added Batch E 2026-05-27)*
 Formats `state/performance_history.json` into prompt-ready strings consumed by S1 / S6 / S8. `summarise_for_prompt(history, k=20)` returns a dict with keys: `top_performing_story_kinds, worst_performing_story_kinds, retention_dip_warnings, visual_intents_that_retained, visual_intents_that_lost_viewers`. Q-E2 confirmed: summarised pattern + up to 3 concrete example episode IDs per warning. Empty / placeholder strings when fewer than 2 published episodes have been analysed.
@@ -367,9 +371,11 @@ Single CLI entry point. Holds the global file lock for the duration of one stage
 - `--rerender EP_ID BEAT_ID [--from-edited-prompt] [--force-grok]` *(added Batch B 2026-05-26; force-Grok added Batch N.2 2026-05-31)* — re-run S09 rendering for a single beat. Existing render + any Grok-corrected version archived to `03_assets/quarantine/` first. `--from-edited-prompt` re-reads the beat's FLUX prompt fresh from beat_sheet.json (operator edited it). `--force-grok` bypasses FLUX and renders the beat directly with Grok, then promotes the result to `03_assets/flux/BEAT_ID.png`.
 - `--narrator N_ID` / `--archetype A_ID` / `--visual-style V_ID` *(added Batch G 2026-05-28)* — modifier flags (use with `--enqueue` or `--inject-topic`). Pin the corresponding A/N/V dimension on the new episode(s), overriding the cooldown engine + `suits_story_kinds` gate. Useful for trialling a specific narrator voice (e.g. `--narrator N5` for the Sardonic Outsider) on a topic the gate wouldn't normally assign them to. Validated against `config.yaml` — typos exit cleanly.
 - `--rerun-from EP_ID STAGE_ID` *(added 2026-05-28)* — reset the named stage AND every later stage back to `pending` so the orchestrator re-runs them. Use after a config-flag flip that invalidates an earlier stage's output: `asset_hunt.enabled false→true` (rerun-from S5), `sfx_library.enabled false→true` (S11), `tts.backend kokoro→elevenlabs` (S10), narrator persona edit (S6), callout styling change (S12). Accepts `S5` / `s5` / `5`. Does NOT delete on-disk artifacts — those get overwritten when each stage runs.
-- `--authorize-youtube` *(added Batch E 2026-05-27)* — one-time OAuth dance for YouTube Analytics. Caches refresh token to `state/youtube_oauth_token.json`.
+- `--authorize-youtube` *(added Batch E 2026-05-27; scopes expanded Batch N.9 2026-06-01)* — one-time OAuth dance for YouTube Analytics and upload/manage APIs. Caches refresh token to `state/youtube_oauth_token.json`.
 - `--set-video-id EP_ID YT_VIDEO_ID` *(added Batch E 2026-05-27)* — bind a published video to an episode record so S14 can pull its metrics.
 - `--analyse-performance` *(added Batch E 2026-05-27)* — out-of-band run of S14 (NOT in the per-cron stage flow). Walks every episode with a video_id, writes metrics to `06_metadata/youtube_performance.json` and `state/performance_history.json`. Subsequent S1/S6/S8 reads the history via `pipeline.performance_summary.summarise_for_prompt()` and injects the patterns as soft guidance.
+- `--build-youtube-package EP_ID` *(added Batch N.9 2026-06-01)* — build a reviewable upload package under `06_metadata/youtube_upload_package/` containing long-form video, captions, thumbnail, Shorts, metadata JSON, descriptions, and `PACKAGE_SUMMARY.md`. Does not upload.
+- `--upload-youtube-package EP_ID --approve-youtube-upload [--youtube-privacy private|unlisted|public]` *(added Batch N.9 2026-06-01)* — upload the package to YouTube only after explicit approval. Defaults to `upload.default_privacy_status` from `config.yaml`; writes `upload_results.json` and updates queue video IDs.
 - `--status` — print queue state. Manual picks tagged `(manual)`; preview picks tagged `(preview)`; brand-safety flag counts surfaced as `(safety_flags=NH/NL)`.
 - `-v / --verbose` — DEBUG logging.
 - (default, no flags) — run one stage of the next pending episode and exit.
@@ -539,9 +545,11 @@ python -m pipeline.hermes_orchestrator --analyse-performance
 For every queue episode with `youtube_video_id` set, fetches YouTube Analytics, writes `06_metadata/youtube_performance.json`, computes per-`visual_intent` average retention (cross-references retention curve × voice_timing × beat_sheet), and upserts a summary into `state/performance_history.json`. Subsequent S1/S6/S8 runs read this history via `pipeline.performance_summary.summarise_for_prompt()` and inject the patterns as soft guidance.
 
 Operator workflow:
-1. Once-off: `--authorize-youtube` (browser dance, token cached).
-2. After each upload: `--set-video-id EP_NNN <youtube_video_id>`.
-3. Weekly (or whenever): `--analyse-performance`.
+1. Once-off: `--authorize-youtube` (browser dance, token cached; re-run if scopes changed).
+2. Build a package: `--build-youtube-package EP_NNN`.
+3. Review `06_metadata/youtube_upload_package/PACKAGE_SUMMARY.md` and metadata JSON files.
+4. Upload only when approved: `--upload-youtube-package EP_NNN --approve-youtube-upload`.
+5. Weekly (or whenever): `--analyse-performance`.
 
 ### S13 — Packaging *(added Batch D 2026-05-27)*  (`s13_packaging.py`)
 Runs after S12 with three phases:
@@ -824,9 +832,10 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-06-01 — N8 Felix persona with female Kokoro voice.*
+*This file last updated: 2026-06-01 — YouTube upload package and approval workflow.*
 
 ### Batch N — Topic And Script Generation Reliability — 2026-05-31
+- **YouTube package/upload workflow added** — `youtube_upload.py` creates a self-contained upload package with long-form video, captions, thumbnail, Shorts, metadata, and summaries. Upload requires `--upload-youtube-package EP_ID --approve-youtube-upload`, uses the expanded OAuth token, uploads long-form + Shorts, sets thumbnail/captions/playlists where configured, writes `upload_results.json`, and binds uploaded IDs back to the queue.
 - **N8 Felix Female Voice added** — `config.yaml > narrators` now enables N5/N6/N7/N8. N8 uses Felix's dry N5 persona instructions via a YAML anchor in `pipeline/style_profiles/narrators.yaml`, while Kokoro renders it with `bf_emma`.
 - **V3 Sunlit Editorial Comic added** — `pipeline/style_profiles/V3.yaml` defines a warmer optimistic editorial-comic look for great brand-origin, disruption, pivot, and underdog-comeback stories. `config.yaml > visual_styles` now registers V3 and story-kind gates all visual styles so V3 does not get assigned to scandal/collapse episodes.
 - **S01 and S06 retry budgets are bounded at 100** — `orchestrator.max_topic_discovery_retries` and `production.max_script_generation_attempts` default to 100, keeping topic/script generation persistent without allowing unbounded loops.

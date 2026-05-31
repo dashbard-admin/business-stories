@@ -295,8 +295,24 @@ topic_validation:
   reject_incumbent_traps: true
 
 upload:
-  mode: "manual"                    # "manual" only — no automatic upload in this pipeline
+  mode: "package_then_approve"      # build a reviewable package, then
+                                    # upload only via explicit approval CLI
   schedule_offset_hours: 36
+  default_privacy_status: "private" # private | unlisted | public
+  category_id: "27"                 # 27=Education, 22=People & Blogs
+  default_language: "en"
+  long_form_playlist_id: ""
+  shorts_playlist_id: ""
+  made_for_kids: false
+  tags:
+    - business history
+    - brand story
+    - company documentary
+    - business documentary
+    - startup history
+  shorts_hashtags:
+    - Shorts
+    - BusinessHistory
 
 search:
   backend: "searxng"
