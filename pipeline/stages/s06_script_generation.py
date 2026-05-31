@@ -26,6 +26,11 @@ logger = logging.getLogger("hermes.stage.s06")
 
 BEAT_RE = re.compile(r"##\s*BEAT\s+(\d+)\s*##", re.IGNORECASE)
 THINK_RE = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.DOTALL | re.IGNORECASE)
+CALLOUT_RE = re.compile(
+    r"\[\s*CALLOUT\s*:\s*[\"“‘]?([^\"”’\]]+)[\"”’]?\s*\]",
+    re.IGNORECASE,
+)
+SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]")
 
 ACT_SPECS = [
     ("ACT_0", "The Hook", 80, 2),
@@ -131,6 +136,52 @@ STRAY_TOKEN_RE = re.compile(
     re.IGNORECASE,
 )
 
+MONTH_RE = re.compile(
+    r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|"
+    r"Nov(?:ember)?|Dec(?:ember)?)\b\.?\s+\d{1,2}(?:st|nd|rd|th)?",
+    re.IGNORECASE,
+)
+
+MONEY_NUM_RE = re.compile(
+    r"\$\s*\d+(?:[.,]\d+)?\s*(?:million|billion|m|bn|b)?",
+    re.IGNORECASE,
+)
+MONEY_WORD_RE = re.compile(
+    r"\b((?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|"
+    r"twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
+    r"nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
+    r"hundred|thousand|million|billion|half|quarter|[-\s])+?)\s+"
+    r"(million|billion)\s+dollars\b",
+    re.IGNORECASE,
+)
+COUNT_WORD_RE = re.compile(
+    r"\b((?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|"
+    r"twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
+    r"nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
+    r"hundred|thousand|million|billion|[-\s])+?)\s+"
+    r"(users|customers|subscribers|creators|views|employees)\b",
+    re.IGNORECASE,
+)
+DURATION_RE = re.compile(
+    r"\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|"
+    r"twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
+    r"nineteen|twenty|thirty|forty|fifty|sixty|ninety|hundred)\s+"
+    r"(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b",
+    re.IGNORECASE,
+)
+YEAR_RE = re.compile(r"\b(19|20)\d{2}\b|\btwenty[-\s](?:ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twenty-one|twenty-two|twenty-three|twenty-four|twenty-five|twenty-six)\b", re.IGNORECASE)
+
+NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+    "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+    "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40,
+    "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80,
+    "ninety": 90,
+}
+
 
 def _clean(text: str) -> str:
     """Strip <think> tags, code fences, stray placeholder tokens, and
@@ -192,6 +243,175 @@ def _detect_dual_stream(text: str) -> tuple[bool, int, int]:
     orphans = len(ORPHAN_BEAT_RE.findall(text))
     is_dual = valid >= 5 and orphans >= max(3, valid // 2)
     return is_dual, valid, orphans
+
+
+def _number_words_to_int(text: str) -> int | None:
+    total = 0
+    current = 0
+    seen = False
+    for raw in re.split(r"[\s-]+", text.lower()):
+        word = raw.strip(" ,.")
+        if not word:
+            continue
+        if word in NUMBER_WORDS:
+            current += NUMBER_WORDS[word]
+            seen = True
+        elif word == "hundred":
+            current = max(1, current) * 100
+            seen = True
+        elif word == "thousand":
+            total += max(1, current) * 1000
+            current = 0
+            seen = True
+        elif word in {"million", "billion"}:
+            break
+    value = total + current
+    return value if seen and value > 0 else None
+
+
+def _compact_number_phrase(text: str, unit: str | None = None) -> str | None:
+    text = text.strip()
+    m = re.search(r"\d+(?:[.,]\d+)?", text)
+    if m:
+        value = float(m.group(0).replace(",", ""))
+    else:
+        parsed = _number_words_to_int(text)
+        if parsed is None:
+            return None
+        value = float(parsed)
+    if unit:
+        suffix = "B" if unit.lower().startswith("b") else "M"
+        return f"{int(value) if value.is_integer() else value:g}{suffix}"
+    return f"{int(value) if value.is_integer() else value:g}"
+
+
+def _callout_for_sentence(sentence: str) -> str | None:
+    money = MONEY_NUM_RE.search(sentence)
+    if money:
+        raw = money.group(0).upper().replace(" ", "")
+        raw = raw.replace("MILLION", "M").replace("BILLION", "B")
+        raw = raw.replace("BN", "B")
+        if len(raw) <= 20:
+            return raw
+
+    money_word = MONEY_WORD_RE.search(sentence)
+    if money_word:
+        compact = _compact_number_phrase(
+            money_word.group(1), unit=money_word.group(2)
+        )
+        if compact:
+            return f"${compact}"
+
+    count_word = COUNT_WORD_RE.search(sentence)
+    if count_word:
+        compact = _compact_number_phrase(
+            count_word.group(1), unit=(
+                "billion" if "billion" in count_word.group(1).lower()
+                else "million" if "million" in count_word.group(1).lower()
+                else None
+            ),
+        )
+        if compact:
+            label = count_word.group(2).upper()
+            return f"{compact} {label}"[:20]
+
+    duration = DURATION_RE.search(sentence)
+    if duration:
+        value = duration.group(0).upper()
+        value = re.sub(r"\bONE\b", "1", value)
+        value = re.sub(r"\bTWO\b", "2", value)
+        value = re.sub(r"\bTHREE\b", "3", value)
+        value = re.sub(r"\bFOUR\b", "4", value)
+        value = re.sub(r"\bFIVE\b", "5", value)
+        value = re.sub(r"\bSIX\b", "6", value)
+        if len(value) <= 20:
+            return value
+
+    month = MONTH_RE.search(sentence)
+    if month:
+        return month.group(0).upper().replace(".", "")[:20]
+
+    year = YEAR_RE.search(sentence)
+    if year:
+        y = year.group(0)
+        if y.lower().startswith("twenty"):
+            tail = y.lower().replace("-", " ").split()[-1]
+            year_map = {
+                "ten": "2010", "eleven": "2011", "twelve": "2012",
+                "thirteen": "2013", "fourteen": "2014",
+                "fifteen": "2015", "sixteen": "2016",
+                "seventeen": "2017", "eighteen": "2018",
+                "nineteen": "2019", "twenty": "2020",
+                "one": "2021", "two": "2022", "three": "2023",
+                "four": "2024", "five": "2025", "six": "2026",
+            }
+            return year_map.get(tail)
+        return y
+
+    return None
+
+
+def _ensure_callout_markers(
+    script: str,
+    *,
+    min_total: int,
+    target_total: int,
+    max_total: int,
+) -> tuple[str, dict]:
+    existing = CALLOUT_RE.findall(script)
+    desired = min(max_total, max(min_total, target_total))
+    if len(existing) >= desired or max_total <= 0:
+        return script, {"added": 0, "total": len(existing)}
+
+    used_text = {c.strip().upper() for c in existing}
+    used_beats = {
+        int(m.group(1))
+        for m in re.finditer(
+            r"##\s*BEAT\s+(\d+)\s*##(?:(?!##\s*BEAT\s+\d+\s*##).)*"
+            r"\[\s*CALLOUT\s*:",
+            script,
+            re.IGNORECASE | re.DOTALL,
+        )
+    }
+    parts = list(BEAT_RE.finditer(script))
+    inserts: list[tuple[int, str]] = []
+    target = min(max_total, max(desired, len(existing)))
+
+    for idx, marker in enumerate(parts):
+        if len(existing) + len(inserts) >= target:
+            break
+        beat_num = int(marker.group(1))
+        if beat_num in used_beats:
+            continue
+        start = marker.end()
+        end = parts[idx + 1].start() if idx + 1 < len(parts) else len(script)
+        beat_text = script[start:end]
+        for sent in SENTENCE_RE.finditer(beat_text):
+            sentence = sent.group(0).strip()
+            if "[CALLOUT:" in sentence.upper():
+                continue
+            callout = _callout_for_sentence(sentence)
+            if not callout:
+                continue
+            callout = callout.strip()[:20]
+            if not re.search(r"[\d$]", callout):
+                continue
+            if callout.upper() in used_text:
+                continue
+            insert_at = start + sent.end()
+            inserts.append((insert_at, f'\n[CALLOUT: "{callout}"]\n'))
+            used_text.add(callout.upper())
+            used_beats.add(beat_num)
+            break
+
+    if not inserts:
+        return script, {"added": 0, "total": len(existing)}
+
+    for pos, text in sorted(inserts, reverse=True):
+        script = script[:pos].rstrip() + text + script[pos:]
+    script = re.sub(r"(\[CALLOUT:[^\n]+\]\n)[ \t]+", r"\1", script)
+    total = len(CALLOUT_RE.findall(script))
+    return script, {"added": len(inserts), "total": total}
 
 
 def run(episode: dict, queue: dict) -> str | None:
@@ -495,6 +715,23 @@ def run(episode: dict, queue: dict) -> str | None:
             logger.info("S06 forbidden-phrase substitutions applied: %s",
                         ", ".join(f'{m}→{r}' for m, r in sub_log))
 
+    # Callout repair. The prompt asks for 3-6 numeric callouts, but
+    # act-by-act generation can under-deliver because each act sees
+    # only its own slice. Add safe markers after existing numeric
+    # sentences before S08 parses the beat sheet.
+    if cfg.callouts.get("enabled", True):
+        script, callout_info = _ensure_callout_markers(
+            script,
+            min_total=int(cfg.callouts.get("min_total", 3)),
+            target_total=int(cfg.callouts.get("target_total", 5)),
+            max_total=int(cfg.callouts.get("max_total", 6)),
+        )
+        if callout_info["added"]:
+            logger.info(
+                "S06 callout repair: added %d marker(s), total=%d",
+                callout_info["added"], callout_info["total"],
+            )
+
     (ws / "02_script").mkdir(exist_ok=True)
     (ws / "02_script" / "script.txt").write_text(script)
 
@@ -511,6 +748,7 @@ def run(episode: dict, queue: dict) -> str | None:
     (ws / "02_script" / "script_meta.json").write_text(json.dumps({
         "word_count": wc,
         "beat_count": len(beats),
+        "callout_count": len(CALLOUT_RE.findall(script)),
         "archetype": archetype,
         "narrator": narrator,
         "visual_style": visual_style,

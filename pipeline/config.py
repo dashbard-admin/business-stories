@@ -314,6 +314,9 @@ class Config:
         Pillow text overlays on the beat's image."""
         defaults = {
             "enabled": True,
+            "min_total": 3,
+            "target_total": 5,
+            "max_total": 6,
             "max_per_beat": 1,
             "font_size_pct": 0.10,
             "color": "#FFE600",
