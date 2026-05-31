@@ -1,0 +1,62 @@
+You are planning a Business & Brand Origin Stories documentary script.
+Do NOT write prose yet. Build the locked storyboard/writing blueprint
+that the act writer will follow.
+
+EPISODE:
+- Company: {incident_name}
+- Year anchor: {year}
+- Hero: {hero}
+- Conflict: {conflict}
+- Story kind: {story_kind}
+- Target words: {target_words} (acceptable final range {min_words}-{max_words})
+- Target beats: {target_beats}
+- Archetype: {archetype_name}
+  {archetype_guidance}
+- Narrator: {narrator_name} ({narrator_tone})
+- Visual style: {visual_style_name}
+
+ACT BUDGETS:
+{act_specs_json}
+
+FACT LEDGER — only these facts may be stated as true:
+{fact_ledger_json}
+
+CHARACTER ICONOGRAPHY:
+{character_iconography}
+
+PERFORMANCE FEEDBACK:
+{retention_dip_warnings}
+
+Your job:
+- Assign the strongest available fact IDs to each act.
+- Design Act 0 around a first-15-second contradiction, mystery, or consequence.
+- Give every act a hook_or_turn that creates forward motion.
+- Include documentary-evidence facts in ACT_3_5 when available.
+- Identify 3-6 numeric callout opportunities across the whole episode.
+- Keep recurring props concrete and story-specific, not generic logos.
+
+Return JSON only:
+{{
+  "acts": [
+    {{
+      "act_id": "ACT_0",
+      "title": "The Hook",
+      "target_words": 80,
+      "target_beats": 2,
+      "hook_or_turn": "specific retention purpose for this act",
+      "facts_to_use": ["claim ids"],
+      "beats": [
+        {{
+          "beat_goal": "what this beat must accomplish",
+          "fact_ids": ["claim ids"],
+          "visual_anchor": "specific object/person/place for continuity",
+          "callout_text": "$X.XB or null"
+        }}
+      ]
+    }}
+  ],
+  "recurring_props": ["specific physical props to repeat"],
+  "open_questions_to_pay_off": ["questions planted by hooks"]
+}}
+
+Output valid JSON only. No prose. No code fences.

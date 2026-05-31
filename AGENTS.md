@@ -158,7 +158,7 @@ business_success_stories/
 ├── .env / .env.example          ← secrets (gitignored / template)
 ├── pyproject.toml               ← dependencies
 ├── run_orchestrator.sh          ← cron entry point; detaches python
-├── run_full_auto_approve.sh     ← foreground all-stage runner; auto-approves gates until final.mp4
+├── run_full_auto_approve.sh     ← foreground all-stage runner; auto-approves review gates until final.mp4
 ├── pipeline/                    ← all code
 │   ├── __init__.py              ← SSL bootstrap + .env loader
 │   ├── hermes_orchestrator.py   ← CLI + lock + stage dispatch
@@ -209,10 +209,10 @@ Major blocks:
 - `channel` — branding (channel name, brand color, contact email).
 - `paths` — `${root}` is optional; defaults to the directory containing `config.yaml`.
 - `models` — logical model keys consumed by the LLM gateway. `mock_mode: true` makes every adapter return canned data.
-- `production` — duration / word-count targets, title-card styling, fade timings. *(retuned 2026-05-26 Batch A — 18-min midpoint, 2300-word target. Batch J 2026-05-29 added title/closing-card audio padding; Batch M.3 2026-05-30 keeps `opening_title_card_seconds: 1` and adds `closing_card_enabled` so credits can be hidden without losing the configured duration.)*
+- `production` — duration / word-count targets, title-card styling, fade timings. *(retuned 2026-05-26 Batch A — 18-min midpoint, 2300-word target. Batch J 2026-05-29 added title/closing-card audio padding; Batch M.3 2026-05-30 keeps `opening_title_card_seconds: 1` and adds `closing_card_enabled` so credits can be hidden without losing the configured duration. Batch N 2026-05-31 adds `script_act_by_act_enabled` so S06 writes from a blueprint + per-act prompts.)*
 - `quality_gates` — minimum source counts, beat counts, script word counts, audio LUFS bounds. *(beat/word windows widened 2026-05-26 Batch A.)*
 - `constraints` — `rolling_window_*` cooldowns for archetype/narrator/style.
-- `orchestrator` — lock staleness, max topic-discovery retries, per-invocation budget.
+- `orchestrator` — lock staleness, max topic-discovery retries, topic-discovery batch size, per-invocation budget.
 - `search` — SearXNG endpoint + tuning.
 - `music_library` — bed-track config + voice dynaudnorm settings.
 - `grok` — xAI image-regeneration endpoint/model/resolution + local upscale settings. **API key in env only**.
@@ -240,8 +240,8 @@ Cron-friendly wrapper. **Critical contract**: the python process must detach so 
 nohup python3 -m pipeline.hermes_orchestrator "$@" </dev/null >>"${LOGFILE}" 2>&1 &
 ```
 
-### `run_full_auto_approve.sh` *(added 2026-05-30; stdin hardening 2026-05-30)*
-Foreground operator runner for one complete video build. It calls `python3 -m pipeline.hermes_orchestrator` synchronously in a loop, runs `--approve EP_ID` whenever the selected episode reaches `needs_human`, and exits when `05_video/final.mp4` exists. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it targets that episode via `--run-episode EP_ID`. Logs to `logs/full_auto.<timestamp>.log`. The runner redirects stdin to `/dev/null` for orchestrator subprocesses so long SSH/agent launches can't leave Python inheriting a bad stdin descriptor during auto-approval.
+### `run_full_auto_approve.sh` *(added 2026-05-30; stdin hardening 2026-05-30; review-gate guard 2026-05-31)*
+Foreground operator runner for one complete video build. It calls `python3 -m pipeline.hermes_orchestrator` synchronously in a loop, runs `--approve EP_ID` only for configured review gates (`AUTO_APPROVE_STAGES`, default `S7 S8 S9`), and exits when `05_video/final.mp4` exists. It deliberately refuses to auto-approve S10+ build failures such as S12 timeline mismatch, because approving those marks the stage done without creating the artifact. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it targets that episode via `--run-episode EP_ID`. Logs to `logs/full_auto.<timestamp>.log`. The runner redirects stdin to `/dev/null` for orchestrator subprocesses so long SSH/agent launches can't leave Python inheriting a bad stdin descriptor during auto-approval.
 
 ### `README.md`
 Operator-facing quickstart. Less detail than this AGENTS.md; intended for the project owner, not for an AI agent reading the codebase cold.
@@ -378,7 +378,7 @@ Each stage module exports a `run(episode_dict, queue_dict) -> str | None` functi
 ### S01 — Topic Discovery (`s01_topic_discovery.py`)
 Picks the next topic. Two paths:
 
-1. **LLM path (default)**: prompts the writer LLM with `topic_discovery.txt`. The prompt is templated with `{decline_preference_hint}` (decline-bias editorial line), `{non_us_required_hint}` (hard requirement when rolling window is too US-heavy), `{recent_story_kinds}`, `{recent_countries}`, and the used-topics exclusion list. Up to `max_topic_discovery_retries` attempts; failed candidates feed their rejection reason back into the next attempt's prompt.
+1. **LLM path (default)**: prompts the writer LLM with `topic_discovery.txt`, then appends a batch-mode override. The prompt is templated with `{decline_preference_hint}` (decline-bias editorial line), `{non_us_required_hint}` (hard requirement when rolling window is too US-heavy), `{recent_story_kinds}`, `{recent_countries}`, and the used-topics exclusion list. Each attempt asks for `orchestrator.topic_discovery_batch_size` candidates (default 8), validates them locally in order, and accepts the first candidate that clears every gate. Up to `max_topic_discovery_retries` batch attempts; failed candidates feed their rejection reason back into the next prompt.
 2. **Manual path (`incident_origin == "manual"`)**: skips the LLM call, runs only dedup + country normalisation + (optionally) demand validation. Honors pin fields on the episode record.
 
 Gates (in order, cheap first):
@@ -434,6 +434,8 @@ Writer LLM with `script_generate.txt`. **Seven-act retention template at 120 wpm
 
 **BEAT 1 hook quality bar *(Batch M.1 2026-05-30)*:** Act 0 now explicitly requires the first 15 seconds to create a concrete mystery, contradiction, or consequence. A neutral fact is not enough, even if it has a date, filing, valuation, or court action. The opening must make the viewer ask "How did that happen?" or "Why does that matter?"
 
+**Blueprint + act-by-act generation *(Batch N 2026-05-31)*:** when `production.script_act_by_act_enabled: true`, S06 no longer asks the writer for one huge script first. It runs `script_blueprint.txt` to assign act budgets, fact IDs, hook turns, beat goals, recurring props, and callout opportunities, writes `02_script/script_blueprint.json`, then calls `script_act_generate.txt` once per act with the relevant act blueprint, previous-act tail, narrator persona, fact ledger, and beat range. The output is renumbered, cleaned, repaired for near-miss length issues, and only falls back to the older full-script retry loop if staged generation errors or returns an empty draft. Preview mode still uses the older compact full-script path.
+
 `[CALLOUT: "$9 BILLION"]` markers are **mandatory** (3-6 per script, hardened Batch H 2026-05-28, tightened Batch J 2026-05-29). Batch J rules:
 - HARD CAP: max 6 across the entire script (Quibi v3 shipped 36).
 - Word-only callouts are BANNED. Each CALLOUT must contain at least one digit OR a dollar sign OR a date abbreviation. "TIKTOK ERA", "BAD SUPER BOWL", "THE SHUTDOWN" are explicitly listed as wrong in the prompt.
@@ -441,13 +443,14 @@ Writer LLM with `script_generate.txt`. **Seven-act retention template at 120 wpm
 
 **Pattern-driven hook examples *(Batch J 2026-05-29)*:** the writer prompt no longer carries literal sentence templates for re-hooks or mid-roll cliffs. Pre-Batch J the LLM treated examples like "Nobody at the table that night could have predicted what was about to happen" and "It was a terrible idea. And he was about to bet everything on it." as substitution slots and copied them verbatim across episodes (Quibi v3 had at least five instances). Each example is replaced with a "PATTERN: ..." description plus an explicit "DO NOT WRITE [literal phrasing]" ban for the original example. The prompt still anchors the shape; the LLM must derive the sentence from the ledger.
 
-**Multi-pass length + forbidden-phrase retry loop** *(reworked Batch I.2 2026-05-28)*. `_generate_within_range` scores each draft by BOTH word-range fit AND clean-phrase status. Per-attempt logic:
+**Multi-pass length + forbidden-phrase retry loop** *(reworked Batch I.2 2026-05-28; deterministic cleanup moved earlier Batch N 2026-05-31)*. `_generate_within_range` scores each draft by BOTH word-range fit AND clean-phrase status. Per-attempt logic:
 - Build a pressure block: length-budget nudge if previous attempt was out-of-range, full forbidden-list nudge if previous attempt had hits. Both can fire.
 - Temperature decays per `production.script_generation_temp_step` (default 0.05).
+- Apply `forbidden_substitutions.yaml` before scoring a draft, so harmless phrase-level fixes do not force a full regeneration.
 - Selection priority: in_range+clean → return immediately. Else track best_in_range, best_clean, best_any.
 - After exhausting attempts: in_range+forbidden > clean+out_of_range > any. Never errors out for forbidden-phrase reasons; the rare ship-with-hits case is logged for operator review.
 
-**Post-retry substring substitution safety net *(Batch J 2026-05-29)*:** after the retry loop selects the best candidate but BEFORE `02_script/script.txt` is written, `_apply_substitutions()` runs `pipeline/lint/forbidden_substitutions.yaml` against the script. Each `{match, replace}` entry is case-insensitive substring; sentence-initial hits keep their leading capital via `_sub()`'s capitalization-preservation logic. Fired substitutions are logged at INFO level. The substitution table covers phrases that survive the retry loop (e.g. "a brilliant idea that failed" → "an ambitious idea that didn't survive the market") so they don't ship. This is purely a last-resort guardrail — the retry loop remains the preferred clean-up path.
+**Targeted repair safety net *(Batch J 2026-05-29; expanded Batch N 2026-05-31)*:** `_apply_substitutions()` runs `pipeline/lint/forbidden_substitutions.yaml` against drafts. Each `{match, replace}` entry is case-insensitive substring; sentence-initial hits keep their leading capital via `_sub()`'s capitalization-preservation logic. Fired substitutions are logged at INFO level. Staged generation also runs `_rewrite_forbidden_sentences()` if a phrase survives substitutions, and uses focused expand/condense passes for near-miss length errors instead of gambling on a fresh full-script draft.
 
 **Prompt log** *(added 2026-05-28)*: `02_script/script_prompt.txt` is overwritten on every attempt. After the loop returns, the file holds the prompt that produced the chosen draft (rewritten on fallback paths). Useful for diff-ing against the template + debugging.
 
@@ -545,12 +548,14 @@ Runs after S12 with three phases:
 
 | File | Used by | Placeholders | Purpose |
 |---|---|---|---|
-| `topic_discovery.txt` | S1 | `{current_year}, {max_year}, {used_topics_list}, {recent_story_kinds}, {recent_countries}, {decline_preference_hint}, {non_us_required_hint}` | Asks the writer for one topic. Schema includes `hq_country` (ISO 3166-1 alpha-2). |
+| `topic_discovery.txt` | S1 | `{current_year}, {max_year}, {used_topics_list}, {recent_story_kinds}, {recent_countries}, {decline_preference_hint}, {non_us_required_hint}` | Canonical topic schema; S01 appends a batch-mode override and asks for multiple candidates per attempt. Schema includes `hq_country` (ISO 3166-1 alpha-2). |
 | `fact_extract.txt` | S3 | `{incident_name}` | Per-source fact extraction. |
 | `fact_merge.txt` | S3 | `{incident_name}` | Dedup near-identical claims. |
 | `fact_verify.txt` | S4 | `{incident_name}` | Adversarial skeptic. |
 | `company_hq_consolidate.txt` | S3 | `{incident_name}` | Derive HQ `{city, state, country}` from facts. |
-| `script_generate.txt` | S6 | `{incident}, {narrator_block}, {archetype_block}, {target_words}, …` | 6-act template at 120 wpm. |
+| `script_generate.txt` | S6 fallback / preview | `{incident}, {narrator_block}, {archetype_block}, {target_words}, ...` | Full-script 7-act template at 120 wpm; now mainly fallback when staged generation fails, and preview-mode source. |
+| `script_blueprint.txt` *(added Batch N 2026-05-31)* | S6 primary | `{incident_name}, {fact_ledger_json}, {act_specs_json}, {narrator_*}, …` | Builds a validated act/beat/fact blueprint before prose generation. |
+| `script_act_generate.txt` *(added Batch N 2026-05-31)* | S6 primary | `{act_id}, {act_blueprint_json}, {beat_start}, {beat_end}, {prior_summary}, …` | Writes one act at a time using only the relevant blueprint slice and fact ledger. |
 | `script_critique.txt` | S7 | `{script}` | Retention + voice audit. |
 | `beat_sheet.txt` | S8 | `{script}, {target_beats}, …` | Beat split + visual_intent + sfx_cue. Batch M guidance asks for narrative-movie continuity, recurring props, and concrete scenes over generic symbolic panels. |
 | `character_iconography.txt` | S9 helper | `{founder}, {company}` | Per-episode founder appearance hint folded into FLUX prompts. |
@@ -796,7 +801,16 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-05-30 — Grok 1K upscale, credits toggle, ribbon top-right orientation.*
+*This file last updated: 2026-05-31 — batch topic discovery + staged script generation.*
+
+### Batch N — Topic And Script Generation Reliability — 2026-05-31
+- **S01 now validates topic batches** — each LLM attempt asks for `orchestrator.topic_discovery_batch_size` candidates, then local gates choose the first viable topic. This reduces single-candidate retry churn when dedup, non-US, incumbent-trap, or demand gates reject a good-looking but unusable idea.
+- **S06 now writes from a blueprint before prose** — `script_blueprint.txt` assigns act budgets, fact IDs, hook turns, beat goals, recurring props, and callout opportunities before any narration is generated.
+- **S06 now generates one act at a time** — `script_act_generate.txt` receives only the relevant act blueprint, previous-act tail, beat range, narrator persona, and fact ledger, then S06 renumbers beats and assembles the full script.
+- **Near-miss drafts are repaired instead of discarded** — forbidden substitutions run before scoring full-script attempts, staged drafts get targeted forbidden-sentence rewrite when needed, and close length misses use focused expand/condense passes before falling back to full regeneration.
+- **`run_full_auto_approve.sh` no longer approves build-stage blockers** — default `AUTO_APPROVE_STAGES` is `S7 S8 S9`, so review gates still clear automatically but S10+ artifact failures stop the run instead of producing a `DONE` episode with no `final.mp4`.
+
+*Previous: 2026-05-30 — Grok 1K upscale, credits toggle, ribbon top-right orientation.*
 
 ### Batch M.3 — Video Cost And Card Tweaks — 2026-05-30
 - **Corner ribbon callouts now render in the top-right only** — `corner_ribbon` placement is pinned to the top-right corner, angled northwest-to-southeast, for validation before adding other corners.
@@ -825,7 +839,7 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 *Previous: 2026-05-30 — targeted full-auto runner fix.*
 
 ### Full-auto local runner — 2026-05-30
-- **`run_full_auto_approve.sh` runs the selected episode continuously until S12 creates `05_video/final.mp4`** — unlike `run_orchestrator.sh`, it does not detach; it calls `python3 -m pipeline.hermes_orchestrator --run-episode EP_ID` synchronously in a loop, auto-runs `--approve EP_ID` whenever the selected episode hits a `needs_human` gate, and writes a combined operator log to `logs/full_auto.<timestamp>.log`. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it can continue that episode even if an older queue item exists. Environment knobs: `MAX_ITERATIONS`, `SLEEP_SECONDS`, and `PYTHON_BIN`.
+- **`run_full_auto_approve.sh` runs the selected episode continuously until S12 creates `05_video/final.mp4`** — unlike `run_orchestrator.sh`, it does not detach; it calls `python3 -m pipeline.hermes_orchestrator --run-episode EP_ID` synchronously in a loop, auto-runs `--approve EP_ID` for review gates only, and writes a combined operator log to `logs/full_auto.<timestamp>.log`. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it can continue that episode even if an older queue item exists. Environment knobs: `MAX_ITERATIONS`, `SLEEP_SECONDS`, `PYTHON_BIN`, and `AUTO_APPROVE_STAGES`.
 
 *Previous: 2026-05-29 — corner-ribbon callouts + per-callout font variation.*
 
