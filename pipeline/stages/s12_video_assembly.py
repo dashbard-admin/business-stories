@@ -69,6 +69,7 @@ def run(episode: dict, queue: dict) -> str | None:
         return "no voice_timing.json"
     timing = json.loads(timing_path.read_text())
     timing_by_beat = {b["beat_id"]: b for b in timing["beats"]}
+    beats = _align_beats_to_voice_timing(beats, timing)
 
     final_mix = ws / "04_audio" / "final_mix.wav"
     if not final_mix.exists():
@@ -418,6 +419,60 @@ def _clip_is_valid(path: Path) -> bool:
         return get_duration_seconds(path) > 0.0
     except Exception:
         return False
+
+
+def _align_beats_to_voice_timing(beats: list[dict], timing: dict) -> list[dict]:
+    """Return one beat-sheet row per voiced beat, in voice order.
+
+    S08 is LLM-shaped and can occasionally duplicate a beat_id. S10
+    derives voice_timing from the script itself, so it has the
+    authoritative one-row-per-spoken-beat timeline. If S12 renders a
+    duplicate beat-sheet row, it adds a clip with no extra audio and
+    trips the preflight drift gate. Keep the first matching beat row
+    and skip duplicates/missing rows with clear logs.
+    """
+    timing_ids = [str(b.get("beat_id") or "") for b in timing.get("beats", [])]
+    timing_set = set(timing_ids)
+    by_id: dict[str, dict] = {}
+    duplicates: list[str] = []
+    extras: list[str] = []
+    for beat in beats:
+        beat_id = str(beat.get("beat_id") or "")
+        if beat_id not in timing_set:
+            extras.append(beat_id or "(missing beat_id)")
+            continue
+        if beat_id in by_id:
+            duplicates.append(beat_id)
+            continue
+        by_id[beat_id] = beat
+
+    aligned: list[dict] = []
+    missing: list[str] = []
+    for beat_id in timing_ids:
+        beat = by_id.get(beat_id)
+        if beat is None:
+            missing.append(beat_id)
+            continue
+        aligned.append(beat)
+
+    if duplicates:
+        logger.warning(
+            "S12 beat/timing align: skipped duplicate beat_sheet ids: %s",
+            ", ".join(duplicates[:12]),
+        )
+    if extras:
+        logger.warning(
+            "S12 beat/timing align: skipped beat_sheet ids missing from "
+            "voice_timing: %s",
+            ", ".join(extras[:12]),
+        )
+    if missing:
+        logger.warning(
+            "S12 beat/timing align: voice_timing ids missing from "
+            "beat_sheet: %s",
+            ", ".join(missing[:12]),
+        )
+    return aligned
 
 
 def _duration_mismatch(
