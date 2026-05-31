@@ -402,6 +402,13 @@ music_library:
   voice_dynaudnorm_gauss: 11
   voice_dynaudnorm_max_gain: 9.0
 
+image_generation:
+  # S09 generated-image backend policy:
+  #   both — current behavior: FLUX first, Grok fallback when VLM flags issues
+  #   flux — FLUX only; never call Grok during normal S09 rendering
+  #   grok — Grok only; bypass FLUX for generated panels/title/credits
+  backend: "both"
+
 grok:
   # xAI Grok image-correction pass (S09 sub-phase). When a FLUX render
   # comes back with malformed / illegible text artifacts flagged by

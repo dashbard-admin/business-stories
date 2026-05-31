@@ -215,6 +215,7 @@ Major blocks:
 - `orchestrator` — lock staleness, max topic-discovery retries, topic-discovery batch size, per-invocation budget.
 - `search` — SearXNG endpoint + tuning.
 - `music_library` — bed-track config + voice dynaudnorm settings.
+- `image_generation` — S09 backend policy: `both` (FLUX first + VLM-triggered Grok fallback), `flux` only, or `grok` only.
 - `grok` — xAI image-regeneration endpoint/model/resolution + local upscale settings. **API key in env only**.
 - `flux_cli` — CLI binary + render dims (1920×1080, 24 steps).
 - `visual_continuity` — S08 storyboard prompt controls for recurring prop rotation (`props_per_beat`, `prop_cooldown_beats`, `avoid_recently_used_props`).
@@ -478,7 +479,12 @@ Splits the script into 65–95 beats *(beat window widened Batch A 2026-05-26 fo
 **In-flight gate *(added Batch B 2026-05-26)*:** when `cfg.orchestrator.gate_at_S08: true`, S08 writes the beat sheet to disk then returns a `needs_human` reason with a summary table (beat count, PD/FLUX split, visual_intent distribution). Operator inspects `02_script/beat_sheet.json` and clears with `--approve <ep_id>` to advance to S09. Default `false` — flip to `true` for the first few episodes to calibrate beat-distribution intuition before committing FLUX compute.
 
 ### S09 — FLUX Render (`s09_flux_render.py`)
-For each beat that routes to FLUX, the stage:
+For each generated-image beat, S09 follows `config.yaml > image_generation.backend`:
+- `both` — default/current behavior: render with FLUX, judge with VLM, and route to Grok only when the VLM flags malformed text or anatomy issues.
+- `flux` — FLUX only; Grok is never called during normal S09 or one-beat rerenders unless the operator passes `--force-grok`.
+- `grok` — Grok only; bypasses FLUX for generated beat panels plus title/credits backdrops. The output is still promoted to the canonical `03_assets/flux/*.png` path so S12 does not need separate downstream logic.
+
+For each beat that routes to generated imagery, the stage:
 
 *(Batch B 2026-05-26 — added the `rerender_single_beat(episode, beat_id, from_edited_prompt=False)` entry point that the orchestrator's `--rerender` CLI calls. Archives existing renders to `03_assets/quarantine/<beat_id>.<flux|grok>.<timestamp>.png` before re-rendering. Reuses the same VLM judge + Grok fallback path as the main loop. 2026-05-29 fix: rerender now uses per-attempt temp files, keeps the best rejected attempt when none pass, marks VLM outages as `unjudged`, and promotes successful Grok corrections to the canonical FLUX path. Batch N.2 2026-05-31 added `--force-grok`, which bypasses FLUX for that beat, renders from the beat's FLUX prompt through Grok, archives the forced Grok image under `03_assets/grok/`, and copies it to the canonical `03_assets/flux/<beat_id>.png` path with `image_qa.grok_correction.forced=true`.)*
 
@@ -489,7 +495,7 @@ For each beat that routes to FLUX, the stage:
 2. Renders N candidates via `flux.py`.
 3. Judges each via the VLM (`vlm.judge()`).
 4. Picks the best surviving candidate per `strict_borderline` policy.
-5. **Grok fallback sub-phase**: if the chosen verdict has `anatomy_ok == False` OR `_has_malformed_text(verdict)` flags malformed/illegible text artifacts, sends the original FLUX prompt to xAI Grok via `grok.regenerate_from_prompt()`. The corrected image replaces the FLUX image under the same filename; both versions are archived to `03_assets/grok/` for comparison.
+5. **Grok fallback sub-phase** (`image_generation.backend: both` only): if the chosen verdict has `anatomy_ok == False` OR `_has_malformed_text(verdict)` flags malformed/illegible text artifacts, sends the original FLUX prompt to xAI Grok via `grok.regenerate_from_prompt()`. The corrected image replaces the FLUX image under the same filename; both versions are archived to `03_assets/grok/` for comparison.
 
 S09 stores `image_qa.prompt_hash` and `image_qa.visual_prompt_version` *(Batch M 2026-05-30)*. If S08 regenerates a new storyboard prompt, S09 detects the prompt hash change and re-renders instead of silently reusing old passing images.
 
@@ -653,6 +659,7 @@ Resets `S5` AND every later stage to `pending`, points `current_stage` at `S5`, 
 | `asset_hunt.enabled` false → true | `S5` |
 | `image_qa.pd_direct_use_threshold` changed | `S8` |
 | `visual_continuity.*` changed | `S8` |
+| `image_generation.backend` changed | `S9` |
 | `sfx_library.enabled` false → true | `S11` |
 | `tts.backend` kokoro → elevenlabs | `S10` |
 | `wpm_effective` / `enforce_tts_wpm_effective` changed | `S10` |
@@ -819,6 +826,7 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 - **`run_full_auto_approve.sh` no longer approves build-stage blockers** — default `AUTO_APPROVE_STAGES` is `S7 S8 S9`, so review gates still clear automatically but S10+ artifact failures stop the run instead of producing a `DONE` episode with no `final.mp4`.
 - **S08/S12 now tolerate duplicate beat-sheet rows** — S08 drops duplicate `beat_id` rows before writing downstream prompts, and S12 aligns beat rows to `voice_timing.json` so old episodes with duplicate rows do not render extra panels without audio.
 - **S09 one-beat rerender can now force Grok** — `--rerender EP_ID BEAT_ID --force-grok` bypasses FLUX for that beat, renders with Grok from the stored FLUX prompt, archives the Grok image, and promotes it to the canonical FLUX asset path for S12.
+- **S09 can force an image backend globally** — `image_generation.backend` supports `both`, `flux`, and `grok`; `both` keeps the existing FLUX-first/VLM-triggered-Grok behavior, while `flux` and `grok` force a single provider for generated panels.
 - **S10 now enforces configured narration cadence** — `production.enforce_tts_wpm_effective` time-stretches `voice_full.wav` to the duration implied by script word count and `production.wpm_effective`, fixing Kokoro renders that came out much faster than the planned documentary pace.
 - **S11/S12 now support a music-only conclusion tail** — `production.conclusion_music_tail_seconds` pads the final mix and adds a static final-panel hold after narration ends.
 - **S12 opening title is a static hold** — the one-second title clip now uses `hold_still` with no fade or Ken Burns motion.
