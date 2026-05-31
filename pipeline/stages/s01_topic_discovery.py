@@ -91,12 +91,14 @@ def run(episode: dict, queue: dict) -> str | None:
     # been run over published episodes.
     perf = summarise_for_prompt()
 
+    batch_size = int(cfg.orchestrator.get("topic_discovery_batch_size", 8))
+
     for attempt in range(1, max_retries + 1):
         exclusion = "\n".join(f"  - {x}" for x in sorted(used)) or "  (none)"
         rejected_inline = "\n".join(
             f"  REJECTED previously this run: {r}" for r in rejection_reasons
         )
-        prompt = template.format(
+        single_prompt = template.format(
             current_year=current_year,
             max_year=max_year,
             used_topics_list=exclusion + ("\n" + rejected_inline if rejected_inline else ""),
@@ -107,102 +109,44 @@ def run(episode: dict, queue: dict) -> str | None:
             top_performing_story_kinds=perf["top_performing_story_kinds"],
             worst_performing_story_kinds=perf["worst_performing_story_kinds"],
         )
-        logger.info("topic discovery attempt %d (require_non_us=%s)",
-                    attempt, require_non_us)
+        prompt = _batch_topic_prompt(single_prompt, batch_size)
+        logger.info(
+            "topic discovery attempt %d (batch_size=%d, require_non_us=%s)",
+            attempt, batch_size, require_non_us,
+        )
         try:
-            candidate = llm.complete_json(prompt, temperature=0.8)
+            raw_candidates = llm.complete_json(prompt, temperature=0.75, max_tokens=6000)
         except Exception as e:
             rejection_reasons.append(f"LLM JSON parse failed: {e}")
             continue
 
-        # gate 1: required fields
-        name = (candidate.get("company_name") or "").strip()
-        if not name:
-            rejection_reasons.append("missing company_name")
-            continue
-        if not (candidate.get("founder_or_protagonist") or "").strip():
-            rejection_reasons.append(f"{name}: missing founder_or_protagonist")
-            continue
-        if not (candidate.get("hero") or "").strip():
-            rejection_reasons.append(f"{name}: missing hero field")
-            continue
-        if not (candidate.get("conflict") or "").strip():
-            rejection_reasons.append(f"{name}: missing conflict field")
+        candidates = _coerce_topic_candidates(raw_candidates)
+        if not candidates:
+            rejection_reasons.append("LLM returned no topic candidates")
             continue
 
-        # gate 2: dedup
-        if topic_already_used(name):
-            rejection_reasons.append(f"{name}: already used")
-            continue
-
-        # gate 3: recency (anchor year ≤ max_year)
-        year = candidate.get("year_anchor")
-        if not isinstance(year, int) or year > max_year:
-            rejection_reasons.append(f"{name}: year_anchor {year} fails recency gate")
-            continue
-
-        # gate 4: risk markers
-        risk = (candidate.get("demonetization_risk_notes") or "").lower()
-        risky_terms = [
-            "ongoing litigation", "active investigation",
-            "minors", "explicit gore", "recent terrorism",
-        ]
-        if any(t in risk for t in risky_terms):
-            rejection_reasons.append(f"{name}: risk flag matched ({risk[:60]})")
-            continue
-
-        # gate 5: basic structural validity
-        ok, why = is_valid_topic(
-            {"company_name": name, "year_anchor": year},
-            rolling,
-        )
-        if not ok:
-            rejection_reasons.append(f"{name}: {why}")
-            continue
-
-        # gate 5b (Batch F 2026-05-27): incumbent-trap filter. The
-        # company / founder is too saturated on YouTube — even a great
-        # script can't break into a niche dominated by 5M-view
-        # incumbents. Operator can disable via
-        # cfg.topic_validation.reject_incumbent_traps: false.
-        if tv_cfg.get("reject_incumbent_traps", True):
-            is_trap, token = is_incumbent_trap(candidate)
-            if is_trap:
-                rejection_reasons.append(
-                    f"{name}: incumbent-trap match on '{token}' — "
-                    f"topic is over-covered on YouTube; pick an "
-                    f"under-covered alternative"
-                )
-                continue
-
-        # gate 6: geographic diversity. If the rolling window says the
-        # next pick must be non-US, enforce it as a hard reject so the
-        # LLM gets feedback and tries again with a different country.
-        country = _normalise_country(candidate.get("hq_country"))
-        candidate["hq_country"] = country  # store normalised form back
-        if require_non_us and country == "US":
-            rejection_reasons.append(
-                f"{name}: hq_country=US but rolling window requires non-US "
-                f"(recent: {', '.join(recent_countries) or 'n/a'})"
+        for candidate in candidates:
+            accepted, reason, signals = _validate_topic_candidate(
+                candidate,
+                rolling=rolling,
+                tv_cfg=tv_cfg,
+                browser=browser,
+                max_year=max_year,
+                require_non_us=require_non_us,
+                recent_countries=recent_countries,
             )
-            continue
-
-        # gate 7: demand validation via SearXNG. This is the costliest
-        # gate (two network calls), so it runs last. Failure feeds back
-        # into the rejection list so the LLM proposes a different
-        # company on the next attempt.
-        verdict = validate_candidate(candidate, tv_cfg, browser)
-        last_signals = verdict.signals
-        if not verdict.ok:
-            rejection_reasons.append(f"{name}: {verdict.reason}")
-            continue
-
-        # Attach the demand signals to the candidate so downstream
-        # stages (and the operator's eyes) can see why this topic was
-        # accepted.
-        candidate["validation_signals"] = verdict.signals
-        incident = candidate
-        break
+            if accepted is None:
+                rejection_reasons.append(reason)
+                continue
+            last_signals = signals
+            incident = accepted
+            logger.info(
+                "topic discovery accepted %s from batch attempt %d",
+                incident.get("company_name"), attempt,
+            )
+            break
+        if incident is not None:
+            break
 
     if incident is None:
         return (
@@ -235,6 +179,126 @@ def run(episode: dict, queue: dict) -> str | None:
     _finalise_pick(episode, queue, incident, assignment, last_signals,
                    origin="llm")
     return None
+
+
+def _batch_topic_prompt(single_topic_prompt: str, batch_size: int) -> str:
+    """Convert the canonical one-topic prompt into a batch request.
+
+    The validation code still picks exactly one accepted topic. Asking
+    the writer for several candidates up front avoids burning a whole
+    LLM round trip every time a single idea fails dedup, geography, or
+    demand gates.
+    """
+    return (
+        single_topic_prompt
+        + "\n\nBATCH MODE OVERRIDE:\n"
+        + f"Instead of ONE topic, propose {batch_size} distinct topic "
+          "candidates in a single JSON array. Each array item must use "
+          "EXACTLY the same object schema described above. Diversify "
+          "companies, countries, story_kind, and central conflict. Put "
+          "your strongest, most source-rich, least saturated candidates "
+          "first because the local validator will accept the first item "
+          "that passes all gates.\n\n"
+          "OUTPUT FORMAT — JSON array only, no wrapper object, no prose, "
+          "no code fences:\n"
+          "[{...}, {...}]"
+    )
+
+
+def _coerce_topic_candidates(raw) -> list[dict]:
+    """Normalize batch/singleton LLM output into a candidate list."""
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    if isinstance(raw, dict):
+        for key in ("candidates", "topics", "topic_candidates"):
+            items = raw.get(key)
+            if isinstance(items, list):
+                return [x for x in items if isinstance(x, dict)]
+        return [raw]
+    return []
+
+
+def _validate_topic_candidate(
+    candidate: dict,
+    *,
+    rolling: dict,
+    tv_cfg: dict,
+    browser: Browser,
+    max_year: int,
+    require_non_us: bool,
+    recent_countries: list[str],
+) -> tuple[dict | None, str, dict]:
+    """Run the S01 gates for one candidate.
+
+    Returns `(candidate, "", signals)` on accept, or `(None, reason,
+    signals)` on reject.
+    """
+    # gate 1: required fields
+    name = (candidate.get("company_name") or "").strip()
+    if not name:
+        return None, "missing company_name", {}
+    if not (candidate.get("founder_or_protagonist") or "").strip():
+        return None, f"{name}: missing founder_or_protagonist", {}
+    if not (candidate.get("hero") or "").strip():
+        return None, f"{name}: missing hero field", {}
+    if not (candidate.get("conflict") or "").strip():
+        return None, f"{name}: missing conflict field", {}
+
+    # gate 2: dedup
+    if topic_already_used(name):
+        return None, f"{name}: already used", {}
+
+    # gate 3: recency (anchor year <= max_year)
+    year = candidate.get("year_anchor")
+    if not isinstance(year, int) or year > max_year:
+        return None, f"{name}: year_anchor {year} fails recency gate", {}
+
+    # gate 4: risk markers
+    risk = (candidate.get("demonetization_risk_notes") or "").lower()
+    risky_terms = [
+        "ongoing litigation", "active investigation",
+        "minors", "explicit gore", "recent terrorism",
+    ]
+    if any(t in risk for t in risky_terms):
+        return None, f"{name}: risk flag matched ({risk[:60]})", {}
+
+    # gate 5: basic structural validity
+    ok, why = is_valid_topic(
+        {"company_name": name, "year_anchor": year},
+        rolling,
+    )
+    if not ok:
+        return None, f"{name}: {why}", {}
+
+    # gate 5b: incumbent-trap filter.
+    if tv_cfg.get("reject_incumbent_traps", True):
+        is_trap, token = is_incumbent_trap(candidate)
+        if is_trap:
+            return (
+                None,
+                f"{name}: incumbent-trap match on '{token}' — topic is "
+                "over-covered on YouTube; pick an under-covered alternative",
+                {},
+            )
+
+    # gate 6: geographic diversity.
+    country = _normalise_country(candidate.get("hq_country"))
+    candidate["hq_country"] = country
+    if require_non_us and country == "US":
+        return (
+            None,
+            f"{name}: hq_country=US but rolling window requires non-US "
+            f"(recent: {', '.join(recent_countries) or 'n/a'})",
+            {},
+        )
+
+    # gate 7: demand validation via SearXNG.
+    verdict = validate_candidate(candidate, tv_cfg, browser)
+    if not verdict.ok:
+        return None, f"{name}: {verdict.reason}", verdict.signals
+
+    candidate["validation_signals"] = verdict.signals
+    return candidate, "", verdict.signals
 
 
 # ----------------------------------------------------------------------

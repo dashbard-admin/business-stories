@@ -27,6 +27,16 @@ logger = logging.getLogger("hermes.stage.s06")
 BEAT_RE = re.compile(r"##\s*BEAT\s+(\d+)\s*##", re.IGNORECASE)
 THINK_RE = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.DOTALL | re.IGNORECASE)
 
+ACT_SPECS = [
+    ("ACT_0", "The Hook", 80, 2),
+    ("ACT_1", "The Before", 430, 12),
+    ("ACT_2", "The Bet", 360, 11),
+    ("ACT_3", "The Crisis", 560, 16),
+    ("ACT_3_5", "The Investigation", 330, 9),
+    ("ACT_4", "The Pivot or Collapse", 440, 12),
+    ("ACT_5", "The Lesson", 300, 6),
+]
+
 # Strip Kokoro-poisoning terminal sign-offs ("End of script", "THE END",
 # "Fin.", "---END---") from the script tail.
 #
@@ -283,6 +293,20 @@ def run(episode: dict, queue: dict) -> str | None:
     from ..performance_summary import summarise_for_prompt
     perf = summarise_for_prompt()
 
+    fact_claims = [
+        {"id": c.get("claim_id"),
+         "fact_type": c.get("fact_type"),
+         "statement": c.get("canonical_statement"),
+         # Batch H 2026-05-28: pass document_citation through to
+         # the writer so Act 3.5 can cite filings/depositions
+         # verbatim instead of producing generic analysis.
+         "document_citation": c.get("document_citation"),
+         "exact_quote": c.get("exact_quote"),
+         "soft": c.get("soft", False)}
+        for c in ledger.get("claims", [])
+    ]
+    fact_ledger_json = json.dumps(fact_claims, indent=2)
+
     prompt = template.format(
         preview_mode_directive=preview_directive,
         incident_name=incident["company_name"],
@@ -301,19 +325,7 @@ def run(episode: dict, queue: dict) -> str | None:
         narrator_full_instructions=narr["full_instructions"],
         visual_style_name=style_yaml["name"],
         character_iconography=character_iconography,
-        fact_ledger_json=json.dumps(
-            [{"id": c.get("claim_id"),
-              "fact_type": c.get("fact_type"),
-              "statement": c.get("canonical_statement"),
-              # Batch H 2026-05-28: pass document_citation through to
-              # the writer so Act 3.5 can cite filings/depositions
-              # verbatim instead of producing generic analysis.
-              "document_citation": c.get("document_citation"),
-              "exact_quote": c.get("exact_quote"),
-              "soft": c.get("soft", False)}
-             for c in ledger.get("claims", [])],
-            indent=2,
-        ),
+        fact_ledger_json=fact_ledger_json,
         target_beats=target_beats,
         retention_dip_warnings=perf["retention_dip_warnings"],
     )
@@ -339,12 +351,45 @@ def run(episode: dict, queue: dict) -> str | None:
     # file holds the prompt that produced the chosen draft — useful
     # for diagnosing why a particular generation succeeded or failed.
     prompt_log_path = ws / "02_script" / "script_prompt.txt"
-    script = _generate_within_range(
-        llm, prompt, min_w=min_w, max_w=max_w, target_w=target_words,
-        max_attempts=max_attempts, temp_step=temp_step,
-        forbidden=forbidden,
-        prompt_log_path=prompt_log_path,
-    )
+    staged_enabled = bool(cfg.production.get("script_act_by_act_enabled", True))
+    script = ""
+    if staged_enabled and not preview_mode:
+        try:
+            script = _generate_via_blueprint_and_acts(
+                llm,
+                cfg=cfg,
+                ws=ws,
+                incident=incident,
+                archetype_name=arch["name"],
+                archetype_guidance=arch_guidance,
+                narrator_name=narr["name"],
+                narrator_tone=narr_cfg["tone"],
+                narrator_id=narrator,
+                narrator_full_instructions=narr["full_instructions"],
+                visual_style_name=style_yaml["name"],
+                character_iconography=character_iconography,
+                fact_ledger_json=fact_ledger_json,
+                retention_dip_warnings=perf["retention_dip_warnings"],
+                target_words=target_words,
+                min_words=min_w,
+                max_words=max_w,
+                target_beats=target_beats,
+                forbidden=forbidden,
+            )
+        except Exception as e:
+            logger.warning(
+                "S06 staged act-by-act generation failed; falling back "
+                "to full-script generation: %s", e,
+            )
+            script = ""
+
+    if not script:
+        script = _generate_within_range(
+            llm, prompt, min_w=min_w, max_w=max_w, target_w=target_words,
+            max_attempts=max_attempts, temp_step=temp_step,
+            forbidden=forbidden,
+            prompt_log_path=prompt_log_path,
+        )
 
     # Length gate — last-mile expand/condense
     wc = len(script.split())
@@ -472,6 +517,266 @@ def run(episode: dict, queue: dict) -> str | None:
     }, indent=2))
     logger.info("S06 complete: %d words, %d beats", wc, len(beats))
     return None
+
+
+# -------------------- staged script generation --------------------
+
+def _scaled_act_specs(target_words: int, target_beats: int) -> list[dict]:
+    base_words = sum(spec[2] for spec in ACT_SPECS)
+    base_beats = sum(spec[3] for spec in ACT_SPECS)
+    word_scale = target_words / max(1, base_words)
+    beat_scale = target_beats / max(1, base_beats)
+    specs: list[dict] = []
+    used_words = 0
+    used_beats = 0
+    for idx, (act_id, title, base_w, base_b) in enumerate(ACT_SPECS):
+        is_last = idx == len(ACT_SPECS) - 1
+        words = target_words - used_words if is_last else max(60, round(base_w * word_scale))
+        beats = target_beats - used_beats if is_last else max(1, round(base_b * beat_scale))
+        specs.append({
+            "act_id": act_id,
+            "title": title,
+            "target_words": int(words),
+            "target_beats": int(beats),
+        })
+        used_words += int(words)
+        used_beats += int(beats)
+    return specs
+
+
+def _generate_via_blueprint_and_acts(
+    llm,
+    *,
+    cfg,
+    ws: Path,
+    incident: dict,
+    archetype_name: str,
+    archetype_guidance: str,
+    narrator_name: str,
+    narrator_tone: str,
+    narrator_id: str,
+    narrator_full_instructions: str,
+    visual_style_name: str,
+    character_iconography: str,
+    fact_ledger_json: str,
+    retention_dip_warnings: str,
+    target_words: int,
+    min_words: int,
+    max_words: int,
+    target_beats: int,
+    forbidden: list[str],
+) -> str:
+    """Generate script as outline first, then one act at a time.
+
+    This lowers variance versus asking the writer for a full 2.5k-word
+    script in one pass. The old full-script generator remains the
+    fallback when this staged path returns an unusable draft.
+    """
+    act_specs = _scaled_act_specs(target_words, target_beats)
+    common = {
+        "incident_name": incident["company_name"],
+        "year": incident.get("year_anchor"),
+        "hero": incident.get("hero", ""),
+        "conflict": incident.get("conflict", ""),
+        "story_kind": incident.get("story_kind", ""),
+        "target_words": target_words,
+        "min_words": min_words,
+        "max_words": max_words,
+        "target_beats": target_beats,
+        "act_specs_json": json.dumps(act_specs, indent=2),
+        "archetype_name": archetype_name,
+        "archetype_guidance": archetype_guidance,
+        "narrator_name": narrator_name,
+        "narrator_tone": narrator_tone,
+        "narrator_id": narrator_id,
+        "narrator_full_instructions": narrator_full_instructions,
+        "visual_style_name": visual_style_name,
+        "character_iconography": character_iconography,
+        "fact_ledger_json": fact_ledger_json,
+        "retention_dip_warnings": retention_dip_warnings,
+    }
+
+    blueprint_template = (cfg.prompts_dir / "script_blueprint.txt").read_text()
+    blueprint_prompt = blueprint_template.format(**common)
+    (ws / "02_script").mkdir(exist_ok=True)
+    (ws / "02_script" / "script_blueprint_prompt.txt").write_text(blueprint_prompt)
+    logger.info("S06 staged generation: creating blueprint")
+    blueprint = llm.complete_json(
+        blueprint_prompt, temperature=0.35, max_tokens=6000,
+    )
+    blueprint = _normalize_blueprint(blueprint, act_specs)
+    (ws / "02_script" / "script_blueprint.json").write_text(
+        json.dumps(blueprint, indent=2)
+    )
+
+    act_template = (cfg.prompts_dir / "script_act_generate.txt").read_text()
+    act_texts: list[str] = []
+    prior_summary = ""
+    first_beat = 1
+    prompt_log_parts: list[str] = []
+    for spec in act_specs:
+        act_id = spec["act_id"]
+        act_blueprint = _blueprint_for_act(blueprint, act_id)
+        last_beat = first_beat + int(spec["target_beats"]) - 1
+        act_prompt = act_template.format(
+            **common,
+            act_id=act_id,
+            act_title=spec["title"],
+            act_target_words=spec["target_words"],
+            act_target_beats=spec["target_beats"],
+            beat_start=first_beat,
+            beat_end=last_beat,
+            act_blueprint_json=json.dumps(act_blueprint, indent=2),
+            prior_summary=prior_summary or "(this is the opening act)",
+            forbidden_phrases="\n".join(f"  - {p}" for p in forbidden),
+        )
+        prompt_log_parts.append(f"\n\n===== {act_id} PROMPT =====\n\n{act_prompt}")
+        logger.info(
+            "S06 staged generation: %s target=%d words/%d beats",
+            act_id, spec["target_words"], spec["target_beats"],
+        )
+        result = llm.complete(
+            act_prompt, temperature=0.62, max_tokens=4500,
+        )
+        act_text = _clean(result.text)
+        act_text = _strip_non_requested_act_headers(act_text)
+        act_texts.append(act_text)
+        prior_summary = _summarize_tail(act_text)
+        first_beat = last_beat + 1
+
+    (ws / "02_script" / "script_act_prompts.txt").write_text(
+        "".join(prompt_log_parts).strip()
+    )
+    script = "\n\n".join(part.strip() for part in act_texts if part.strip())
+    script = _renumber_beats(script)
+    script, sub_log = _apply_substitutions(script, _load_substitutions())
+    if sub_log:
+        logger.info(
+            "S06 staged substitutions applied: %s",
+            ", ".join(f"{m}->{r}" for m, r in sub_log),
+        )
+
+    wc = len(script.split())
+    hits = _find_forbidden(script, forbidden)
+    if hits:
+        script = _rewrite_forbidden_sentences(llm, script, hits, forbidden)
+        script, _ = _apply_substitutions(script, _load_substitutions())
+        hits = _find_forbidden(script, forbidden)
+        wc = len(script.split())
+
+    if wc > max_words and wc - max_words <= 450:
+        script = _condense_script(llm, script, max_words, target_words, max_attempts=2)
+    elif wc < min_words and min_words - wc <= 450:
+        script = _expand_script(llm, script, min_words, target_words, max_attempts=2)
+
+    logger.info(
+        "S06 staged generation complete candidate: %d words, %d beats, "
+        "%d forbidden hits",
+        len(script.split()), len(BEAT_RE.findall(script)),
+        len(_find_forbidden(script, forbidden)),
+    )
+    return script
+
+
+def _normalize_blueprint(raw, act_specs: list[dict]) -> dict:
+    if isinstance(raw, dict) and isinstance(raw.get("acts"), list):
+        acts = raw["acts"]
+    elif isinstance(raw, list):
+        acts = raw
+    else:
+        acts = []
+    by_id = {
+        str((a or {}).get("act_id") or "").upper().replace(".", "_"): a
+        for a in acts if isinstance(a, dict)
+    }
+    normalized = {"acts": []}
+    for spec in act_specs:
+        act = dict(by_id.get(spec["act_id"], {}))
+        act.setdefault("act_id", spec["act_id"])
+        act.setdefault("title", spec["title"])
+        act.setdefault("target_words", spec["target_words"])
+        act.setdefault("target_beats", spec["target_beats"])
+        act.setdefault("beats", [])
+        act.setdefault("facts_to_use", [])
+        act.setdefault("hook_or_turn", "")
+        normalized["acts"].append(act)
+    return normalized
+
+
+def _blueprint_for_act(blueprint: dict, act_id: str) -> dict:
+    for act in blueprint.get("acts") or []:
+        if str(act.get("act_id")) == act_id:
+            return act
+    return {"act_id": act_id}
+
+
+def _strip_non_requested_act_headers(text: str) -> str:
+    # The video pipeline only wants BEAT markers. Drop markdown act
+    # headings if the model emits them despite the prompt.
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if re.match(r"^#{1,6}\s*ACT\b", stripped, re.IGNORECASE):
+            continue
+        if re.match(r"^ACT\s+\d", stripped, re.IGNORECASE):
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def _summarize_tail(text: str, max_words: int = 90) -> str:
+    words = text.split()
+    if len(words) <= max_words:
+        return text.strip()
+    return " ".join(words[-max_words:])
+
+
+def _renumber_beats(script: str) -> str:
+    idx = 0
+
+    def repl(_m: re.Match[str]) -> str:
+        nonlocal idx
+        idx += 1
+        return f"## BEAT {idx} ##"
+
+    out = BEAT_RE.sub(repl, script)
+    if idx == 0 and out.strip():
+        out = f"## BEAT 1 ##\n\n{out.strip()}"
+    return out.strip()
+
+
+def _rewrite_forbidden_sentences(
+    llm,
+    script: str,
+    hits: list[str],
+    forbidden: list[str],
+) -> str:
+    """Targeted cleanup for forbidden phrases that substitutions miss."""
+    if not hits:
+        return script
+    prompt = (
+        "Rewrite only the sentences containing forbidden phrases in the "
+        "script below. Preserve all facts, all ## BEAT N ## markers, all "
+        "CALLOUT markers, and the overall word count. Do not rewrite the "
+        "whole script.\n\n"
+        "Forbidden phrases found:\n"
+        + "\n".join(f"  - {h}" for h in hits[:20])
+        + "\n\nFull forbidden list:\n"
+        + "\n".join(f"  - {p}" for p in forbidden)
+        + "\n\nReturn the FULL cleaned script only.\n\n"
+        f"SCRIPT:\n---\n{script}\n---\n"
+    )
+    try:
+        out = _clean(llm.complete(
+            prompt, temperature=0.35, max_tokens=12000,
+        ).text)
+    except Exception as e:
+        logger.warning("S06 forbidden sentence rewrite failed: %s", e)
+        return script
+    if len(out.split()) < 500:
+        logger.warning("S06 forbidden sentence rewrite returned too little text")
+        return script
+    return out
 
 
 # -------------------- forbidden phrase lint --------------------
@@ -804,6 +1109,15 @@ def _generate_within_range(
             prompt, temperature=temperature, max_tokens=12000,
         )
         script = _clean(result.text)
+        sub_table = _load_substitutions()
+        if sub_table:
+            script, sub_log = _apply_substitutions(script, sub_table)
+            if sub_log:
+                logger.info(
+                    "S06 attempt %d substitutions: %s",
+                    attempt + 1,
+                    ", ".join(f"{m}->{r}" for m, r in sub_log),
+                )
         wc = len(script.split())
         hits = _find_forbidden(script, forbidden) if forbidden else []
         last_wc = wc

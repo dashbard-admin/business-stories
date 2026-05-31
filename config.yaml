@@ -69,6 +69,9 @@ production:
   # 8 attempts) but better in-range hit rate. Fewer attempts =
   # faster but more `needs_human` from out-of-range scripts.
   max_script_generation_attempts: 20
+  # Generate S06 scripts as blueprint -> act-by-act drafts -> repair.
+  # The older full-script retry loop remains as fallback.
+  script_act_by_act_enabled: true
   # Per-attempt temperature step. Lower step = more creativity
   # preserved across retries. With step=0.05 and 8 attempts the
   # sequence is 0.75 / 0.70 / 0.65 / 0.60 / 0.55 / 0.50 / 0.45 /
@@ -162,6 +165,7 @@ constraints:
 orchestrator:
   stale_lock_hours: 6
   max_topic_discovery_retries: 5
+  topic_discovery_batch_size: 8
   per_invocation_max_runtime_seconds: 5400   # 90 min cap per cron run
 
   # In-flight gate after S08 (Batch B 2026-05-26). When true, S08

@@ -1,0 +1,66 @@
+You are writing ONE act of a Business & Brand Origin Stories
+documentary script. Use the blueprint below. Do not write any other
+act.
+
+EPISODE:
+- Company: {incident_name}
+- Year anchor: {year}
+- Hero: {hero}
+- Conflict: {conflict}
+- Story kind: {story_kind}
+- Final script target: {target_words} words, {target_beats} beats
+- Current act: {act_id} — {act_title}
+- Current act budget: {act_target_words} words, {act_target_beats} beats
+- Beat numbers for this act: ## BEAT {beat_start} ## through ## BEAT {beat_end} ##
+- Archetype: {archetype_name}
+  {archetype_guidance}
+- Narrator: {narrator_name} ({narrator_tone})
+- Visual style: {visual_style_name}
+
+ACT BLUEPRINT:
+{act_blueprint_json}
+
+PREVIOUS ACT TAIL / CONTINUITY:
+{prior_summary}
+
+FACT LEDGER — these are the ONLY facts you may state as true:
+{fact_ledger_json}
+
+CHARACTER ICONOGRAPHY:
+{character_iconography}
+
+PERFORMANCE FEEDBACK:
+{retention_dip_warnings}
+
+NARRATOR PERSONA INSTRUCTIONS — {narrator_id}:
+{narrator_full_instructions}
+
+RULES:
+- Write only {act_id}. Do not include act headings.
+- Use the requested BEAT markers only, starting at ## BEAT {beat_start} ##.
+- Each beat should carry 30-55 words of narration.
+- The act should land near {act_target_words} words; do not over-explain.
+- Preserve factual discipline: no invented dates, quotes, money, dialogue,
+  motives, employee counts, or legal findings.
+- Include [CALLOUT: "..."] only when the blueprint gives a numeric
+  opportunity or the fact ledger supports a concrete number/date.
+- A CALLOUT must contain a digit, dollar sign, or date abbreviation and
+  must be 20 characters or fewer.
+- Vary sentence length. After several long sentences, use one short
+  sentence for rhythm.
+- Keep the narrator persona active, but do not copy the persona examples.
+- Avoid every forbidden phrase below.
+
+FORBIDDEN PHRASES:
+{forbidden_phrases}
+
+SPECIAL ACT RULES:
+- ACT_0: the first sentence must contain a concrete number, date, or named
+  place from the ledger AND a contradiction, mystery, or consequence. No
+  channel intro.
+- ACT_3_5: cite documentary evidence by document name/date when the ledger
+  provides it. If evidence is thin, keep this act concise.
+- ACT_5: close with one concrete image. No "subscribe", no "in conclusion",
+  no generic lesson-summary phrasing.
+
+Output only the act prose with BEAT markers. No preamble. No code fences.
