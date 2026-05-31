@@ -52,7 +52,7 @@ production:
   target_words: 2500                # 120wpm × 18 min ≈ 2160 spoken words;
                                     # +160 buffer for SFX/music pauses.
   word_count_tolerance: 250
-  wpm_effective: 110                # Anchored to script_generate.txt
+  wpm_effective: 140                # Anchored to script_generate.txt
                                     # which schedules Act 0-5 hook
                                     # cadence at 120 wpm. Changing this
                                     # invalidates the hook timing the
@@ -407,7 +407,7 @@ image_generation:
   #   both — current behavior: FLUX first, Grok fallback when VLM flags issues
   #   flux — FLUX only; never call Grok during normal S09 rendering
   #   grok — Grok only; bypass FLUX for generated panels/title/credits
-  backend: "both"
+  backend: "grok"
 
 grok:
   # xAI Grok image-correction pass (S09 sub-phase). When a FLUX render
