@@ -354,6 +354,14 @@ def cli() -> int:
         ),
     )
     parser.add_argument(
+        "--force-grok", action="store_true",
+        help=(
+            "with --rerender: bypass FLUX and regenerate this beat "
+            "directly with Grok from the beat's FLUX prompt. The Grok "
+            "image is promoted to 03_assets/flux/BEAT_ID.png."
+        ),
+    )
+    parser.add_argument(
         "--authorize-youtube", action="store_true",
         help=(
             "one-time OAuth dance for the YouTube Analytics API. "
@@ -447,7 +455,9 @@ def cli() -> int:
     if args.rerender:
         ep_id, beat_id = args.rerender
         return _rerender_cmd(
-            ep_id, beat_id, from_edited_prompt=args.from_edited_prompt,
+            ep_id, beat_id,
+            from_edited_prompt=args.from_edited_prompt,
+            force_grok=args.force_grok,
         )
 
     if args.authorize_youtube:
@@ -716,6 +726,7 @@ def _rerender_cmd(
     beat_id: str,
     *,
     from_edited_prompt: bool = False,
+    force_grok: bool = False,
 ) -> int:
     """Re-run S09's FLUX render path for a single beat. Loads the
     episode workspace, locates the beat in beat_sheet.json, archives
@@ -745,6 +756,7 @@ def _rerender_cmd(
                 ok = s09.rerender_single_beat(
                     ep, beat_id,
                     from_edited_prompt=from_edited_prompt,
+                    force_grok=force_grok,
                 )
             except FileNotFoundError as e:
                 print(f"--rerender: {e}", file=sys.stderr)

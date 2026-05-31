@@ -57,8 +57,30 @@ def _is_good_enough(verdict: ImageVerdict, strict_borderline: bool) -> bool:
     return False
 
 
+def _image_backend(cfg) -> str:
+    raw = (cfg.raw.get("image_generation") or {}).get("backend", "both")
+    backend = str(raw or "both").strip().lower()
+    aliases = {
+        "auto": "both",
+        "fallback": "both",
+        "flux_only": "flux",
+        "only_flux": "flux",
+        "grok_only": "grok",
+        "only_grok": "grok",
+    }
+    backend = aliases.get(backend, backend)
+    if backend not in {"both", "flux", "grok"}:
+        logger.warning(
+            "S09: unknown image_generation.backend=%r; using 'both'",
+            raw,
+        )
+        return "both"
+    return backend
+
+
 def run(episode: dict, queue: dict) -> str | None:
     cfg = load_config()
+    image_backend = _image_backend(cfg)
     flux = Flux()
     ws = find_episode_workspace(episode["id"])
     if not ws:
@@ -84,7 +106,8 @@ def run(episode: dict, queue: dict) -> str | None:
     max_attempts = max(1, int(cfg.image_qa.get("max_attempts_per_beat", 2)))
     strict_borderline = bool(cfg.image_qa.get("strict_borderline", True))
     vlm: VLM | None = VLM() if qa_enabled else None
-    logger.info("S09: image QA %s, max_attempts_per_beat=%d, strict_borderline=%s",
+    logger.info("S09: image backend=%s, image QA %s, max_attempts_per_beat=%d, strict_borderline=%s",
+                image_backend,
                 "enabled" if qa_enabled else "disabled",
                 max_attempts, strict_borderline)
 
@@ -93,7 +116,8 @@ def run(episode: dict, queue: dict) -> str | None:
     grok = Grok()
     grok_prompt_template: str | None = None
     grok_dir = ws / "03_assets" / "grok"
-    if grok.available:
+    grok_needed = image_backend in {"both", "grok"}
+    if grok_needed and grok.available:
         try:
             grok_prompt_template = (
                 cfg.prompts_dir / "grok_text_correction.txt"
@@ -106,20 +130,29 @@ def run(episode: dict, queue: dict) -> str | None:
             logger.warning("S09: Grok prompt template unreadable "
                            "(%s); correction disabled", e)
             grok_prompt_template = None
-    else:
+    elif grok_needed:
         logger.info("S09: Grok text-correction disabled (%s)",
                     grok.unavailability_reason())
+        if image_backend == "grok":
+            return f"image_generation.backend=grok but Grok is unavailable: {grok.unavailability_reason()}"
+    else:
+        logger.info("S09: Grok disabled by image_generation.backend=flux")
 
     # ----- title + credits cards (rendered first so S12 can pick them up
     # even if the per-beat loop bails mid-way) -----
-    _render_title_card(ws=ws, episode=episode, cfg=cfg, flux=flux, flux_dir=flux_dir)
+    _render_title_card(
+        ws=ws, episode=episode, cfg=cfg, flux=flux, flux_dir=flux_dir,
+        image_backend=image_backend, grok=grok,
+        grok_prompt_template=grok_prompt_template,
+    )
     prod_cfg = cfg.production
     closing_card_enabled = bool(prod_cfg.get("closing_card_enabled", True))
     closing_card_seconds = float(prod_cfg.get("closing_card_seconds", 0))
     if closing_card_enabled and closing_card_seconds > 0:
         _render_credits_card(
             ws=ws, episode=episode, cfg=cfg, flux=flux, flux_dir=flux_dir,
-            manifest=manifest,
+            manifest=manifest, image_backend=image_backend, grok=grok,
+            grok_prompt_template=grok_prompt_template,
         )
     else:
         logger.info("S09 credits card render skipped (closing card disabled)")
@@ -145,15 +178,20 @@ def run(episode: dict, queue: dict) -> str | None:
         has_image = out_path.exists() and out_path.stat().st_size > 100
         stored_prompt_hash = existing_qa.get("prompt_hash")
         prompt_changed = bool(stored_prompt_hash and stored_prompt_hash != prompt_hash)
+        existing_provider = (existing_qa.get("image_backend") or "").lower()
+        provider_changed = (
+            image_backend in {"flux", "grok"}
+            and (existing_provider or "flux") != image_backend
+        )
 
         if has_image and existing_verdict in ("pass", "borderline", "unjudged"):
-            if not prompt_changed:
+            if not prompt_changed and not provider_changed:
                 if b.get("flux_asset_path") != str(out_path.relative_to(ws)):
                     b["flux_asset_path"] = str(out_path.relative_to(ws))
                     _persist()
                 continue
             logger.info(
-                "S09 %s prompt changed since existing render; re-rendering",
+                "S09 %s prompt/provider changed since existing render; re-rendering",
                 beat_id,
             )
 
@@ -195,24 +233,38 @@ def run(episode: dict, queue: dict) -> str | None:
         # Render-and-judge loop
         attempts: list[tuple[Path, ImageVerdict | None, int]] = []
         passing: tuple[Path, ImageVerdict | None, int] | None = None
+        selected_backend = "grok" if image_backend == "grok" else "flux"
 
         for attempt in range(max_attempts):
             seed_offset = attempt * 1000
             seed_used = compute_seed(fr["prompt"], seed_offset=seed_offset)
             attempt_target = flux_dir / f"{beat_id}_a{attempt}.png"
-            req = FluxRequest(
-                beat_id=beat_id,
-                prompt=fr["prompt"],
-                negative_prompt=fr.get("negative_prompt", ""),
-                out_path=attempt_target,
-                reference_image_path=fr.get("reference_image_path"),
-                reference_strength=float(fr.get("reference_strength", 0.5)),
-            )
-            chosen = flux.render_batch_with_retry(
-                req, num_candidates=1, seed_offset=seed_offset,
-            )
+            if image_backend == "grok":
+                chosen = _render_prompt_with_grok(
+                    grok=grok,
+                    prompt_template=grok_prompt_template,
+                    flux_prompt=fr["prompt"],
+                    out_path=attempt_target,
+                    label=beat_id,
+                )
+                seed_used = 0
+            else:
+                req = FluxRequest(
+                    beat_id=beat_id,
+                    prompt=fr["prompt"],
+                    negative_prompt=fr.get("negative_prompt", ""),
+                    out_path=attempt_target,
+                    reference_image_path=fr.get("reference_image_path"),
+                    reference_strength=float(fr.get("reference_strength", 0.5)),
+                )
+                chosen = flux.render_batch_with_retry(
+                    req, num_candidates=1, seed_offset=seed_offset,
+                )
             if not chosen or not chosen.exists():
-                logger.warning("S09 %s render attempt %d failed", beat_id, attempt + 1)
+                logger.warning(
+                    "S09 %s %s render attempt %d failed",
+                    beat_id, image_backend, attempt + 1,
+                )
                 continue
 
             verdict = vlm.critique_image(chosen, fr["prompt"]) if vlm else None
@@ -257,7 +309,7 @@ def run(episode: dict, queue: dict) -> str | None:
         # both the raw FLUX render and the Grok output are archived
         # to 03_assets/grok/<beat_id>_*.png for visual comparison.
         grok_correction_info: dict | None = None
-        if grok_prompt_template and grok.available and chosen_verdict:
+        if image_backend == "both" and grok_prompt_template and grok.available and chosen_verdict:
             # Two independent gate predicates. Either is enough to
             # route to Grok. Both checked here in the orchestrator
             # so the routing decision is auditable from one log line.
@@ -289,6 +341,7 @@ def run(episode: dict, queue: dict) -> str | None:
                     # chosen path. The original FLUX render lives on at
                     # grok_correction_info["original_archive_path"].
                     chosen_path = Path(grok_correction_info["corrected_path"])
+                    selected_backend = "grok"
                     logger.info("S09 %s: Grok corrected (triggers=%s)",
                                 beat_id, grok_correction_info.get("triggering_artifacts"))
                 else:
@@ -315,6 +368,7 @@ def run(episode: dict, queue: dict) -> str | None:
             "attempts": len(attempts),
             "seed": chosen_seed,
             "prompt_hash": prompt_hash,
+            "image_backend": selected_backend,
             "visual_prompt_version": b.get("visual_prompt_version"),
             **(chosen_verdict.to_dict()
                if chosen_verdict
@@ -399,6 +453,27 @@ def _log_verdict(
 
 
 # ---------------- Grok text-correction helpers ----------------
+
+def _render_prompt_with_grok(
+    *,
+    grok: Grok,
+    prompt_template: str | None,
+    flux_prompt: str,
+    out_path: Path,
+    label: str,
+) -> Path | None:
+    """Render one prompt with Grok, using the same prompt wrapper as fallback."""
+    if not grok.available:
+        logger.warning("S09 %s: Grok unavailable (%s)", label, grok.unavailability_reason())
+        return None
+    if not prompt_template:
+        logger.warning("S09 %s: Grok prompt template unavailable", label)
+        return None
+    grok_prompt = prompt_template.format(flux_prompt=flux_prompt)
+    result = grok.regenerate_from_prompt(prompt=grok_prompt, out_path=out_path)
+    if result is None or not out_path.exists():
+        return None
+    return out_path
 
 # Keyword set used to decide whether a VLM verdict implicates
 # malformed/illegible/garbled text in the rendered image. Checked
@@ -553,15 +628,114 @@ def _correct_text_via_grok(
     }
 
 
+def _rerender_single_beat_with_grok(
+    *,
+    target: dict,
+    beat_sheet: dict,
+    beat_sheet_path: Path,
+    ws: Path,
+    beat_id: str,
+    fr: dict,
+    out_path: Path,
+    grok_dir: Path,
+    ts: str,
+) -> bool:
+    """Force a one-beat Grok render and promote it to the FLUX path."""
+    cfg = load_config()
+    grok = Grok()
+    if not grok.available:
+        logger.warning(
+            "S09 force-grok: Grok unavailable for %s (%s)",
+            beat_id, grok.unavailability_reason(),
+        )
+        return False
+
+    template_path = cfg.prompts_dir / "grok_text_correction.txt"
+    try:
+        prompt_template = template_path.read_text()
+    except Exception as e:
+        logger.warning(
+            "S09 force-grok: prompt template unreadable for %s: %s",
+            beat_id, e,
+        )
+        return False
+
+    grok_dir.mkdir(parents=True, exist_ok=True)
+    forced_archive = grok_dir / f"{beat_id}_grok_forced_{ts}.png"
+    grok_prompt = prompt_template.format(flux_prompt=fr["prompt"])
+    logger.info("S09 force-grok: rendering %s with Grok", beat_id)
+    result = grok.regenerate_from_prompt(
+        prompt=grok_prompt,
+        out_path=forced_archive,
+    )
+    if not result or not forced_archive.exists():
+        logger.warning("S09 force-grok: Grok failed for %s", beat_id)
+        return False
+
+    try:
+        if out_path.exists():
+            out_path.unlink()
+        shutil.copy(str(forced_archive), str(out_path))
+    except Exception as e:
+        logger.warning("S09 force-grok: could not promote %s: %s", beat_id, e)
+        return False
+
+    target["flux_asset_path"] = str(out_path.relative_to(ws))
+    target["image_qa"] = {
+        "verdict": "unjudged",
+        "reasoning": "operator forced Grok rerender",
+        "rerendered_at": ts,
+        "prompt_hash": _prompt_hash(fr["prompt"]),
+        "image_backend": "grok",
+        "visual_prompt_version": target.get("visual_prompt_version"),
+        "grok_correction": {
+            "applied": True,
+            "forced": True,
+            "triggering_artifacts": ["operator --force-grok"],
+            "corrected_archive": str(forced_archive),
+        },
+    }
+    beat_sheet_path.write_text(json.dumps(beat_sheet, indent=2))
+    logger.info("S09 force-grok complete: %s -> %s",
+                forced_archive.name, out_path.name)
+    return True
+
+
 # ---------------- title + credits cards ----------------
 
-def _render_title_card(*, ws: Path, episode: dict, cfg, flux: Flux,
-                       flux_dir: Path) -> None:
+def _panel_backend_matches(out_path: Path, image_backend: str) -> bool:
+    meta_path = out_path.with_suffix(out_path.suffix + ".backend")
+    if not meta_path.exists():
+        return image_backend in {"both", "flux"}
+    return meta_path.read_text().strip().lower() == image_backend
+
+
+def _write_panel_backend(out_path: Path, image_backend: str) -> None:
+    try:
+        out_path.with_suffix(out_path.suffix + ".backend").write_text(image_backend)
+    except Exception:
+        pass
+
+def _render_title_card(
+    *,
+    ws: Path,
+    episode: dict,
+    cfg,
+    flux: Flux,
+    flux_dir: Path,
+    image_backend: str,
+    grok: Grok,
+    grok_prompt_template: str | None,
+) -> None:
     """Render the opening title-card panel. Composed prompt uses the
     visual-style prefix + a description derived from the incident's
     hero/conflict so the panel evokes the episode's tension."""
     out_path = flux_dir / "title.png"
-    if out_path.exists() and out_path.stat().st_size > 1000:
+    if (
+        out_path.exists()
+        and out_path.stat().st_size > 1000
+        and _panel_backend_matches(out_path, image_backend)
+    ):
         return  # idempotent
 
     visual_style = episode["visual_style"]
@@ -594,26 +768,50 @@ def _render_title_card(*, ws: Path, episode: dict, cfg, flux: Flux,
     )
     negative = f"{NO_TEXT_NEGATIVE}, {style_neg}"
 
-    req = FluxRequest(
-        beat_id="title",
-        prompt=composed,
-        negative_prompt=negative,
-        out_path=out_path,
-    )
-    chosen = flux.render_batch_with_retry(req, num_candidates=1, seed_offset=42)
+    if image_backend == "grok":
+        chosen = _render_prompt_with_grok(
+            grok=grok,
+            prompt_template=grok_prompt_template,
+            flux_prompt=f"{composed}. Avoid: {negative}.",
+            out_path=out_path,
+            label="title",
+        )
+    else:
+        req = FluxRequest(
+            beat_id="title",
+            prompt=composed,
+            negative_prompt=negative,
+            out_path=out_path,
+        )
+        chosen = flux.render_batch_with_retry(req, num_candidates=1, seed_offset=42)
     if chosen and chosen.exists():
+        _write_panel_backend(out_path, image_backend)
         logger.info("S09 title card rendered: %s", chosen)
     else:
         logger.warning("S09 title card render failed; S12 will fall back to ffmpeg-drawn card")
 
 
-def _render_credits_card(*, ws: Path, episode: dict, cfg, flux: Flux,
-                         flux_dir: Path, manifest: dict) -> None:
+def _render_credits_card(
+    *,
+    ws: Path,
+    episode: dict,
+    cfg,
+    flux: Flux,
+    flux_dir: Path,
+    manifest: dict,
+    image_backend: str,
+    grok: Grok,
+    grok_prompt_template: str | None,
+) -> None:
     """Render the closing credits/source-attribution backdrop. The
     actual attribution TEXT is composited by S12 over this panel —
     the FLUX panel is the backdrop only."""
     out_path = flux_dir / "credits.png"
-    if out_path.exists() and out_path.stat().st_size > 1000:
+    if (
+        out_path.exists()
+        and out_path.stat().st_size > 1000
+        and _panel_backend_matches(out_path, image_backend)
+    ):
         return
 
     visual_style = episode["visual_style"]
@@ -642,14 +840,24 @@ def _render_credits_card(*, ws: Path, episode: dict, cfg, flux: Flux,
     )
     negative = f"{NO_TEXT_NEGATIVE}, {style_neg}"
 
-    req = FluxRequest(
-        beat_id="credits",
-        prompt=composed,
-        negative_prompt=negative,
-        out_path=out_path,
-    )
-    chosen = flux.render_batch_with_retry(req, num_candidates=1, seed_offset=999)
+    if image_backend == "grok":
+        chosen = _render_prompt_with_grok(
+            grok=grok,
+            prompt_template=grok_prompt_template,
+            flux_prompt=f"{composed}. Avoid: {negative}.",
+            out_path=out_path,
+            label="credits",
+        )
+    else:
+        req = FluxRequest(
+            beat_id="credits",
+            prompt=composed,
+            negative_prompt=negative,
+            out_path=out_path,
+        )
+        chosen = flux.render_batch_with_retry(req, num_candidates=1, seed_offset=999)
     if chosen and chosen.exists():
+        _write_panel_backend(out_path, image_backend)
         logger.info("S09 credits card rendered: %s", chosen)
     else:
         logger.warning("S09 credits card render failed; S12 will fall back to ffmpeg-drawn card")
@@ -796,6 +1004,7 @@ def rerender_single_beat(
     beat_id: str,
     *,
     from_edited_prompt: bool = False,
+    force_grok: bool = False,
 ) -> bool:
     """Re-run FLUX render + VLM judge + Grok fallback for a single
     beat. Called by hermes_orchestrator's --rerender CLI flow.
@@ -808,6 +1017,12 @@ def rerender_single_beat(
     since we don't cache; the flag exists to make the operator's
     intent explicit.
 
+    `force_grok=True` bypasses FLUX entirely and asks Grok to render
+    the beat from the same prompt. Otherwise the configured
+    `image_generation.backend` policy is used. The chosen output is
+    promoted to the canonical 03_assets/flux/<beat_id>.png path so
+    downstream S12 continues to read the usual asset field.
+
     Archives the existing render (and any Grok-corrected version)
     to 03_assets/quarantine/<beat_id>_<timestamp>.png before
     re-rendering, so nothing gets silently overwritten without a
@@ -819,6 +1034,7 @@ def rerender_single_beat(
     from datetime import datetime, timezone
 
     cfg = load_config()
+    image_backend = "grok" if force_grok else _image_backend(cfg)
     ws = find_episode_workspace(episode["id"])
     if not ws:
         raise FileNotFoundError(
@@ -873,6 +1089,19 @@ def rerender_single_beat(
                     "for %s (edited-prompt path)", beat_id)
 
     out_path = flux_dir / f"{beat_id}.png"
+    if image_backend == "grok":
+        return _rerender_single_beat_with_grok(
+            target=target,
+            beat_sheet=beat_sheet,
+            beat_sheet_path=beat_sheet_path,
+            ws=ws,
+            beat_id=beat_id,
+            fr=fr,
+            out_path=out_path,
+            grok_dir=grok_dir,
+            ts=ts,
+        )
+
     qa_enabled = bool(cfg.image_qa.get("enabled", True))
     max_attempts = max(1, int(cfg.image_qa.get("max_attempts_per_beat", 2)))
     strict_borderline = bool(cfg.image_qa.get("strict_borderline", True))
@@ -935,7 +1164,8 @@ def rerender_single_beat(
 
     # Grok fallback if anatomy/text issues remain.
     grok = Grok()
-    if grok.available and chosen_verdict:
+    selected_backend = "flux"
+    if image_backend == "both" and grok.available and chosen_verdict:
         text_triggered, text_triggers = _has_malformed_text(chosen_verdict)
         anatomy_bad = not chosen_verdict.anatomy_ok
         triggers: list[str] = list(text_triggers)
@@ -962,6 +1192,7 @@ def rerender_single_beat(
                         if corrected_path != out_path:
                             shutil.copy(str(corrected_path), str(out_path))
                         chosen_path = out_path
+                        selected_backend = "grok"
                         logger.info(
                             "S09 rerender: promoted Grok correction for %s",
                             beat_id,
@@ -997,12 +1228,14 @@ def rerender_single_beat(
             "artifacts": chosen_verdict.artifacts,
             "reasoning": chosen_verdict.reasoning,
             "rerendered_at": ts,
+            "image_backend": selected_backend,
         }
     else:
         target["image_qa"] = {
             "verdict": "unjudged",
             "reasoning": "VLM unavailable",
             "rerendered_at": ts,
+            "image_backend": selected_backend,
         }
     beat_sheet_path.write_text(json.dumps(beat_sheet, indent=2))
     logger.info("S09 rerender complete: %s", chosen_path.name)

@@ -21,6 +21,7 @@ import soundfile as sf
 import yaml
 
 from ..config import load_config
+from ..ffmpeg_builder import get_duration_seconds, time_stretch_audio
 from ..state import find_episode_workspace
 from ..tts import KOKORO_SAMPLE_RATE, make_tts
 
@@ -71,6 +72,18 @@ def _strip_markdown(text: str) -> str:
     return text
 
 
+def _count_spoken_words(text: str) -> int:
+    """Count script words in the same rough frame as script_meta.
+
+    Count before number-to-word expansion so `2020` remains one script
+    word for duration planning, matching the writer's word budget and
+    operator-facing script_meta.json.
+    """
+    text = BEAT_RE.sub(" ", text)
+    text = PAUSE_RE.sub(" ", text)
+    return len(text.split())
+
+
 def run(episode: dict, queue: dict) -> str | None:
     cfg = load_config()
     ws = find_episode_workspace(episode["id"])
@@ -101,6 +114,7 @@ def run(episode: dict, queue: dict) -> str | None:
     # Collapse any double-spaces the strips leave behind, but preserve
     # newlines so BEAT_RE.match() still anchors to line starts cleanly.
     raw_script = re.sub(r"[ \t]+", " ", raw_script)
+    source_word_count = _count_spoken_words(raw_script)
 
     # Capture beat positions while stripping BEAT markers.
     beat_positions: list[tuple[int, int]] = []
@@ -172,8 +186,36 @@ def run(episode: dict, queue: dict) -> str | None:
 
     full = _crossfade_concat(voice_chunks, crossfade_samples)
     voice_full = ws / "04_audio" / "voice_full.wav"
-    sf.write(str(voice_full), full, KOKORO_SAMPLE_RATE, subtype="PCM_16")
+    raw_voice_full = ws / "04_audio" / "voice_full.raw_kokoro.wav"
+    sf.write(str(raw_voice_full), full, KOKORO_SAMPLE_RATE, subtype="PCM_16")
     voice_total_seconds = len(full) / KOKORO_SAMPLE_RATE
+
+    wpm_effective = max(1.0, float(cfg.production.get("wpm_effective", 110)))
+    target_voice_seconds = (source_word_count / wpm_effective) * 60.0
+    if (
+        bool(cfg.production.get("enforce_tts_wpm_effective", True))
+        and source_word_count > 0
+        and target_voice_seconds > 0
+        and abs(voice_total_seconds - target_voice_seconds) > 2.0
+    ):
+        try:
+            time_stretch_audio(raw_voice_full, voice_full, target_voice_seconds)
+            stretched_seconds = get_duration_seconds(voice_full)
+            logger.info(
+                "S10 WPM enforcement: %d words at %.1f wpm -> %.1fs "
+                "(raw Kokoro %.1fs, stretched %.1fs)",
+                source_word_count, wpm_effective, target_voice_seconds,
+                voice_total_seconds, stretched_seconds,
+            )
+            voice_total_seconds = stretched_seconds
+        except Exception as e:
+            logger.warning(
+                "S10 WPM enforcement failed (%s); using raw Kokoro timing",
+                e,
+            )
+            sf.write(str(voice_full), full, KOKORO_SAMPLE_RATE, subtype="PCM_16")
+    else:
+        sf.write(str(voice_full), full, KOKORO_SAMPLE_RATE, subtype="PCM_16")
     logger.info("voice_full.wav: %.1fs", voice_total_seconds)
 
     # Per-beat timing
@@ -196,6 +238,9 @@ def run(episode: dict, queue: dict) -> str | None:
     (ws / "04_audio" / "voice_timing.json").write_text(json.dumps({
         "total_seconds": voice_total_seconds,
         "sample_rate": KOKORO_SAMPLE_RATE,
+        "source_word_count": source_word_count,
+        "wpm_effective": wpm_effective,
+        "wpm_enforced": bool(cfg.production.get("enforce_tts_wpm_effective", True)),
         "beats": beat_timing,
         "narrator": episode["narrator"],
     }, indent=2))
