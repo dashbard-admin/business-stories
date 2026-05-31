@@ -553,6 +553,78 @@ def _correct_text_via_grok(
     }
 
 
+def _rerender_single_beat_with_grok(
+    *,
+    target: dict,
+    beat_sheet: dict,
+    beat_sheet_path: Path,
+    ws: Path,
+    beat_id: str,
+    fr: dict,
+    out_path: Path,
+    grok_dir: Path,
+    ts: str,
+) -> bool:
+    """Force a one-beat Grok render and promote it to the FLUX path."""
+    cfg = load_config()
+    grok = Grok()
+    if not grok.available:
+        logger.warning(
+            "S09 force-grok: Grok unavailable for %s (%s)",
+            beat_id, grok.unavailability_reason(),
+        )
+        return False
+
+    template_path = cfg.prompts_dir / "grok_text_correction.txt"
+    try:
+        prompt_template = template_path.read_text()
+    except Exception as e:
+        logger.warning(
+            "S09 force-grok: prompt template unreadable for %s: %s",
+            beat_id, e,
+        )
+        return False
+
+    grok_dir.mkdir(parents=True, exist_ok=True)
+    forced_archive = grok_dir / f"{beat_id}_grok_forced_{ts}.png"
+    grok_prompt = prompt_template.format(flux_prompt=fr["prompt"])
+    logger.info("S09 force-grok: rendering %s with Grok", beat_id)
+    result = grok.regenerate_from_prompt(
+        prompt=grok_prompt,
+        out_path=forced_archive,
+    )
+    if not result or not forced_archive.exists():
+        logger.warning("S09 force-grok: Grok failed for %s", beat_id)
+        return False
+
+    try:
+        if out_path.exists():
+            out_path.unlink()
+        shutil.copy(str(forced_archive), str(out_path))
+    except Exception as e:
+        logger.warning("S09 force-grok: could not promote %s: %s", beat_id, e)
+        return False
+
+    target["flux_asset_path"] = str(out_path.relative_to(ws))
+    target["image_qa"] = {
+        "verdict": "unjudged",
+        "reasoning": "operator forced Grok rerender",
+        "rerendered_at": ts,
+        "prompt_hash": _prompt_hash(fr["prompt"]),
+        "visual_prompt_version": target.get("visual_prompt_version"),
+        "grok_correction": {
+            "applied": True,
+            "forced": True,
+            "triggering_artifacts": ["operator --force-grok"],
+            "corrected_archive": str(forced_archive),
+        },
+    }
+    beat_sheet_path.write_text(json.dumps(beat_sheet, indent=2))
+    logger.info("S09 force-grok complete: %s -> %s",
+                forced_archive.name, out_path.name)
+    return True
+
+
 # ---------------- title + credits cards ----------------
 
 def _render_title_card(*, ws: Path, episode: dict, cfg, flux: Flux,
@@ -796,6 +868,7 @@ def rerender_single_beat(
     beat_id: str,
     *,
     from_edited_prompt: bool = False,
+    force_grok: bool = False,
 ) -> bool:
     """Re-run FLUX render + VLM judge + Grok fallback for a single
     beat. Called by hermes_orchestrator's --rerender CLI flow.
@@ -807,6 +880,11 @@ def rerender_single_beat(
     from disk, just unmodified) — semantically equivalent here
     since we don't cache; the flag exists to make the operator's
     intent explicit.
+
+    `force_grok=True` bypasses FLUX entirely and asks Grok to render
+    the beat from the same prompt. The Grok output is promoted to the
+    canonical 03_assets/flux/<beat_id>.png path so downstream S12
+    continues to read the usual asset field.
 
     Archives the existing render (and any Grok-corrected version)
     to 03_assets/quarantine/<beat_id>_<timestamp>.png before
@@ -873,6 +951,19 @@ def rerender_single_beat(
                     "for %s (edited-prompt path)", beat_id)
 
     out_path = flux_dir / f"{beat_id}.png"
+    if force_grok:
+        return _rerender_single_beat_with_grok(
+            target=target,
+            beat_sheet=beat_sheet,
+            beat_sheet_path=beat_sheet_path,
+            ws=ws,
+            beat_id=beat_id,
+            fr=fr,
+            out_path=out_path,
+            grok_dir=grok_dir,
+            ts=ts,
+        )
+
     qa_enabled = bool(cfg.image_qa.get("enabled", True))
     max_attempts = max(1, int(cfg.image_qa.get("max_attempts_per_beat", 2)))
     strict_borderline = bool(cfg.image_qa.get("strict_borderline", True))
