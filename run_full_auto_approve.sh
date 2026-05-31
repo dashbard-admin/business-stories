@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Run the current/next episode continuously until S12 produces final.mp4.
-# Any `needs_human` gate on the selected episode is approved automatically.
+# Review gates on the selected episode are approved automatically. Build
+# failures from S10+ are not review gates; stop instead of marking a
+# missing artifact as done.
 
 set -euo pipefail
 
@@ -28,6 +30,7 @@ exec </dev/null
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 MAX_ITERATIONS="${MAX_ITERATIONS:-80}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-2}"
+AUTO_APPROVE_STAGES="${AUTO_APPROVE_STAGES:-S7 S8 S9}"
 EP_ID="${1:-}"
 
 echo "full-auto runner log: ${LOGFILE}"
@@ -106,6 +109,11 @@ for ((iteration = 1; iteration <= MAX_ITERATIONS; iteration++)); do
   fi
 
   if [[ "${blocked}" == "true" ]]; then
+    if [[ " ${AUTO_APPROVE_STAGES} " != *" ${current_stage} "* ]]; then
+      echo "Episode ${EP_ID} is blocked at ${current_stage}; not auto-approving build-stage failures."
+      echo "Review the blocker in state/episode_queue.json and the latest log before rerunning."
+      exit 2
+    fi
     echo "auto-approving ${blocker_count} blocker(s) for ${EP_ID}"
     orchestrator --approve "${EP_ID}" || true
     sleep "${SLEEP_SECONDS}"

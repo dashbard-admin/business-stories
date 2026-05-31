@@ -158,7 +158,7 @@ business_success_stories/
 ├── .env / .env.example          ← secrets (gitignored / template)
 ├── pyproject.toml               ← dependencies
 ├── run_orchestrator.sh          ← cron entry point; detaches python
-├── run_full_auto_approve.sh     ← foreground all-stage runner; auto-approves gates until final.mp4
+├── run_full_auto_approve.sh     ← foreground all-stage runner; auto-approves review gates until final.mp4
 ├── pipeline/                    ← all code
 │   ├── __init__.py              ← SSL bootstrap + .env loader
 │   ├── hermes_orchestrator.py   ← CLI + lock + stage dispatch
@@ -240,8 +240,8 @@ Cron-friendly wrapper. **Critical contract**: the python process must detach so 
 nohup python3 -m pipeline.hermes_orchestrator "$@" </dev/null >>"${LOGFILE}" 2>&1 &
 ```
 
-### `run_full_auto_approve.sh` *(added 2026-05-30; stdin hardening 2026-05-30)*
-Foreground operator runner for one complete video build. It calls `python3 -m pipeline.hermes_orchestrator` synchronously in a loop, runs `--approve EP_ID` whenever the selected episode reaches `needs_human`, and exits when `05_video/final.mp4` exists. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it targets that episode via `--run-episode EP_ID`. Logs to `logs/full_auto.<timestamp>.log`. The runner redirects stdin to `/dev/null` for orchestrator subprocesses so long SSH/agent launches can't leave Python inheriting a bad stdin descriptor during auto-approval.
+### `run_full_auto_approve.sh` *(added 2026-05-30; stdin hardening 2026-05-30; review-gate guard 2026-05-31)*
+Foreground operator runner for one complete video build. It calls `python3 -m pipeline.hermes_orchestrator` synchronously in a loop, runs `--approve EP_ID` only for configured review gates (`AUTO_APPROVE_STAGES`, default `S7 S8 S9`), and exits when `05_video/final.mp4` exists. It deliberately refuses to auto-approve S10+ build failures such as S12 timeline mismatch, because approving those marks the stage done without creating the artifact. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it targets that episode via `--run-episode EP_ID`. Logs to `logs/full_auto.<timestamp>.log`. The runner redirects stdin to `/dev/null` for orchestrator subprocesses so long SSH/agent launches can't leave Python inheriting a bad stdin descriptor during auto-approval.
 
 ### `README.md`
 Operator-facing quickstart. Less detail than this AGENTS.md; intended for the project owner, not for an AI agent reading the codebase cold.
@@ -808,6 +808,7 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 - **S06 now writes from a blueprint before prose** — `script_blueprint.txt` assigns act budgets, fact IDs, hook turns, beat goals, recurring props, and callout opportunities before any narration is generated.
 - **S06 now generates one act at a time** — `script_act_generate.txt` receives only the relevant act blueprint, previous-act tail, beat range, narrator persona, and fact ledger, then S06 renumbers beats and assembles the full script.
 - **Near-miss drafts are repaired instead of discarded** — forbidden substitutions run before scoring full-script attempts, staged drafts get targeted forbidden-sentence rewrite when needed, and close length misses use focused expand/condense passes before falling back to full regeneration.
+- **`run_full_auto_approve.sh` no longer approves build-stage blockers** — default `AUTO_APPROVE_STAGES` is `S7 S8 S9`, so review gates still clear automatically but S10+ artifact failures stop the run instead of producing a `DONE` episode with no `final.mp4`.
 
 *Previous: 2026-05-30 — Grok 1K upscale, credits toggle, ribbon top-right orientation.*
 
@@ -838,7 +839,7 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 *Previous: 2026-05-30 — targeted full-auto runner fix.*
 
 ### Full-auto local runner — 2026-05-30
-- **`run_full_auto_approve.sh` runs the selected episode continuously until S12 creates `05_video/final.mp4`** — unlike `run_orchestrator.sh`, it does not detach; it calls `python3 -m pipeline.hermes_orchestrator --run-episode EP_ID` synchronously in a loop, auto-runs `--approve EP_ID` whenever the selected episode hits a `needs_human` gate, and writes a combined operator log to `logs/full_auto.<timestamp>.log`. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it can continue that episode even if an older queue item exists. Environment knobs: `MAX_ITERATIONS`, `SLEEP_SECONDS`, and `PYTHON_BIN`.
+- **`run_full_auto_approve.sh` runs the selected episode continuously until S12 creates `05_video/final.mp4`** — unlike `run_orchestrator.sh`, it does not detach; it calls `python3 -m pipeline.hermes_orchestrator --run-episode EP_ID` synchronously in a loop, auto-runs `--approve EP_ID` for review gates only, and writes a combined operator log to `logs/full_auto.<timestamp>.log`. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it can continue that episode even if an older queue item exists. Environment knobs: `MAX_ITERATIONS`, `SLEEP_SECONDS`, `PYTHON_BIN`, and `AUTO_APPROVE_STAGES`.
 
 *Previous: 2026-05-29 — corner-ribbon callouts + per-callout font variation.*
 
