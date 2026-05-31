@@ -51,6 +51,30 @@ def _beat_id_to_int(beat_id: str) -> int | None:
     return int(m.group(0)) if m else None
 
 
+def _dedupe_beat_rows(beats: list) -> list[dict]:
+    """Keep the first row for each beat_id and drop duplicates."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for item in beats:
+        if not isinstance(item, dict):
+            continue
+        beat_id = str(item.get("beat_id") or "").strip()
+        if not beat_id:
+            continue
+        if beat_id in seen:
+            duplicates.append(beat_id)
+            continue
+        seen.add(beat_id)
+        out.append(item)
+    if duplicates:
+        logger.warning(
+            "S08 beat-sheet duplicate beat_id rows dropped: %s",
+            ", ".join(duplicates[:12]),
+        )
+    return out
+
+
 def _estimate_seconds(text: str) -> float:
     return (len(text.split()) / WPM) * 60.0
 
@@ -535,6 +559,7 @@ def run(episode: dict, queue: dict) -> str | None:
 
     if not isinstance(beats, list) or not beats:
         return "beat-sheet output was empty or invalid"
+    beats = _dedupe_beat_rows(beats)
 
     # Inject script_text from disk so the per-beat prose stays
     # authoritative (the LLM does not echo it back).
