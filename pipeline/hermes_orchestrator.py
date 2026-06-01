@@ -442,6 +442,14 @@ def cli() -> int:
             "defaults to upload.default_privacy_status from config.yaml."
         ),
     )
+    parser.add_argument(
+        "--youtube-publish-at",
+        help=(
+            "optional scheduled publish timestamp for "
+            "--upload-youtube-package, e.g. 2026-06-02T18:00:00Z. "
+            "When set, YouTube requires privacy=private until publish."
+        ),
+    )
     parser.add_argument("--status", action="store_true",
                         help="print queue status and exit")
     parser.add_argument("-v", "--verbose", action="count", default=0)
@@ -556,6 +564,7 @@ def cli() -> int:
                 args.upload_youtube_package,
                 approve=bool(args.approve_youtube_upload),
                 privacy_status=args.youtube_privacy,
+                publish_at=args.youtube_publish_at,
             )
         except Exception as e:
             print(f"--upload-youtube-package: {e}", file=sys.stderr)

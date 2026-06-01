@@ -299,17 +299,19 @@ upload:
                                     # upload only via explicit approval CLI
   schedule_offset_hours: 36
   default_privacy_status: "private" # private | unlisted | public
+  publish_at: ""                    # optional RFC3339 UTC timestamp,
+                                    # e.g. 2026-06-02T18:00:00Z.
+                                    # CLI --youtube-publish-at overrides.
   category_id: "27"                 # 27=Education, 22=People & Blogs
   default_language: "en"
   long_form_playlist_id: ""
-  shorts_playlist_id: ""
+  shorts_playlist_id: ""            # YouTube has playlists, not folders;
+                                    # set this to your "Shorts" playlist ID.
   made_for_kids: false
+  max_tags: 3                       # keep tags sparse to avoid spam signals
   tags:
     - business history
     - brand story
-    - company documentary
-    - business documentary
-    - startup history
   shorts_hashtags:
     - Shorts
     - BusinessHistory

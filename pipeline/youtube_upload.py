@@ -75,9 +75,11 @@ def build_upload_package(episode_id: str) -> UploadPackageResult:
     incident = episode.get("incident") or {}
     titles = _load_titles(ws)
     title = _pick_title(titles, incident)
-    tags = _build_tags(incident, cfg.upload.get("tags") or [])
+    max_tags = int(cfg.upload.get("max_tags", 3))
+    tags = _build_tags(incident, cfg.upload.get("tags") or [], max_tags=max_tags)
     description = _build_long_description(ws, incident)
     thumb = _pick_thumbnail(ws)
+    publish_at = _normalize_publish_at(cfg.upload.get("publish_at"))
 
     long_video = long_dir / "final.mp4"
     shutil.copy2(final_mp4, long_video)
@@ -96,6 +98,7 @@ def build_upload_package(episode_id: str) -> UploadPackageResult:
         "tags": tags,
         "category_id": str(cfg.upload.get("category_id", "27")),
         "privacy_status": str(cfg.upload.get("default_privacy_status", "private")),
+        "publish_at": publish_at,
         "default_language": str(cfg.upload.get("default_language", "en")),
         "made_for_kids": bool(cfg.upload.get("made_for_kids", False)),
         "video_path": "long_form/final.mp4",
@@ -116,6 +119,8 @@ def build_upload_package(episode_id: str) -> UploadPackageResult:
         incident=incident,
         cfg_upload=cfg.upload,
         base_tags=tags,
+        max_tags=max_tags,
+        publish_at=publish_at,
     )
 
     manifest = {
@@ -157,6 +162,7 @@ def upload_approved_package(
     *,
     approve: bool,
     privacy_status: str | None = None,
+    publish_at: str | None = None,
 ) -> dict[str, Any]:
     """Upload a package to YouTube.
 
@@ -189,6 +195,10 @@ def upload_approved_package(
     privacy = privacy_status or manifest["long_form"].get(
         "privacy_status"
     ) or cfg.upload.get("default_privacy_status", "private")
+    publish_at_norm = _normalize_publish_at(
+        publish_at or manifest["long_form"].get("publish_at")
+        or cfg.upload.get("publish_at")
+    )
 
     results: dict[str, Any] = {
         "episode_id": episode_id,
@@ -202,6 +212,7 @@ def upload_approved_package(
         package_dir=package_dir,
         metadata=manifest["long_form"],
         privacy_status=privacy,
+        publish_at=publish_at_norm,
     )
     results["long_form"] = long_result
 
@@ -233,6 +244,7 @@ def upload_approved_package(
             package_dir=package_dir,
             metadata=short,
             privacy_status=privacy,
+            publish_at=publish_at_norm,
         )
         if short_result.get("video_id") and short.get("playlist_id"):
             _add_to_playlist(
@@ -270,12 +282,20 @@ def _upload_one_video(
     package_dir: Path,
     metadata: dict[str, Any],
     privacy_status: str,
+    publish_at: str | None,
 ) -> dict[str, Any]:
     from googleapiclient.http import MediaFileUpload
 
     video_path = package_dir / metadata["video_path"]
     description_path = package_dir / metadata["description_path"]
     description = description_path.read_text() if description_path.exists() else ""
+    effective_privacy = "private" if publish_at else privacy_status
+    status_body: dict[str, Any] = {
+        "privacyStatus": effective_privacy,
+        "selfDeclaredMadeForKids": bool(metadata.get("made_for_kids", False)),
+    }
+    if publish_at:
+        status_body["publishAt"] = publish_at
     body = {
         "snippet": {
             "title": metadata["title"][:100],
@@ -284,10 +304,7 @@ def _upload_one_video(
             "categoryId": str(metadata.get("category_id") or "27"),
             "defaultLanguage": metadata.get("default_language") or "en",
         },
-        "status": {
-            "privacyStatus": privacy_status,
-            "selfDeclaredMadeForKids": bool(metadata.get("made_for_kids", False)),
-        },
+        "status": status_body,
     }
     media = MediaFileUpload(
         str(video_path), mimetype="video/mp4", chunksize=-1, resumable=True
@@ -307,7 +324,8 @@ def _upload_one_video(
         "video_id": video_id,
         "url": f"https://www.youtube.com/watch?v={video_id}",
         "title": metadata.get("title"),
-        "privacy_status": privacy_status,
+        "privacy_status": effective_privacy,
+        "publish_at": publish_at,
     }
 
 
@@ -426,12 +444,22 @@ def _build_short_description(incident: dict[str, Any], hashtags: list[str]) -> s
     return f"{company} business history short.\n\n{tags}\n"
 
 
-def _build_tags(incident: dict[str, Any], defaults: list[str]) -> list[str]:
-    raw = list(defaults)
-    for key in ("company_name", "story_kind", "founder_or_protagonist"):
-        val = (incident.get(key) or "").strip()
-        if val:
-            raw.append(val)
+def _build_tags(
+    incident: dict[str, Any],
+    defaults: list[str],
+    *,
+    max_tags: int,
+) -> list[str]:
+    """Build a short, story-specific tag list.
+
+    YouTube tags are weak discovery signals and spammy tag blocks can
+    look low-quality, so we keep this intentionally tiny: company,
+    one hooky story-kind phrase, then one broad niche tag.
+    """
+    company = (incident.get("company_name") or "").strip()
+    story_kind = (incident.get("story_kind") or "").strip()
+    hook = _tag_for_story_kind(story_kind)
+    raw = [company, hook] + list(defaults)
     out: list[str] = []
     seen: set[str] = set()
     total_chars = 0
@@ -445,7 +473,23 @@ def _build_tags(incident: dict[str, Any], defaults: list[str]) -> list[str]:
         seen.add(key)
         out.append(clean)
         total_chars += len(clean)
+        if len(out) >= max(1, int(max_tags)):
+            break
     return out
+
+
+def _tag_for_story_kind(story_kind: str) -> str:
+    sk = story_kind.strip().lower()
+    mapping = {
+        "origin": "brand origin story",
+        "rise_and_fall": "business rise and fall",
+        "disruption": "market disruption story",
+        "pivot": "impossible business pivot",
+        "underdog_comeback": "underdog brand comeback",
+        "founder_drama": "founder drama",
+        "scandal_postmortem": "corporate scandal explained",
+    }
+    return mapping.get(sk, "business history")
 
 
 def _pick_thumbnail(ws: Path) -> Path | None:
@@ -471,6 +515,8 @@ def _build_shorts_package(
     incident: dict[str, Any],
     cfg_upload: dict[str, Any],
     base_tags: list[str],
+    max_tags: int,
+    publish_at: str | None,
 ) -> list[dict[str, Any]]:
     src_dir = ws / "05_video" / "shorts"
     manifest_path = src_dir / "manifest.json"
@@ -501,11 +547,14 @@ def _build_shorts_package(
             "rank": rank,
             "title": title[:100],
             "description_path": f"shorts/short_{rank:02d}/description.txt",
-            "tags": _build_tags(incident, base_tags + hashtags),
+            "tags": _build_tags(
+                incident, base_tags + hashtags, max_tags=max_tags,
+            ),
             "category_id": str(cfg_upload.get("category_id", "27")),
             "privacy_status": str(
                 cfg_upload.get("default_privacy_status", "private")
             ),
+            "publish_at": publish_at,
             "default_language": str(cfg_upload.get("default_language", "en")),
             "made_for_kids": bool(cfg_upload.get("made_for_kids", False)),
             "video_path": f"shorts/short_{rank:02d}/short_{rank:02d}.mp4",
@@ -534,6 +583,24 @@ def _rel(path: Path, root: Path) -> str:
     return str(path.relative_to(root))
 
 
+def _normalize_publish_at(value: Any) -> str | None:
+    """Return an RFC3339-ish UTC timestamp string or None.
+
+    Accepts empty values, a trailing-Z timestamp, or a Python ISO
+    timestamp with +00:00. Validation is intentionally light; YouTube
+    remains the final authority on whether the scheduled time is valid
+    and far enough in the future.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        return text
+    if text.endswith("+00:00"):
+        return text[:-6] + "Z"
+    return text
+
+
 def _write_summary(package_dir: Path, manifest: dict[str, Any]) -> None:
     lines = [
         f"YouTube Upload Package: {manifest['episode_id']}",
@@ -541,6 +608,8 @@ def _write_summary(package_dir: Path, manifest: dict[str, Any]) -> None:
         "Long form:",
         f"- video: {manifest['long_form']['video_path']}",
         f"- title: {manifest['long_form']['title']}",
+        f"- tags: {', '.join(manifest['long_form'].get('tags') or [])}",
+        f"- publish_at: {manifest['long_form'].get('publish_at')}",
         f"- thumbnail: {manifest['long_form'].get('thumbnail_path')}",
         f"- captions: {manifest['long_form'].get('caption_path')}",
         "",

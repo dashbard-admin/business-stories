@@ -82,11 +82,13 @@ class Config:
             "mode": "package_then_approve",
             "schedule_offset_hours": 36,
             "default_privacy_status": "private",
+            "publish_at": "",
             "category_id": "27",
             "default_language": "en",
             "long_form_playlist_id": "",
             "shorts_playlist_id": "",
             "made_for_kids": False,
+            "max_tags": 3,
             "tags": [],
             "shorts_hashtags": ["Shorts"],
         }
