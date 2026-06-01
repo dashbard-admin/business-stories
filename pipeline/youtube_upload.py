@@ -217,25 +217,38 @@ def upload_approved_package(
     results["long_form"] = long_result
 
     long_video_id = long_result.get("video_id")
+    post_upload_warnings: list[dict[str, str]] = []
     if long_video_id and manifest["long_form"].get("thumbnail_path"):
-        _set_thumbnail(
-            yt,
-            video_id=long_video_id,
-            path=package_dir / manifest["long_form"]["thumbnail_path"],
+        _safe_post_upload_step(
+            post_upload_warnings,
+            "long_form_thumbnail",
+            lambda: _set_thumbnail(
+                yt,
+                video_id=long_video_id,
+                path=package_dir / manifest["long_form"]["thumbnail_path"],
+            ),
         )
     if long_video_id and manifest["long_form"].get("caption_path"):
-        _insert_caption(
-            yt,
-            video_id=long_video_id,
-            path=package_dir / manifest["long_form"]["caption_path"],
-            language=manifest["long_form"].get("default_language", "en"),
-            name="English",
+        _safe_post_upload_step(
+            post_upload_warnings,
+            "long_form_caption",
+            lambda: _insert_caption(
+                yt,
+                video_id=long_video_id,
+                path=package_dir / manifest["long_form"]["caption_path"],
+                language=manifest["long_form"].get("default_language", "en"),
+                name="English",
+            ),
         )
     if long_video_id and manifest["long_form"].get("playlist_id"):
-        _add_to_playlist(
-            yt,
-            video_id=long_video_id,
-            playlist_id=manifest["long_form"]["playlist_id"],
+        _safe_post_upload_step(
+            post_upload_warnings,
+            "long_form_playlist",
+            lambda: _add_to_playlist(
+                yt,
+                video_id=long_video_id,
+                playlist_id=manifest["long_form"]["playlist_id"],
+            ),
         )
 
     for short in manifest.get("shorts") or []:
@@ -247,12 +260,17 @@ def upload_approved_package(
             publish_at=publish_at_norm,
         )
         if short_result.get("video_id") and short.get("playlist_id"):
-            _add_to_playlist(
-                yt,
-                video_id=short_result["video_id"],
-                playlist_id=short["playlist_id"],
+            _safe_post_upload_step(
+                post_upload_warnings,
+                f"short_{short.get('rank')}_playlist",
+                lambda sr=short_result, sh=short: _add_to_playlist(
+                    yt,
+                    video_id=sr["video_id"],
+                    playlist_id=sh["playlist_id"],
+                ),
             )
         results["shorts"].append(short_result)
+    results["post_upload_warnings"] = post_upload_warnings
 
     manifest["approved"] = True
     manifest["uploaded"] = True
@@ -274,6 +292,19 @@ def _youtube_client():
     if creds is None:
         return None
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
+
+
+def _safe_post_upload_step(
+    warnings: list[dict[str, str]],
+    step: str,
+    fn,
+) -> None:
+    try:
+        fn()
+    except Exception as e:
+        msg = str(e)
+        logger.warning("YouTube post-upload step failed: %s: %s", step, msg)
+        warnings.append({"step": step, "error": msg[:500]})
 
 
 def _upload_one_video(
