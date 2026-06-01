@@ -2,7 +2,7 @@
 # Edit this file. All modules read from it via pipeline/config.py.
 
 channel:
-  name: "Origin & Outcome"
+  name: "Winners & Wrecks"
   brand_color: "#1a2b3c"
   channel_id: ""                   # fill after YouTube channel creation
   contact_email: "you@example.com"
