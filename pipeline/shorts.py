@@ -326,6 +326,13 @@ def build_teaser_short(
         subprocess.run(cmd, check=True, capture_output=True,
                        stdin=subprocess.DEVNULL, timeout=300)
         return out_mp4.exists() and out_mp4.stat().st_size > 1000
+    except subprocess.CalledProcessError as e:
+        logger.warning(
+            "Shorts teaser final encode failed: %s — stderr=%s",
+            e.returncode,
+            (e.stderr or b"")[:1000],
+        )
+        return False
     except Exception as e:
         logger.warning("Shorts teaser final encode failed: %s", e)
         return False
@@ -631,6 +638,7 @@ def _drawtext_escape(text: str) -> str:
     text = text.replace("\\", "\\\\")
     text = text.replace("'", "\\'")
     text = text.replace(":", "\\:")
+    text = text.replace(",", "\\,")
     text = text.replace("%", "\\%")
     text = text.replace("\n", " ")
     return text

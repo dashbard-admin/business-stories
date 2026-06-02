@@ -832,9 +832,10 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-06-02 — fast teaser Shorts and multilingual subtitles.*
+*This file last updated: 2026-06-02 — Shorts drawtext punctuation fix.*
 
 ### Batch N — Topic And Script Generation Reliability — 2026-05-31
+- **Shorts caption burn escapes ffmpeg punctuation** — `pipeline.shorts._drawtext_escape()` escapes commas as well as quotes/colons/percent signs so teaser sentences like `Costolo, an...` do not break the ffmpeg filter graph. Final encode warnings now include ffmpeg stderr.
 - **Shorts are now fast teaser scripts, not long-form excerpts** — S13 uses `shorts_teaser_script.txt` to create one 30-second viral teaser script, renders fast Kokoro TTS around 230 WPM, reuses beat images with 3-5 second cuts, omits music/SFX, and writes per-Short `.srt` captions.
 - **YouTube upload packages include multilingual subtitles** — `upload.subtitle_languages` defaults to English plus zh-Hans, es, hi, ar, fr, bn, pt, ru, ur, and id. Package build translates long-form and Shorts SRT tracks with the writer LLM and upload loops through every `caption_track`.
 - **YouTube Shorts packaging now survives project moves** — `youtube_upload.py` no longer drops Shorts when `05_video/shorts/manifest.json` points at an old absolute workspace path; it resolves by current filename/rank under the episode's `05_video/shorts/` directory.
