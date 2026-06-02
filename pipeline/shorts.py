@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -115,6 +116,7 @@ def render_teaser_audio(
     target_seconds: float,
     target_wpm: float,
     tts_speed: float,
+    enforce_wpm: bool = False,
 ) -> tuple[Path, float]:
     """Render one fast Shorts voice track with no music or SFX."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -146,33 +148,47 @@ def render_teaser_audio(
     subprocess.run(cmd, check=True, capture_output=True, stdin=subprocess.DEVNULL)
 
     words = max(1, teaser.word_count)
-    desired = (words / max(1.0, target_wpm)) * 60.0
-    desired = min(float(target_seconds), max(10.0, desired))
-    try:
-        time_stretch_audio(raw_wav, final_wav, desired)
-    except Exception as e:
-        logger.warning("Shorts teaser time-stretch failed (%s); using raw TTS", e)
+    if enforce_wpm:
+        desired = (words / max(1.0, target_wpm)) * 60.0
+        desired = max(10.0, desired)
+        try:
+            time_stretch_audio(raw_wav, final_wav, desired)
+        except Exception as e:
+            logger.warning(
+                "Shorts teaser time-stretch failed (%s); using raw TTS", e
+            )
+            final_wav.write_bytes(raw_wav.read_bytes())
+    else:
         final_wav.write_bytes(raw_wav.read_bytes())
     duration = get_duration_seconds(final_wav)
     logger.info(
-        "shorts teaser TTS: %d words, target %.0f wpm -> %.1fs",
-        words, target_wpm, duration,
+        "shorts teaser TTS: %d words, target %.0f wpm, speed %.2f, "
+        "enforce_wpm=%s -> %.1fs",
+        words, target_wpm, tts_speed, enforce_wpm, duration,
     )
     return final_wav, duration
 
 
-def build_teaser_subtitles(script: str, duration_seconds: float) -> list[Segment]:
-    sentences = _split_sentences(script)
-    total_words = sum(len(s.split()) for s in sentences) or 1
+def build_teaser_subtitles(
+    script: str,
+    duration_seconds: float,
+    *,
+    max_words: int = 6,
+    max_chars: int = 44,
+) -> list[Segment]:
+    units = _split_caption_units(
+        script, max_words=max_words, max_chars=max_chars
+    )
+    total_words = sum(len(s.split()) for s in units) or 1
     cursor = 0.0
     out: list[Segment] = []
-    for sentence in sentences:
-        words = max(1, len(sentence.split()))
+    for unit in units:
+        words = max(1, len(unit.split()))
         seg_dur = float(duration_seconds) * (words / total_words)
         start = cursor
         end = min(float(duration_seconds), cursor + seg_dur)
         cursor = end
-        out.append(Segment(start_seconds=start, end_seconds=end, text=sentence))
+        out.append(Segment(start_seconds=start, end_seconds=end, text=unit))
     return out
 
 
@@ -233,6 +249,8 @@ def build_teaser_short(
     subtitles: list[Segment] | None,
     burn_subtitles: bool,
     seconds_per_image: float,
+    transition_seconds: float = 0.22,
+    motion_strength: float = 0.10,
 ) -> bool:
     """Create a vertical Short from still images plus standalone teaser audio."""
     if not image_paths:
@@ -244,13 +262,20 @@ def build_teaser_short(
     clip_paths: list[Path] = []
     needed = max(1, int(round(float(duration_seconds) / max(1.0, seconds_per_image) + 0.49)))
     images = [image_paths[i % len(image_paths)] for i in range(needed)]
-    base_dur = float(duration_seconds) / len(images)
+    transition = max(
+        0.0,
+        min(float(transition_seconds), max(1.0, seconds_per_image) / 2),
+    )
+    base_dur = (
+        (float(duration_seconds) + transition * max(0, len(images) - 1))
+        / len(images)
+    )
     for i, img in enumerate(images, start=1):
         clip = work_dir / f"img_{i:02d}.mp4"
-        vf = (
-            "scale=-2:1920:flags=lanczos,"
-            "crop=1080:1920,"
-            "setsar=1"
+        vf = _shorts_motion_filter(
+            index=i,
+            duration_seconds=base_dur,
+            motion_strength=motion_strength,
         )
         cmd = [
             require_ffmpeg(), "-y",
@@ -275,15 +300,19 @@ def build_teaser_short(
     if not clip_paths:
         return False
 
-    concat_file = work_dir / "concat.txt"
-    concat_file.write_text(
-        "".join(f"file '{p.as_posix()}'\n" for p in clip_paths)
-    )
+    video_only = work_dir / "video_only.mp4"
+    if not _join_short_clips(
+        clip_paths=clip_paths,
+        out_path=video_only,
+        clip_seconds=base_dur,
+        transition_seconds=transition,
+    ):
+        return False
+
     temp_mp4 = work_dir / "with_audio.mp4"
     cmd = [
         require_ffmpeg(), "-y",
-        "-f", "concat", "-safe", "0",
-        "-i", str(concat_file),
+        "-i", str(video_only),
         "-i", str(audio_path),
         "-t", f"{duration_seconds:.3f}",
         "-map", "0:v:0",
@@ -628,6 +657,131 @@ def _split_sentences(text: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+def _split_caption_units(
+    text: str, *, max_words: int, max_chars: int
+) -> list[str]:
+    units: list[str] = []
+    for sentence in _split_sentences(text):
+        words = sentence.split()
+        buf: list[str] = []
+        for word in words:
+            candidate = " ".join(buf + [word])
+            if (
+                buf
+                and (
+                    len(buf) >= max(1, max_words)
+                    or len(candidate) > max(12, max_chars)
+                )
+            ):
+                units.append(" ".join(buf))
+                buf = [word]
+            else:
+                buf.append(word)
+        if buf:
+            units.append(" ".join(buf))
+    return units or [text.strip()]
+
+
+def _shorts_motion_filter(
+    *, index: int, duration_seconds: float, motion_strength: float
+) -> str:
+    frames = max(1, int(round(duration_seconds * 30)))
+    strength = max(0.0, min(0.35, float(motion_strength)))
+    progress = f"on/{max(1, frames - 1)}"
+    zoom = f"1+{strength:.4f}*{progress}"
+    x_center = "(iw-iw/zoom)/2"
+    y_center = "(ih-ih/zoom)/2"
+    if index % 3 == 1:
+        x_expr = x_center
+        y_expr = y_center
+    elif index % 3 == 2:
+        x_expr = f"(iw-iw/zoom)*{progress}"
+        y_expr = y_center
+    else:
+        x_expr = f"(iw-iw/zoom)*(1-{progress})"
+        y_expr = y_center
+    return (
+        "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,"
+        "crop=1080:1920,"
+        f"zoompan=z='{zoom}':x='{x_expr}':y='{y_expr}'"
+        f":d={frames}:s=1080x1920:fps=30,"
+        "setsar=1"
+    )
+
+
+def _join_short_clips(
+    *,
+    clip_paths: list[Path],
+    out_path: Path,
+    clip_seconds: float,
+    transition_seconds: float,
+) -> bool:
+    if len(clip_paths) == 1:
+        shutil.copy2(clip_paths[0], out_path)
+        return True
+    transition = max(0.0, min(float(transition_seconds), clip_seconds / 2))
+    if transition > 0:
+        cmd: list[str] = [require_ffmpeg(), "-y"]
+        for p in clip_paths:
+            cmd.extend(["-i", str(p)])
+        parts: list[str] = []
+        prev = "[0:v]"
+        for idx in range(1, len(clip_paths)):
+            out_label = f"[v{idx}]"
+            offset = max(0.0, idx * (clip_seconds - transition))
+            parts.append(
+                f"{prev}[{idx}:v]xfade=transition=slideleft"
+                f":duration={transition:.3f}:offset={offset:.3f}"
+                f"{out_label}"
+            )
+            prev = out_label
+        cmd.extend([
+            "-filter_complex", ";".join(parts),
+            "-map", f"[v{len(clip_paths) - 1}]",
+            "-an",
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            str(out_path),
+        ])
+        try:
+            subprocess.run(cmd, check=True, capture_output=True,
+                           stdin=subprocess.DEVNULL, timeout=300)
+            return out_path.exists() and out_path.stat().st_size > 1000
+        except subprocess.CalledProcessError as e:
+            stderr = (e.stderr or b"").decode("utf-8", errors="replace")
+            logger.warning(
+                "Shorts xfade transition failed; falling back to hard cuts: %s",
+                stderr[-800:],
+            )
+        except Exception as e:
+            logger.warning(
+                "Shorts xfade transition failed; falling back to hard cuts: %s",
+                e,
+            )
+
+    concat_file = out_path.parent / f"{out_path.stem}.concat.txt"
+    concat_file.write_text(
+        "".join(f"file '{p.as_posix()}'\n" for p in clip_paths)
+    )
+    cmd = [
+        require_ffmpeg(), "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", str(concat_file),
+        "-an",
+        "-c", "copy",
+        str(out_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True,
+                       stdin=subprocess.DEVNULL, timeout=180)
+        return out_path.exists() and out_path.stat().st_size > 1000
+    except Exception as e:
+        logger.warning("Shorts hard-cut concat failed: %s", e)
+        return False
+
+
 def _caption_overlays(
     subtitles: list[Segment],
     duration_seconds: float,
@@ -641,7 +795,7 @@ def _caption_overlays(
         end = min(float(duration_seconds), float(seg.end_seconds))
         if end <= start:
             continue
-        text = seg.text.strip()[:96]
+        text = seg.text.strip()
         if not text:
             continue
         path = work_dir / f"caption_{idx:02d}.png"
@@ -717,7 +871,7 @@ def _wrap_caption(
             current = candidate
     if current:
         lines.append(current)
-    return lines[:3] or [text[:60]]
+    return lines or [text[:60]]
 
 
 def _caption_font(size: int) -> ImageFont.ImageFont:

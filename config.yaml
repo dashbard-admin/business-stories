@@ -379,10 +379,15 @@ packaging:
   shorts_enabled: true
   shorts_count: 3                       # vertical clips per episode
   shorts_target_seconds: 30.0
-  shorts_tts_wpm: 230.0                 # fast teaser narration pace
-  shorts_tts_speed: 1.3                # Kokoro speed hint before
-                                        # local time-stretch enforces WPM
+  shorts_tts_wpm: 175.0                 # teaser script word budget / optional WPM
+  shorts_tts_speed: 1.05                # Kokoro speed; lower = slower
+  shorts_enforce_tts_wpm: false         # false lets Kokoro speed control duration;
+                                        # true time-stretches to shorts_tts_wpm
   shorts_seconds_per_image: 3.75        # fast visual cuts, ~3-5 sec
+  shorts_transition_seconds: 0.22       # fast slide transition between images
+  shorts_motion_strength: 0.10          # Ken Burns zoom/pan intensity
+  shorts_caption_max_words: 6
+  shorts_caption_max_chars: 44
   shorts_exclude_callout_beats: true
   shorts_burn_subtitles: true           # Q-D1: hard-burn subtitles,
                                         # knob-able (set false to keep

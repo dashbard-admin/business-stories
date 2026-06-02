@@ -144,12 +144,18 @@ def run(episode: dict, queue: dict) -> str | None:
             target_seconds=shorts_seconds,
             target_wpm=target_wpm,
             tts_speed=float(pack_cfg.get("shorts_tts_speed", 1.85)),
+            enforce_wpm=bool(pack_cfg.get("shorts_enforce_tts_wpm", False)),
         )
     except Exception as e:
         logger.warning("S13 shorts teaser audio failed: %s", e)
         return None
 
-    subtitles = build_teaser_subtitles(teaser.script, audio_seconds)
+    subtitles = build_teaser_subtitles(
+        teaser.script,
+        audio_seconds,
+        max_words=int(pack_cfg.get("shorts_caption_max_words", 6)),
+        max_chars=int(pack_cfg.get("shorts_caption_max_chars", 44)),
+    )
     base_srt = shorts_dir / "teaser_captions.srt"
     write_srt(subtitles, base_srt)
 
@@ -182,6 +188,10 @@ def run(episode: dict, queue: dict) -> str | None:
             subtitles=subtitles,
             burn_subtitles=burn_subs,
             seconds_per_image=seconds_per_image,
+            transition_seconds=float(
+                pack_cfg.get("shorts_transition_seconds", 0.22)
+            ),
+            motion_strength=float(pack_cfg.get("shorts_motion_strength", 0.10)),
         )
         if ok:
             out_paths.append(out_path)
