@@ -309,6 +309,19 @@ upload:
                                     # set this to your "Shorts" playlist ID.
   made_for_kids: false
   max_tags: 3                       # keep tags sparse to avoid spam signals
+  multilingual_subtitles_enabled: true
+  subtitle_languages:
+    - {code: en, name: English, source: true}
+    - {code: zh-Hans, name: "Chinese (Simplified)"}
+    - {code: es, name: Spanish}
+    - {code: hi, name: Hindi}
+    - {code: ar, name: Arabic}
+    - {code: fr, name: French}
+    - {code: bn, name: Bengali}
+    - {code: pt, name: Portuguese}
+    - {code: ru, name: Russian}
+    - {code: ur, name: Urdu}
+    - {code: id, name: Indonesian}
   tags:
     - business history
     - brand story
@@ -366,6 +379,10 @@ packaging:
   shorts_enabled: true
   shorts_count: 3                       # vertical clips per episode
   shorts_target_seconds: 30.0
+  shorts_tts_wpm: 230.0                 # fast teaser narration pace
+  shorts_tts_speed: 1.85                # Kokoro speed hint before
+                                        # local time-stretch enforces WPM
+  shorts_seconds_per_image: 3.75        # fast visual cuts, ~3-5 sec
   shorts_exclude_callout_beats: true
   shorts_burn_subtitles: true           # Q-D1: hard-burn subtitles,
                                         # knob-able (set false to keep

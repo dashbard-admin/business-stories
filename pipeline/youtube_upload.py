@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import load_config
+from .llm import LLM
 from .state import (
     file_lock,
     find_episode,
@@ -42,6 +44,7 @@ class UploadPackageResult:
     manifest_path: Path
     long_form_ready: bool
     shorts_ready: int
+    caption_tracks_ready: int
 
 
 def build_upload_package(episode_id: str) -> UploadPackageResult:
@@ -85,6 +88,12 @@ def build_upload_package(episode_id: str) -> UploadPackageResult:
     shutil.copy2(final_mp4, long_video)
     _copy_if_exists(ws / "05_video" / "captions.srt", long_dir / "captions.srt")
     _copy_if_exists(ws / "05_video" / "captions.vtt", long_dir / "captions.vtt")
+    long_caption_tracks = _build_caption_tracks(
+        source_srt=ws / "05_video" / "captions.srt",
+        out_dir=long_dir / "subtitles",
+        rel_prefix="long_form/subtitles",
+        cfg_upload=cfg.upload,
+    )
     thumbnail_rel = None
     if thumb:
         out_thumb = long_dir / thumb.name
@@ -106,6 +115,7 @@ def build_upload_package(episode_id: str) -> UploadPackageResult:
             "long_form/captions.srt"
             if (long_dir / "captions.srt").exists() else None
         ),
+        "caption_tracks": long_caption_tracks,
         "thumbnail_path": thumbnail_rel,
         "playlist_id": (cfg.upload.get("long_form_playlist_id") or ""),
     }
@@ -135,8 +145,12 @@ def build_upload_package(episode_id: str) -> UploadPackageResult:
         "contents": {
             "long_form_video": long_metadata["video_path"],
             "long_form_caption": long_metadata["caption_path"],
+            "long_form_caption_tracks": len(long_caption_tracks),
             "long_form_thumbnail": long_metadata["thumbnail_path"],
             "shorts_count": len(short_entries),
+            "shorts_caption_tracks": sum(
+                len(s.get("caption_tracks") or []) for s in short_entries
+            ),
         },
         "review_notes": [
             "Review long_form/metadata.json and long_form/description.txt.",
@@ -154,6 +168,10 @@ def build_upload_package(episode_id: str) -> UploadPackageResult:
         manifest_path=manifest_path,
         long_form_ready=True,
         shorts_ready=len(short_entries),
+        caption_tracks_ready=(
+            len(long_caption_tracks)
+            + sum(len(s.get("caption_tracks") or []) for s in short_entries)
+        ),
     )
 
 
@@ -228,18 +246,19 @@ def upload_approved_package(
                 path=package_dir / manifest["long_form"]["thumbnail_path"],
             ),
         )
-    if long_video_id and manifest["long_form"].get("caption_path"):
-        _safe_post_upload_step(
-            post_upload_warnings,
-            "long_form_caption",
-            lambda: _insert_caption(
-                yt,
-                video_id=long_video_id,
-                path=package_dir / manifest["long_form"]["caption_path"],
-                language=manifest["long_form"].get("default_language", "en"),
-                name="English",
-            ),
-        )
+    if long_video_id:
+        for track in _caption_tracks_for_metadata(manifest["long_form"]):
+            _safe_post_upload_step(
+                post_upload_warnings,
+                f"long_form_caption_{track['language']}",
+                lambda tr=track: _insert_caption(
+                    yt,
+                    video_id=long_video_id,
+                    path=package_dir / tr["path"],
+                    language=tr["language"],
+                    name=tr["name"],
+                ),
+            )
     if long_video_id and manifest["long_form"].get("playlist_id"):
         _safe_post_upload_step(
             post_upload_warnings,
@@ -269,6 +288,19 @@ def upload_approved_package(
                     playlist_id=sh["playlist_id"],
                 ),
             )
+        if short_result.get("video_id"):
+            for track in _caption_tracks_for_metadata(short):
+                _safe_post_upload_step(
+                    post_upload_warnings,
+                    f"short_{short.get('rank')}_caption_{track['language']}",
+                    lambda tr=track, sr=short_result: _insert_caption(
+                        yt,
+                        video_id=sr["video_id"],
+                        path=package_dir / tr["path"],
+                        language=tr["language"],
+                        name=tr["name"],
+                    ),
+                )
         results["shorts"].append(short_result)
     results["post_upload_warnings"] = post_upload_warnings
 
@@ -573,6 +605,15 @@ def _build_shorts_package(
         out_dir.mkdir(parents=True, exist_ok=True)
         out_video = out_dir / f"short_{rank:02d}.mp4"
         shutil.copy2(src, out_video)
+        caption_src = _resolve_short_caption_source(
+            ws=ws, src_dir=src_dir, item=item, rank=rank
+        )
+        caption_tracks = _build_caption_tracks(
+            source_srt=caption_src,
+            out_dir=out_dir / "subtitles",
+            rel_prefix=f"shorts/short_{rank:02d}/subtitles",
+            cfg_upload=cfg_upload,
+        ) if caption_src else []
         title = (item.get("title_hint") or incident.get("company_name") or "Short")
         if "#Shorts" not in title:
             title = f"{title} #Shorts"
@@ -592,6 +633,7 @@ def _build_shorts_package(
             "default_language": str(cfg_upload.get("default_language", "en")),
             "made_for_kids": bool(cfg_upload.get("made_for_kids", False)),
             "video_path": f"shorts/short_{rank:02d}/short_{rank:02d}.mp4",
+            "caption_tracks": caption_tracks,
             "playlist_id": (cfg_upload.get("shorts_playlist_id") or ""),
             "source_window": {
                 "start_seconds": item.get("start_seconds"),
@@ -636,6 +678,183 @@ def _resolve_short_source(
     return None
 
 
+def _resolve_short_caption_source(
+    *, ws: Path, src_dir: Path, item: dict[str, Any], rank: int
+) -> Path | None:
+    raw = str(item.get("caption_path") or "").strip()
+    candidates: list[Path] = []
+    if raw:
+        p = Path(raw)
+        candidates.append(p if p.is_absolute() else ws / p)
+        if p.name:
+            candidates.append(src_dir / p.name)
+    candidates.append(src_dir / f"short_{rank:02d}.srt")
+    candidates.append(src_dir / "teaser_captions.srt")
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def _build_caption_tracks(
+    *,
+    source_srt: Path,
+    out_dir: Path,
+    rel_prefix: str,
+    cfg_upload: dict[str, Any],
+) -> list[dict[str, str]]:
+    if not source_srt.exists():
+        return []
+    specs = _language_specs(cfg_upload)
+    if not specs:
+        return []
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tracks: list[dict[str, str]] = []
+    source_lang = str(cfg_upload.get("default_language") or "en")
+    for spec in specs:
+        code = str(spec.get("code") or "").strip()
+        name = str(spec.get("name") or code).strip()
+        if not code:
+            continue
+        out_file = out_dir / f"captions.{_safe_lang_code(code)}.srt"
+        is_source = bool(spec.get("source")) or code == source_lang
+        if is_source:
+            shutil.copy2(source_srt, out_file)
+        else:
+            translated = _translate_srt(
+                source_srt=source_srt,
+                language_code=code,
+                language_name=name,
+            )
+            if not translated:
+                logger.warning("subtitle translation skipped: %s", code)
+                continue
+            out_file.write_text(translated)
+        tracks.append({
+            "language": code,
+            "name": name,
+            "path": f"{rel_prefix}/{out_file.name}",
+        })
+    return tracks
+
+
+def _language_specs(cfg_upload: dict[str, Any]) -> list[dict[str, Any]]:
+    if not bool(cfg_upload.get("multilingual_subtitles_enabled", True)):
+        return [{
+            "code": str(cfg_upload.get("default_language") or "en"),
+            "name": "English",
+            "source": True,
+        }]
+    raw = cfg_upload.get("subtitle_languages") or []
+    if not isinstance(raw, list):
+        return []
+    specs = [x for x in raw if isinstance(x, dict)]
+    if not specs:
+        return [{
+            "code": str(cfg_upload.get("default_language") or "en"),
+            "name": "English",
+            "source": True,
+        }]
+    return specs
+
+
+def _caption_tracks_for_metadata(metadata: dict[str, Any]) -> list[dict[str, str]]:
+    tracks = metadata.get("caption_tracks") or []
+    if isinstance(tracks, list) and tracks:
+        return [
+            {
+                "language": str(t.get("language") or "en"),
+                "name": str(t.get("name") or t.get("language") or "Caption"),
+                "path": str(t.get("path") or ""),
+            }
+            for t in tracks
+            if isinstance(t, dict) and t.get("path")
+        ]
+    path = metadata.get("caption_path")
+    if not path:
+        return []
+    language = str(metadata.get("default_language") or "en")
+    return [{"language": language, "name": "English", "path": str(path)}]
+
+
+def _translate_srt(
+    *, source_srt: Path, language_code: str, language_name: str
+) -> str | None:
+    blocks = _parse_srt(source_srt.read_text())
+    if not blocks:
+        return None
+    translations: list[str] = []
+    chunk_size = 30
+    for start in range(0, len(blocks), chunk_size):
+        texts = [b["text"] for b in blocks[start:start + chunk_size]]
+        translated = _translate_caption_texts(
+            texts=texts,
+            language_code=language_code,
+            language_name=language_name,
+        )
+        if len(translated) != len(texts):
+            logger.warning(
+                "subtitle translation count mismatch for %s: %d != %d",
+                language_code, len(translated), len(texts),
+            )
+            return None
+        translations.extend(translated)
+    lines: list[str] = []
+    for block, text in zip(blocks, translations):
+        lines.extend([
+            block["index"],
+            block["timing"],
+            text.strip(),
+            "",
+        ])
+    return "\n".join(lines)
+
+
+def _translate_caption_texts(
+    *, texts: list[str], language_code: str, language_name: str
+) -> list[str]:
+    prompt = (
+        "Translate these YouTube subtitle cue texts into "
+        f"{language_name} ({language_code}). Preserve meaning, names, "
+        "numbers, punchiness, and line-level order. Do not add commentary. "
+        "Return JSON only as {\"translations\": [..]} with exactly the "
+        "same number of strings.\n\n"
+        f"TEXTS:\n{json.dumps(texts, ensure_ascii=False)}"
+    )
+    try:
+        result = LLM(role="writer").complete_json(
+            prompt, temperature=0.25, max_tokens=3500
+        )
+    except Exception as e:
+        logger.warning("subtitle translation failed for %s: %s", language_code, e)
+        return []
+    values = result.get("translations") or []
+    return [str(v).strip() for v in values if str(v).strip()]
+
+
+def _parse_srt(text: str) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    blocks = re.split(r"\n\s*\n", text.strip())
+    for block in blocks:
+        lines = [ln.rstrip() for ln in block.splitlines() if ln.strip()]
+        if len(lines) < 3:
+            continue
+        timing_idx = next((i for i, ln in enumerate(lines) if "-->" in ln), -1)
+        if timing_idx <= 0:
+            continue
+        out.append({
+            "index": lines[0],
+            "timing": lines[timing_idx],
+            "text": " ".join(lines[timing_idx + 1:]).strip(),
+        })
+    return out
+
+
+def _safe_lang_code(code: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "-", code.strip())
+    return safe or "unknown"
+
+
 def _copy_if_exists(src: Path, dst: Path) -> None:
     if src.exists():
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -674,12 +893,16 @@ def _write_summary(package_dir: Path, manifest: dict[str, Any]) -> None:
         f"- tags: {', '.join(manifest['long_form'].get('tags') or [])}",
         f"- publish_at: {manifest['long_form'].get('publish_at')}",
         f"- thumbnail: {manifest['long_form'].get('thumbnail_path')}",
-        f"- captions: {manifest['long_form'].get('caption_path')}",
+        "- captions: "
+        f"{len(manifest['long_form'].get('caption_tracks') or [])} tracks",
         "",
         f"Shorts: {len(manifest.get('shorts') or [])}",
     ]
     for s in manifest.get("shorts") or []:
-        lines.append(f"- {s['video_path']}: {s['title']}")
+        lines.append(
+            f"- {s['video_path']}: {s['title']} "
+            f"({len(s.get('caption_tracks') or [])} subtitle tracks)"
+        )
     lines.extend([
         "",
         "Review package_manifest.json before upload.",

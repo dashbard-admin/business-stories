@@ -553,7 +553,8 @@ def cli() -> int:
         print(f"manifest: {result.manifest_path}")
         print(
             f"contents: long_form={result.long_form_ready}, "
-            f"shorts={result.shorts_ready}"
+            f"shorts={result.shorts_ready}, "
+            f"subtitle_tracks={result.caption_tracks_ready}"
         )
         return 0
 

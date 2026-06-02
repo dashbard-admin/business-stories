@@ -1,0 +1,37 @@
+You are writing a standalone YouTube Shorts teaser for a business
+documentary. The final Short will be about {target_seconds} seconds
+long, voiced at roughly {target_wpm} WPM, so the script must be
+{target_words_min}-{target_words_max} spoken words.
+
+EPISODE:
+- Company: {company_name}
+- Hero: {hero}
+- Conflict: {conflict}
+- Story kind: {story_kind}
+
+FULL SCRIPT:
+{script}
+
+BEAT TABLE:
+{beats_dump}
+
+Write one extremely condensed teaser script with high viral potential.
+
+Requirements:
+- The first 5 seconds must contain a major hook: a contradiction, a
+  shocking number, a named person, or a decision that sounds impossible.
+- Add 2-3 more curiosity hooks along the way.
+- Make it self-contained for a viewer who knows nothing about the story.
+- End with a strong reason to watch the full long-form episode.
+- Use concrete nouns, names, numbers, and stakes.
+- No generic business cliches.
+- No greetings, no sponsor language, no "in this video".
+- No stage directions, no beat markers, no markdown.
+
+OUTPUT FORMAT — JSON only, no prose, no code fences:
+
+{{
+  "title_hint": "5-8 words for the Short title",
+  "hook_notes": "briefly identify the opening hook and the later curiosity hooks",
+  "teaser_script": "the final {target_words_min}-{target_words_max} word spoken script"
+}}

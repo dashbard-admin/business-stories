@@ -91,6 +91,20 @@ class Config:
             "max_tags": 3,
             "tags": [],
             "shorts_hashtags": ["Shorts"],
+            "multilingual_subtitles_enabled": True,
+            "subtitle_languages": [
+                {"code": "en", "name": "English", "source": True},
+                {"code": "zh-Hans", "name": "Chinese (Simplified)"},
+                {"code": "es", "name": "Spanish"},
+                {"code": "hi", "name": "Hindi"},
+                {"code": "ar", "name": "Arabic"},
+                {"code": "fr", "name": "French"},
+                {"code": "bn", "name": "Bengali"},
+                {"code": "pt", "name": "Portuguese"},
+                {"code": "ru", "name": "Russian"},
+                {"code": "ur", "name": "Urdu"},
+                {"code": "id", "name": "Indonesian"},
+            ],
         }
         return {**defaults, **(self.raw.get("upload") or {})}
 
@@ -315,6 +329,9 @@ class Config:
             "shorts_enabled": True,
             "shorts_count": 3,
             "shorts_target_seconds": 30.0,
+            "shorts_tts_wpm": 230.0,
+            "shorts_tts_speed": 1.85,
+            "shorts_seconds_per_image": 3.75,
             "shorts_exclude_callout_beats": True,
             "shorts_burn_subtitles": True,
             "show_channel_logo": True,

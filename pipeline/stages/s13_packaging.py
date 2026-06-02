@@ -12,12 +12,12 @@ Post-S12 stage that runs three discovery/CTR features:
     JPGs at 05_video/thumbnails/thumb_<layout>.jpg. Layouts:
     founder_closeup, split_frame, big_number, shocked_face, noir.
 
-  Phase 3: Shorts cutter
-    Calls pipeline.shorts.pick_windows() to identify 3 dramatic
-    30s windows, then pipeline.shorts.cut_short() to cut each as
-    1080x1920 vertical with hard-burned subtitles (whisper.cpp
-    via pipeline.asr). Outputs at 05_video/shorts/short_N.mp4 +
-    05_video/shorts/manifest.json.
+  Phase 3: Shorts teaser builder
+    Calls pipeline.shorts.generate_teaser_script() to compress the
+    whole episode into a viral 30-second teaser, renders fast standalone
+    TTS, then cuts quickly across reused beat images as 1080x1920
+    vertical Shorts with no music/SFX. Outputs at
+    05_video/shorts/short_N.mp4 + manifest.json.
 
 S13 is in STAGE_DISPATCH so it auto-runs after S12. In preview
 mode (Act 0 + Act 5 only renders), S13 still runs but title and
@@ -32,15 +32,18 @@ import logging
 
 from ..config import load_config
 from ..shorts import (
-    ShortWindow, cut_short, extract_audio_for_window,
-    pick_windows, write_manifest,
+    build_teaser_short,
+    build_teaser_subtitles,
+    collect_story_images,
+    generate_teaser_script,
+    render_teaser_audio,
+    write_srt,
+    write_teaser_manifest,
 )
 from ..state import find_episode_workspace
 from ..thumbnails import generate_variants as generate_thumbnail_variants
 from ..titles import generate_variants as generate_title_variants
 from ..titles import write_variants as write_title_variants
-from ..asr import transcribe
-
 logger = logging.getLogger("hermes.stage.s13")
 
 
@@ -94,7 +97,7 @@ def run(episode: dict, queue: dict) -> str | None:
         except Exception as e:
             logger.warning("S13 thumbnail generation failed: %s", e)
 
-    # ---------- Phase 3: Shorts cutter ----------
+    # ---------- Phase 3: Shorts teaser builder ----------
     if not pack_cfg.get("shorts_enabled", True):
         logger.info("S13: shorts_enabled=false; skipping shorts phase")
         return None
@@ -117,77 +120,88 @@ def run(episode: dict, queue: dict) -> str | None:
     script_path = ws / "02_script" / "script.txt"
     script = script_path.read_text() if script_path.exists() else ""
 
-    voice_timing_path = ws / "04_audio" / "voice_timing.json"
-    voice_timing = None
-    if voice_timing_path.exists():
-        try:
-            voice_timing = json.loads(voice_timing_path.read_text())
-        except Exception:
-            voice_timing = None
-
-    windows = pick_windows(
+    target_wpm = float(pack_cfg.get("shorts_tts_wpm", 230.0))
+    teaser = generate_teaser_script(
         incident=incident,
         script=script,
         beat_sheet=beat_sheet,
-        voice_timing=voice_timing,
-        n=shorts_count,
         target_seconds=shorts_seconds,
+        target_wpm=target_wpm,
     )
-    if not windows:
-        logger.info("S13 shorts: no windows picked")
+    if not teaser:
+        logger.info("S13 shorts: no teaser generated")
         return None
 
     shorts_dir = ws / "05_video" / "shorts"
     shorts_dir.mkdir(parents=True, exist_ok=True)
+    (shorts_dir / "teaser_script.txt").write_text(teaser.script)
+
+    try:
+        teaser_audio, audio_seconds = render_teaser_audio(
+            teaser=teaser,
+            narrator_id=episode["narrator"],
+            out_dir=shorts_dir,
+            target_seconds=shorts_seconds,
+            target_wpm=target_wpm,
+            tts_speed=float(pack_cfg.get("shorts_tts_speed", 1.85)),
+        )
+    except Exception as e:
+        logger.warning("S13 shorts teaser audio failed: %s", e)
+        return None
+
+    subtitles = build_teaser_subtitles(teaser.script, audio_seconds)
+    base_srt = shorts_dir / "teaser_captions.srt"
+    write_srt(subtitles, base_srt)
+
     out_paths: list = []
+    srt_paths: list = []
+    image_sets: list = []
     burn_subs = bool(pack_cfg.get("shorts_burn_subtitles", True))
+    seconds_per_image = float(pack_cfg.get("shorts_seconds_per_image", 3.75))
+    images_per_short = max(
+        1, int(round(audio_seconds / max(1.0, seconds_per_image)))
+    )
 
-    for w in windows:
-        out_path = shorts_dir / f"short_{w.rank:02d}.mp4"
+    for rank in range(1, shorts_count + 1):
+        out_path = shorts_dir / f"short_{rank:02d}.mp4"
+        short_srt = shorts_dir / f"short_{rank:02d}.srt"
+        short_srt.write_text(base_srt.read_text())
+        image_paths = collect_story_images(
+            ws=ws,
+            beat_sheet=beat_sheet,
+            count=images_per_short,
+            offset=(rank - 1) * max(1, images_per_short // 2),
+        )
+        image_sets.append(image_paths)
 
-        # Audio extract + ASR for subtitles.
-        segments = None
-        if burn_subs:
-            audio_wav = shorts_dir / f"short_{w.rank:02d}_audio.wav"
-            ok = extract_audio_for_window(
-                final_mp4, audio_wav,
-                start_seconds=w.start_seconds,
-                duration_seconds=shorts_seconds,
-            )
-            if ok:
-                segments = transcribe(audio_wav)
-                # whisper segments are relative to the audio file
-                # we just extracted. Adjust to absolute time so the
-                # cut_short's enable= filter is correct.
-                if segments:
-                    for s in segments:
-                        s.start_seconds += w.start_seconds
-                        s.end_seconds += w.start_seconds
-                # Don't leave loose WAVs around.
-                try:
-                    audio_wav.unlink()
-                except OSError:
-                    pass
-
-        ok = cut_short(
-            src_mp4=final_mp4,
+        ok = build_teaser_short(
+            image_paths=image_paths,
+            audio_path=teaser_audio,
             out_mp4=out_path,
-            start_seconds=w.start_seconds,
-            duration_seconds=shorts_seconds,
+            duration_seconds=audio_seconds,
+            subtitles=subtitles,
             burn_subtitles=burn_subs,
-            subtitles=segments,
+            seconds_per_image=seconds_per_image,
         )
         if ok:
             out_paths.append(out_path)
-            logger.info("S13 short %d: %s (%.1fs - %.1fs)",
-                        w.rank, out_path.name,
-                        w.start_seconds, w.end_seconds)
+            srt_paths.append(short_srt)
+            logger.info("S13 short %d: %s (%.1fs teaser)",
+                        rank, out_path.name, audio_seconds)
         else:
             out_paths.append(None)
-            logger.warning("S13 short %d FAILED for window %.1fs",
-                           w.rank, w.start_seconds)
+            srt_paths.append(None)
+            logger.warning("S13 short %d FAILED for teaser build", rank)
 
-    write_manifest(windows, out_paths, shorts_dir / "manifest.json")
+    write_teaser_manifest(
+        teaser=teaser,
+        out_paths=out_paths,
+        srt_paths=srt_paths,
+        image_sets=image_sets,
+        manifest_path=shorts_dir / "manifest.json",
+        duration_seconds=audio_seconds,
+        target_wpm=target_wpm,
+    )
     logger.info("S13 complete: %d titles, %d shorts",
                 len(variants), sum(1 for p in out_paths if p))
     return None

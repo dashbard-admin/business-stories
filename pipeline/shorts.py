@@ -1,29 +1,28 @@
 """Shorts pipeline (Batch D 2026-05-27).
 
-Generates N vertical (9:16) Short clips per episode from the most-
-dramatic 30-second windows in the script. Long-form alone is slow
-growth; Shorts as a discovery funnel pull 10-50x the views and
-funnel new subscribers in.
+Generates N vertical (9:16) Short clips per episode. The current
+default is a teaser-first path: write a fresh 30-second viral script,
+render fast standalone TTS, and cut quickly across reused beat images.
+The older window-cutter helpers remain below for fallback/comparison.
 
 Flow:
-  1. Ask the writer LLM to identify the 3 most-dramatic 30-second
-     windows (prompt: shorts_select.txt).
-  2. For each window, cut the corresponding [start, end] segment
-     out of 05_video/final.mp4.
-  3. Crop/scale to 1080x1920 (9:16 vertical).
-  4. Run ASR (whisper.cpp) over the cut audio to get word-level
-     subtitles.
-  5. Burn the subtitles as hard captions onto the vertical frame
-     (Q-D1 confirmed: hard subtitles, behaviour disable-able via
-     cfg.shorts.burn_subtitles).
-  6. Output: 05_video/shorts/short_N.mp4 (1080x1920, 30s, with
-     subtitles).
+  1. Ask the writer LLM for one compressed viral teaser script
+     (prompt: shorts_teaser_script.txt).
+  2. Render one fast standalone TTS track, then time-stretch it to
+     the configured WPM target.
+  3. Generate English SRT cues from the teaser script.
+  4. For each Short, reuse beat images as rapid 3-5 second vertical
+     cuts and mux the teaser voice only. No music, no SFX.
+  5. Optionally hard-burn the English captions.
+  6. Output: 05_video/shorts/short_NN.mp4 + short_NN.srt +
+     manifest.json.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,8 +30,9 @@ from typing import Any
 
 from .asr import Segment, transcribe
 from .config import load_config
-from .ffmpeg_builder import require_ffmpeg
+from .ffmpeg_builder import get_duration_seconds, require_ffmpeg, time_stretch_audio
 from .llm import LLM
+from .tts import KOKORO_SAMPLE_RATE, make_tts
 
 logger = logging.getLogger("hermes.shorts")
 
@@ -44,6 +44,291 @@ class ShortWindow:
     end_seconds: float
     title_hint: str
     reasoning: str
+
+
+@dataclass
+class ShortTeaser:
+    script: str
+    title_hint: str
+    hook_notes: str
+    word_count: int
+
+
+def generate_teaser_script(
+    *,
+    incident: dict[str, Any],
+    script: str,
+    beat_sheet: dict[str, Any],
+    target_seconds: float = 30.0,
+    target_wpm: float = 230.0,
+) -> ShortTeaser | None:
+    """Generate a fresh, compressed Shorts script from the full episode."""
+    cfg = load_config()
+    template_path = cfg.prompts_dir / "shorts_teaser_script.txt"
+    if not template_path.exists():
+        logger.warning("shorts_teaser_script.txt missing; skipping teaser")
+        return None
+    beats = beat_sheet.get("beats", [])
+    beat_lines = []
+    for b in beats:
+        bid = b.get("beat_id", "")
+        text = (b.get("script_text") or "")[:260].replace("\n", " ")
+        if bid and text:
+            beat_lines.append(f"{bid}: {text}")
+    prompt = template_path.read_text().format(
+        company_name=incident.get("company_name", ""),
+        hero=incident.get("hero", ""),
+        conflict=incident.get("conflict", ""),
+        story_kind=incident.get("story_kind", ""),
+        target_seconds=int(target_seconds),
+        target_wpm=int(target_wpm),
+        target_words_min=int(target_seconds * target_wpm / 60) - 12,
+        target_words_max=int(target_seconds * target_wpm / 60) + 8,
+        script=script[:24000],
+        beats_dump="\n".join(beat_lines[:120]),
+    )
+    try:
+        result = LLM(role="writer").complete_json(
+            prompt, temperature=0.76, max_tokens=1800
+        )
+    except Exception as e:
+        logger.warning("shorts teaser generation failed: %s", e)
+        return None
+    teaser = _clean_teaser_text(result.get("teaser_script") or "")
+    if not teaser:
+        return None
+    return ShortTeaser(
+        script=teaser,
+        title_hint=(result.get("title_hint") or incident.get("company_name") or "Short")[:80],
+        hook_notes=(result.get("hook_notes") or "")[:500],
+        word_count=len(teaser.split()),
+    )
+
+
+def render_teaser_audio(
+    *,
+    teaser: ShortTeaser,
+    narrator_id: str,
+    out_dir: Path,
+    target_seconds: float,
+    target_wpm: float,
+    tts_speed: float,
+) -> tuple[Path, float]:
+    """Render one fast Shorts voice track with no music or SFX."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir = out_dir / "teaser_chunks"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    tts = make_tts(narrator_id=narrator_id)
+    if hasattr(tts, "speed"):
+        tts.speed = float(tts_speed)
+    chunks = tts.synthesize_script(
+        teaser.script, raw_dir, max_words_per_chunk=160
+    )
+    if not chunks:
+        raise RuntimeError("Shorts teaser TTS produced no chunks")
+
+    concat_file = out_dir / "teaser_audio.concat.txt"
+    concat_file.write_text(
+        "".join(f"file '{c.wav_path.as_posix()}'\n" for c in chunks)
+    )
+    raw_wav = out_dir / "teaser_voice_raw.wav"
+    final_wav = out_dir / "teaser_voice.wav"
+    cmd = [
+        require_ffmpeg(), "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", str(concat_file),
+        "-ar", str(KOKORO_SAMPLE_RATE),
+        "-c:a", "pcm_s16le",
+        str(raw_wav),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, stdin=subprocess.DEVNULL)
+
+    words = max(1, teaser.word_count)
+    desired = (words / max(1.0, target_wpm)) * 60.0
+    desired = min(float(target_seconds), max(10.0, desired))
+    try:
+        time_stretch_audio(raw_wav, final_wav, desired)
+    except Exception as e:
+        logger.warning("Shorts teaser time-stretch failed (%s); using raw TTS", e)
+        final_wav.write_bytes(raw_wav.read_bytes())
+    duration = get_duration_seconds(final_wav)
+    logger.info(
+        "shorts teaser TTS: %d words, target %.0f wpm -> %.1fs",
+        words, target_wpm, duration,
+    )
+    return final_wav, duration
+
+
+def build_teaser_subtitles(script: str, duration_seconds: float) -> list[Segment]:
+    sentences = _split_sentences(script)
+    total_words = sum(len(s.split()) for s in sentences) or 1
+    cursor = 0.0
+    out: list[Segment] = []
+    for sentence in sentences:
+        words = max(1, len(sentence.split()))
+        seg_dur = float(duration_seconds) * (words / total_words)
+        start = cursor
+        end = min(float(duration_seconds), cursor + seg_dur)
+        cursor = end
+        out.append(Segment(start_seconds=start, end_seconds=end, text=sentence))
+    return out
+
+
+def write_srt(segments: list[Segment], path: Path) -> None:
+    lines: list[str] = []
+    for i, seg in enumerate(segments, start=1):
+        lines.extend([
+            str(i),
+            f"{_ts_srt(seg.start_seconds)} --> {_ts_srt(seg.end_seconds)}",
+            seg.text.strip(),
+            "",
+        ])
+    path.write_text("\n".join(lines))
+
+
+def collect_story_images(
+    *,
+    ws: Path,
+    beat_sheet: dict[str, Any],
+    count: int,
+    offset: int = 0,
+) -> list[Path]:
+    flux_dir = ws / "03_assets" / "flux"
+    beats = beat_sheet.get("beats") or []
+    ordered: list[Path] = []
+    for b in beats:
+        bid = b.get("beat_id", "")
+        if not bid:
+            continue
+        p = flux_dir / f"{bid}.png"
+        if p.exists():
+            ordered.append(p)
+    if not ordered:
+        ordered = sorted(flux_dir.glob("BEAT_*.png"))
+    if not ordered:
+        title = ws / "05_video" / "title_card.png"
+        return [title] if title.exists() else []
+    if len(ordered) <= count:
+        return ordered
+    step = max(1, len(ordered) // count)
+    picked = [ordered[(offset + i * step) % len(ordered)] for i in range(count)]
+    # Preserve order while removing duplicates; top up if the modulo repeated.
+    unique: list[Path] = []
+    for p in picked + ordered:
+        if p not in unique:
+            unique.append(p)
+        if len(unique) >= count:
+            break
+    return unique
+
+
+def build_teaser_short(
+    *,
+    image_paths: list[Path],
+    audio_path: Path,
+    out_mp4: Path,
+    duration_seconds: float,
+    subtitles: list[Segment] | None,
+    burn_subtitles: bool,
+    seconds_per_image: float,
+) -> bool:
+    """Create a vertical Short from still images plus standalone teaser audio."""
+    if not image_paths:
+        logger.warning("Shorts teaser has no images")
+        return False
+    out_mp4.parent.mkdir(parents=True, exist_ok=True)
+    work_dir = out_mp4.parent / f".{out_mp4.stem}_clips"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    clip_paths: list[Path] = []
+    needed = max(1, int(round(float(duration_seconds) / max(1.0, seconds_per_image) + 0.49)))
+    images = [image_paths[i % len(image_paths)] for i in range(needed)]
+    base_dur = float(duration_seconds) / len(images)
+    for i, img in enumerate(images, start=1):
+        clip = work_dir / f"img_{i:02d}.mp4"
+        vf = (
+            "scale=-2:1920:flags=lanczos,"
+            "crop=1080:1920,"
+            "setsar=1"
+        )
+        cmd = [
+            require_ffmpeg(), "-y",
+            "-loop", "1",
+            "-t", f"{base_dur:.3f}",
+            "-i", str(img),
+            "-vf", vf,
+            "-r", "30",
+            "-an",
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            str(clip),
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True,
+                           stdin=subprocess.DEVNULL, timeout=240)
+            clip_paths.append(clip)
+        except Exception as e:
+            logger.warning("Shorts image clip failed for %s: %s", img.name, e)
+    if not clip_paths:
+        return False
+
+    concat_file = work_dir / "concat.txt"
+    concat_file.write_text(
+        "".join(f"file '{p.as_posix()}'\n" for p in clip_paths)
+    )
+    temp_mp4 = work_dir / "with_audio.mp4"
+    cmd = [
+        require_ffmpeg(), "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", str(concat_file),
+        "-i", str(audio_path),
+        "-t", f"{duration_seconds:.3f}",
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        str(temp_mp4),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True,
+                       stdin=subprocess.DEVNULL, timeout=300)
+    except Exception as e:
+        logger.warning("Shorts teaser mux failed: %s", e)
+        return False
+
+    if burn_subtitles and subtitles:
+        vf = _drawtext_filter(subtitles, duration_seconds)
+        cmd = [
+            require_ffmpeg(), "-y",
+            "-i", str(temp_mp4),
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "copy",
+            str(out_mp4),
+        ]
+    else:
+        cmd = [
+            require_ffmpeg(), "-y",
+            "-i", str(temp_mp4),
+            "-c", "copy",
+            str(out_mp4),
+        ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True,
+                       stdin=subprocess.DEVNULL, timeout=300)
+        return out_mp4.exists() and out_mp4.stat().st_size > 1000
+    except Exception as e:
+        logger.warning("Shorts teaser final encode failed: %s", e)
+        return False
 
 
 def pick_windows(
@@ -277,3 +562,86 @@ def write_manifest(
             "path": str(p) if p else None,
         })
     manifest_path.write_text(json.dumps({"shorts": entries}, indent=2))
+
+
+def write_teaser_manifest(
+    *,
+    teaser: ShortTeaser,
+    out_paths: list[Path | None],
+    srt_paths: list[Path | None],
+    image_sets: list[list[Path]],
+    manifest_path: Path,
+    duration_seconds: float,
+    target_wpm: float,
+) -> None:
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    entries = []
+    for idx, path in enumerate(out_paths, start=1):
+        entries.append({
+            "rank": idx,
+            "mode": "teaser",
+            "start_seconds": 0.0,
+            "end_seconds": round(duration_seconds, 3),
+            "title_hint": teaser.title_hint,
+            "reasoning": teaser.hook_notes,
+            "path": str(path) if path else None,
+            "caption_path": str(srt_paths[idx - 1]) if idx - 1 < len(srt_paths) and srt_paths[idx - 1] else None,
+            "target_wpm": target_wpm,
+            "script_word_count": teaser.word_count,
+            "images": [p.name for p in image_sets[idx - 1]] if idx - 1 < len(image_sets) else [],
+        })
+    manifest_path.write_text(json.dumps({
+        "mode": "teaser",
+        "teaser_script": teaser.script,
+        "shorts": entries,
+    }, indent=2))
+
+
+def _clean_teaser_text(text: str) -> str:
+    text = re.sub(r"```.*?```", " ", text, flags=re.S)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.strip("\"' ")
+
+
+def _split_sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _drawtext_filter(subtitles: list[Segment], duration_seconds: float) -> str:
+    parts = ["scale=1080:1920,setsar=1"]
+    for seg in subtitles:
+        start = max(0.0, float(seg.start_seconds))
+        end = min(float(duration_seconds), float(seg.end_seconds))
+        if end <= start:
+            continue
+        text = _drawtext_escape(seg.text.strip()[:96])
+        if not text:
+            continue
+        parts.append(
+            f"drawtext=text='{text}':fontsize=64"
+            f":fontcolor=white:borderw=6:bordercolor=black"
+            f":x=(w-text_w)/2:y=h-260"
+            f":enable='between(t,{start:.2f},{end:.2f})'"
+        )
+    return ",".join(parts)
+
+
+def _drawtext_escape(text: str) -> str:
+    text = text.replace("\\", "\\\\")
+    text = text.replace("'", "\\'")
+    text = text.replace(":", "\\:")
+    text = text.replace("%", "\\%")
+    text = text.replace("\n", " ")
+    return text
+
+
+def _ts_srt(seconds: float) -> str:
+    ms = int(round(max(0.0, seconds) * 1000))
+    h = ms // 3_600_000
+    ms %= 3_600_000
+    m = ms // 60_000
+    ms %= 60_000
+    s = ms // 1000
+    ms %= 1000
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
