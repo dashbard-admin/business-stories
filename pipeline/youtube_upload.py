@@ -371,7 +371,7 @@ def backfill_caption_tracks(
     skipped_existing = 0
 
     for label, video_id, metadata in _caption_backfill_items(
-        manifest, upload_results, target=target,
+        manifest, upload_results, target=target, episode_id=episode_id,
     ):
         if not video_id:
             warnings.append({
@@ -466,35 +466,69 @@ def _caption_backfill_items(
     upload_results: dict[str, Any],
     *,
     target: str,
+    episode_id: str,
 ) -> list[tuple[str, str | None, dict[str, Any]]]:
     target_norm = (target or "all").strip().lower().replace("-", "_")
     items: list[tuple[str, str | None, dict[str, Any]]] = []
     long_result = upload_results.get("long_form") or {}
+    episode_record = _episode_record_for_upload(episode_id)
     if target_norm in {"all", "long", "long_form"}:
         items.append((
             "long_form",
-            long_result.get("video_id"),
+            _video_id_from_result(long_result)
+            or (episode_record or {}).get("youtube_video_id"),
             manifest.get("long_form") or {},
         ))
     shorts_meta = manifest.get("shorts") or []
     shorts_results = upload_results.get("shorts") or []
     if target_norm in {"all", "shorts"} or target_norm.startswith("short_"):
         by_rank = {
-            int(s.get("rank") or 0): s
-            for s in shorts_results if isinstance(s, dict)
+            int(s.get("rank") or idx): s
+            for idx, s in enumerate(shorts_results, start=1)
+            if isinstance(s, dict)
         }
+        queued_short_ids = list(
+            (episode_record or {}).get("youtube_shorts_video_ids") or []
+        )
         for meta in shorts_meta:
             rank = int(meta.get("rank") or 0)
             label = f"short_{rank:02d}"
             if target_norm.startswith("short_") and target_norm != label:
                 continue
             result = by_rank.get(rank) or {}
-            items.append((label, result.get("video_id"), meta))
+            queued_id = (
+                str(queued_short_ids[rank - 1])
+                if 0 < rank <= len(queued_short_ids) else None
+            )
+            items.append((
+                label,
+                _video_id_from_result(result) or queued_id,
+                meta,
+            ))
     if not items:
         raise ValueError(
             "--youtube-caption-target must be all, long, shorts, or short_NN"
         )
     return items
+
+
+def _episode_record_for_upload(episode_id: str) -> dict[str, Any] | None:
+    try:
+        return find_episode(load_queue(), episode_id)
+    except Exception:
+        logger.debug("episode lookup failed for upload IDs", exc_info=True)
+        return None
+
+
+def _video_id_from_result(result: dict[str, Any]) -> str | None:
+    video_id = str(result.get("video_id") or "").strip()
+    if video_id:
+        return video_id
+    url = str(result.get("url") or "").strip()
+    m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{6,})", url)
+    if m:
+        return m.group(1)
+    return None
 
 
 def _list_caption_languages(yt, *, video_id: str) -> set[str]:
