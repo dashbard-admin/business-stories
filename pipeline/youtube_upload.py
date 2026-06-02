@@ -47,6 +47,15 @@ class UploadPackageResult:
     caption_tracks_ready: int
 
 
+@dataclass
+class CaptionBackfillResult:
+    package_dir: Path
+    attempted: int
+    uploaded: int
+    skipped_existing: int
+    warnings: list[dict[str, str]]
+
+
 def build_upload_package(episode_id: str) -> UploadPackageResult:
     """Build a reviewable upload package for one episode.
 
@@ -314,6 +323,132 @@ def upload_approved_package(
     return results
 
 
+def backfill_caption_tracks(
+    episode_id: str,
+    *,
+    approve: bool,
+    target: str = "all",
+    languages: list[str] | None = None,
+) -> CaptionBackfillResult:
+    """Upload caption tracks from an existing package without videos.
+
+    Intended for retrying caption failures after quota reset or after
+    YouTube channel permissions/scopes have been fixed.
+    """
+    if not approve:
+        raise ValueError(
+            "refusing caption backfill without explicit "
+            "--approve-youtube-upload"
+        )
+    ws = find_episode_workspace(episode_id)
+    if not ws:
+        raise ValueError(f"no episode workspace for {episode_id}")
+    package_dir = ws / "06_metadata" / "youtube_upload_package"
+    manifest_path = package_dir / "package_manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            f"upload package missing: {manifest_path}; build it first"
+        )
+    manifest = json.loads(manifest_path.read_text())
+    upload_results = manifest.get("upload_results") or {}
+    if not upload_results:
+        raise ValueError(
+            "package has no upload_results; upload videos once before "
+            "caption backfill"
+        )
+
+    yt = _youtube_client()
+    if yt is None:
+        raise RuntimeError(
+            "YouTube client unavailable. Install optional deps and run "
+            "--authorize-youtube again so the token has caption scopes."
+        )
+
+    wanted_langs = {x.strip() for x in (languages or []) if x.strip()}
+    warnings: list[dict[str, str]] = []
+    attempted = 0
+    uploaded = 0
+    skipped_existing = 0
+
+    for label, video_id, metadata in _caption_backfill_items(
+        manifest, upload_results, target=target,
+    ):
+        if not video_id:
+            warnings.append({
+                "step": f"{label}_captions",
+                "error": "missing uploaded video_id",
+            })
+            continue
+        existing = _list_caption_languages(yt, video_id=video_id)
+        for track in _caption_tracks_for_metadata(metadata):
+            language = str(track.get("language") or "").strip()
+            if wanted_langs and language not in wanted_langs:
+                continue
+            step = f"{label}_caption_{language}"
+            if language in existing:
+                skipped_existing += 1
+                logger.info("caption backfill skipped existing: %s", step)
+                continue
+            attempted += 1
+            try:
+                _insert_caption(
+                    yt,
+                    video_id=video_id,
+                    path=package_dir / track["path"],
+                    language=language,
+                    name=track["name"],
+                )
+                uploaded += 1
+                logger.info("caption backfill uploaded: %s", step)
+            except Exception as e:
+                msg = str(e)
+                warnings.append({"step": step, "error": msg})
+                logger.warning("caption backfill failed: %s: %s", step, e)
+                if "quotaExceeded" in msg:
+                    logger.warning("caption backfill stopping: quotaExceeded")
+                    run = _caption_backfill_run(
+                        target=target,
+                        languages=sorted(wanted_langs),
+                        attempted=attempted,
+                        uploaded=uploaded,
+                        skipped_existing=skipped_existing,
+                        warnings=warnings,
+                    )
+                    manifest.setdefault("caption_backfill_runs", []).append(run)
+                    manifest_path.write_text(json.dumps(manifest, indent=2))
+                    (package_dir / "caption_backfill_results.json").write_text(
+                        json.dumps(run, indent=2)
+                    )
+                    return CaptionBackfillResult(
+                        package_dir=package_dir,
+                        attempted=attempted,
+                        uploaded=uploaded,
+                        skipped_existing=skipped_existing,
+                        warnings=warnings,
+                    )
+
+    run = _caption_backfill_run(
+        target=target,
+        languages=sorted(wanted_langs),
+        attempted=attempted,
+        uploaded=uploaded,
+        skipped_existing=skipped_existing,
+        warnings=warnings,
+    )
+    manifest.setdefault("caption_backfill_runs", []).append(run)
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    (package_dir / "caption_backfill_results.json").write_text(
+        json.dumps(run, indent=2)
+    )
+    return CaptionBackfillResult(
+        package_dir=package_dir,
+        attempted=attempted,
+        uploaded=uploaded,
+        skipped_existing=skipped_existing,
+        warnings=warnings,
+    )
+
+
 def _youtube_client():
     try:
         from googleapiclient.discovery import build
@@ -324,6 +459,77 @@ def _youtube_client():
     if creds is None:
         return None
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
+
+
+def _caption_backfill_items(
+    manifest: dict[str, Any],
+    upload_results: dict[str, Any],
+    *,
+    target: str,
+) -> list[tuple[str, str | None, dict[str, Any]]]:
+    target_norm = (target or "all").strip().lower().replace("-", "_")
+    items: list[tuple[str, str | None, dict[str, Any]]] = []
+    long_result = upload_results.get("long_form") or {}
+    if target_norm in {"all", "long", "long_form"}:
+        items.append((
+            "long_form",
+            long_result.get("video_id"),
+            manifest.get("long_form") or {},
+        ))
+    shorts_meta = manifest.get("shorts") or []
+    shorts_results = upload_results.get("shorts") or []
+    if target_norm in {"all", "shorts"} or target_norm.startswith("short_"):
+        by_rank = {
+            int(s.get("rank") or 0): s
+            for s in shorts_results if isinstance(s, dict)
+        }
+        for meta in shorts_meta:
+            rank = int(meta.get("rank") or 0)
+            label = f"short_{rank:02d}"
+            if target_norm.startswith("short_") and target_norm != label:
+                continue
+            result = by_rank.get(rank) or {}
+            items.append((label, result.get("video_id"), meta))
+    if not items:
+        raise ValueError(
+            "--youtube-caption-target must be all, long, shorts, or short_NN"
+        )
+    return items
+
+
+def _list_caption_languages(yt, *, video_id: str) -> set[str]:
+    try:
+        resp = yt.captions().list(part="snippet", videoId=video_id).execute()
+    except Exception as e:
+        logger.warning("caption list failed for %s: %s", video_id, e)
+        return set()
+    languages: set[str] = set()
+    for item in resp.get("items") or []:
+        snippet = item.get("snippet") or {}
+        language = str(snippet.get("language") or "").strip()
+        if language:
+            languages.add(language)
+    return languages
+
+
+def _caption_backfill_run(
+    *,
+    target: str,
+    languages: list[str],
+    attempted: int,
+    uploaded: int,
+    skipped_existing: int,
+    warnings: list[dict[str, str]],
+) -> dict[str, Any]:
+    return {
+        "ran_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "target": target,
+        "languages": languages,
+        "attempted": attempted,
+        "uploaded": uploaded,
+        "skipped_existing": skipped_existing,
+        "warnings": warnings,
+    }
 
 
 def _safe_post_upload_step(

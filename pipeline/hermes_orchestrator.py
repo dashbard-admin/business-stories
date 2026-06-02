@@ -428,10 +428,35 @@ def cli() -> int:
         ),
     )
     parser.add_argument(
+        "--backfill-youtube-captions", metavar="EP_ID",
+        help=(
+            "upload caption tracks from an existing YouTube package without "
+            "re-uploading videos. Requires --approve-youtube-upload."
+        ),
+    )
+    parser.add_argument(
         "--approve-youtube-upload", action="store_true",
         help=(
-            "explicit approval flag required with --upload-youtube-package. "
-            "Without this flag the upload command refuses to run."
+            "explicit approval flag required with --upload-youtube-package "
+            "or --backfill-youtube-captions. Without this flag the upload "
+            "command refuses to run."
+        ),
+    )
+    parser.add_argument(
+        "--youtube-caption-target",
+        default="all",
+        help=(
+            "caption backfill target: all, long, shorts, or short_NN "
+            "(for example short_03)."
+        ),
+    )
+    parser.add_argument(
+        "--youtube-caption-language",
+        action="append",
+        default=[],
+        help=(
+            "caption backfill language code to retry. May be repeated. "
+            "Defaults to every packaged caption track."
         ),
     )
     parser.add_argument(
@@ -576,6 +601,29 @@ def cli() -> int:
         print(f"uploaded shorts: {len(shorts)}")
         for s in shorts:
             print(f"- {s.get('url')}")
+        return 0
+
+    if args.backfill_youtube_captions:
+        from .youtube_upload import backfill_caption_tracks
+        try:
+            result = backfill_caption_tracks(
+                args.backfill_youtube_captions,
+                approve=bool(args.approve_youtube_upload),
+                target=args.youtube_caption_target,
+                languages=args.youtube_caption_language,
+            )
+        except Exception as e:
+            print(f"--backfill-youtube-captions: {e}", file=sys.stderr)
+            return 2
+        print(f"caption backfill package: {result.package_dir}")
+        print(
+            f"caption backfill: attempted={result.attempted}, "
+            f"uploaded={result.uploaded}, "
+            f"skipped_existing={result.skipped_existing}, "
+            f"warnings={len(result.warnings)}"
+        )
+        for warning in result.warnings:
+            print(f"- {warning.get('step')}: {warning.get('error')}")
         return 0
 
     if args.status:
