@@ -33,7 +33,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 from ..browser import Browser, safe_filename
 from ..config import load_config
@@ -64,6 +64,105 @@ class _PD:
     source_page: str | None
 
 
+def _ensure_company_logo(*, ws: Path, company: str, browser: Browser) -> None:
+    """Find one editorial company logo for the title card.
+
+    This intentionally sits outside the main PD-asset manifest so S08
+    does not reuse a trademark/logo as a generic beat prop.
+    """
+    assets_dir = ws / "03_assets"
+    pd_dir = assets_dir / "pd"
+    logo_path = pd_dir / "company_logo.png"
+    meta_path = assets_dir / "title_logo.json"
+    if logo_path.exists():
+        if not meta_path.exists():
+            _write_logo_meta(ws, logo_path, source_url=None, source_title=None)
+        return
+
+    queries = [
+        f"{company} official logo png",
+        f"{company} logo transparent png",
+        f"{company} logo",
+    ]
+    tmp_dir = assets_dir / "quarantine"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    seen: set[str] = set()
+    for query in queries:
+        try:
+            results = browser.search(query, n_results=8, categories="images")
+        except Exception as e:
+            logger.warning("S05 logo search failed for %r: %s", query, e)
+            continue
+        for i, result in enumerate(results):
+            url = result.url
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            haystack = f"{result.title} {url}".lower()
+            if "logo" not in haystack:
+                continue
+            suffix = _ext_from_url(url) or ".png"
+            candidate = tmp_dir / f"company_logo_candidate_{i}{suffix}"
+            try:
+                if not browser.download(url, candidate):
+                    continue
+                meta = _probe_image(candidate)
+                if meta is None or meta[0] < 180 or meta[1] < 60:
+                    continue
+                _normalise_logo(candidate, logo_path)
+                _write_logo_meta(
+                    ws, logo_path,
+                    source_url=url,
+                    source_title=result.title,
+                )
+                logger.info("S05 company logo: %s -> %s", url, logo_path)
+                return
+            except Exception as e:
+                logger.debug("S05 logo candidate rejected (%s): %s", url, e)
+                continue
+    logger.warning("S05 company logo: no usable logo found for %s", company)
+
+
+def _write_logo_meta(
+    ws: Path, logo_path: Path, *,
+    source_url: str | None,
+    source_title: str | None,
+) -> None:
+    meta = {
+        "local_path": str(logo_path.relative_to(ws)),
+        "source_url": source_url,
+        "source_title": source_title,
+        "role": "company_logo_title_card",
+        "license": "editorial-trademark-logo",
+        "direct_use_eligible": False,
+    }
+    (ws / "03_assets" / "title_logo.json").write_text(
+        json.dumps(meta, indent=2)
+    )
+
+
+def _normalise_logo(src: Path, dest: Path) -> None:
+    """Trim whitespace and make plain white logo backgrounds transparent."""
+    with Image.open(src) as raw:
+        img = raw.convert("RGBA")
+    bg = Image.new("RGBA", img.size, img.getpixel((0, 0)))
+    diff = ImageChops.difference(img, bg)
+    bbox = diff.getbbox()
+    if bbox:
+        img = img.crop(bbox)
+
+    # If the logo came on a white canvas, make that canvas transparent.
+    px = img.load()
+    if px is not None:
+        for y in range(img.height):
+            for x in range(img.width):
+                r, g, b, a = px[x, y]
+                if a and r > 245 and g > 245 and b > 245:
+                    px[x, y] = (r, g, b, 0)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    img.save(dest, "PNG")
+
+
 def run(episode: dict, queue: dict) -> str | None:
     cfg = load_config()
     ws = find_episode_workspace(episode["id"])
@@ -87,6 +186,11 @@ def run(episode: dict, queue: dict) -> str | None:
         ws=ws, founder=founder, company=company,
     )
 
+    pd_dir = ws / "03_assets" / "pd"
+    pd_dir.mkdir(parents=True, exist_ok=True)
+    browser = Browser()
+    _ensure_company_logo(ws=ws, company=company, browser=browser)
+
     # ---- master switch ----
     # When asset_hunt.enabled is false (config default for this
     # pipeline), S05 is a near-instant no-op: it writes an empty
@@ -108,14 +212,10 @@ def run(episode: dict, queue: dict) -> str | None:
         )
         return None
 
-    browser = Browser()
-
     # Try to enrich query terms from the fact ledger (key products,
     # competitors, locations).
     extra_terms = _extra_search_terms(ws)
 
-    pd_dir = ws / "03_assets" / "pd"
-    pd_dir.mkdir(parents=True, exist_ok=True)
     quarantine = ws / "03_assets" / "quarantine"
     quarantine.mkdir(parents=True, exist_ok=True)
 

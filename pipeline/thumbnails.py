@@ -20,6 +20,8 @@ fixed layouts target different click psychology:
   5. noir               — V2 visual style: heavy shadow, single
                           accent color, founder silhouetted. For
                           dark / decline stories on the V2 style.
+  6. title_card_logo    — Exact S12 title card, including company
+                          logo placement and yellow Pillow title.
 
 YouTube's native title-test A/B since Dec 2023 supports 3 thumbnail
 variants per video — the operator picks the strongest 3 from this
@@ -49,6 +51,7 @@ DEFAULT_LAYOUTS = (
     "big_number",
     "shocked_face",
     "noir",
+    "title_card_logo",
 )
 
 
@@ -381,12 +384,20 @@ def generate_variants(
                     continue
                 img = _render_noir(backdrop, title,
                                    episode_meta=episode_meta)
+            elif layout == "title_card_logo":
+                title_card = out_dir.parent / "title_card.png"
+                if not title_card.exists():
+                    logger.info("thumbnails: skipping title_card_logo "
+                                "(no S12 title_card.png yet)")
+                    continue
+                with Image.open(title_card) as raw_title:
+                    img = _fit_to_thumb(raw_title.convert("RGB"))
             else:
                 logger.warning("unknown layout %r; skipping", layout)
                 continue
 
             # Composite channel logo (corner, low-right) if available.
-            if logo is not None:
+            if logo is not None and layout != "title_card_logo":
                 img = img.convert("RGBA")
                 pad = int(THUMB_H * 0.03)
                 img.alpha_composite(
@@ -399,7 +410,8 @@ def generate_variants(
             img.save(path, "JPEG", quality=90)
             variants.append(ThumbnailVariant(
                 layout=layout, path=path, text=title,
-                backdrop_beat_id=backdrop_beat_id,
+                backdrop_beat_id="title_card"
+                if layout == "title_card_logo" else backdrop_beat_id,
             ))
         except Exception as e:
             logger.warning("thumbnail layout %s failed: %s", layout, e)

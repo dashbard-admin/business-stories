@@ -323,7 +323,7 @@ Commons MediaWiki API client. S5 uses this for license-clean image hits instead 
 Generates N (default 10) candidate YouTube titles per episode via the writer LLM using `prompts/title_variants.txt`. Each variant is tagged with a style hypothesis (`curiosity_gap, shock_value, outcome_first, named_person, question, contrarian, number_anchored, before_after, time_anchored, character_voice`) and a `predicted_ctr_band ∈ {high, medium, low}`. Output: `06_metadata/titles.json`. S13 calls this in Phase 1.
 
 ### 5.4c `thumbnails.py` *(added Batch D 2026-05-27)*
-Generates 5 Pillow-composited thumbnail variants (1280×720 JPG). Fixed layouts: `founder_closeup, split_frame, big_number, shocked_face, noir` (noir only fires when `visual_style=V2`). Backdrop is the strongest FLUX-rendered beat image (prefers `founder_portrait` intent). Channel logo composited at `assets/branding/channel_mark.png` when present. Output: `05_video/thumbnails/thumb_<layout>.jpg`. Operator picks top 3 for YouTube native A/B test.
+Generates 6 Pillow-composited thumbnail variants (1280×720 JPG). Fixed layouts: `founder_closeup, split_frame, big_number, shocked_face, noir, title_card_logo` (noir only fires when `visual_style=V2`; `title_card_logo` reuses the exact S12 `05_video/title_card.png`, including company-logo placement and the yellow title burn-in). Backdrop is the strongest FLUX-rendered beat image (prefers `founder_portrait` intent). Channel logo composited at `assets/branding/channel_mark.png` when present, except on `title_card_logo` because that candidate must remain an exact title-card export. Output: `05_video/thumbnails/thumb_<layout>.jpg`. Operator picks top 3 for YouTube native A/B test.
 
 ### 5.4d `asr.py` *(added Batch D 2026-05-27)*
 Whisper.cpp wrapper for Shorts subtitles only. `transcribe(wav_path)` returns word-level `Segment(start_seconds, end_seconds, text)` segments for hard-burned captions; it is not part of audio muxing. Falls back gracefully when the `whisper-cli` binary isn't on PATH (logs a warning, returns None — Shorts still render with source audio, but without subtitles). Configurable model name + path via `cfg.asr`.
@@ -418,7 +418,7 @@ Per source, calls the extractor LLM with `fact_extract.txt`. Fact types: `foundi
 Adversarial critic + skeptic over the merged ledger. `fact_verify.txt` (skeptic) rules each claim pass/borderline/reject; `fact_merge.txt` dedupes near-identical claims. Skeptic rejects any claim whose only support is a `paywall_title_only` source. Output: `01_factcheck/fact_ledger.json`.
 
 ### S05 — PD Asset Hunt (`s05_asset_hunt.py`)
-Phased PD asset hunt. Master switch: `config.asset_hunt.enabled` (operator-tunable per episode). Character-iconography sub-step runs unconditionally — it's cheap and provides cross-beat character consistency.
+Phased PD asset hunt. Master switch: `config.asset_hunt.enabled` (operator-tunable per episode). Character-iconography sub-step runs unconditionally — it's cheap and provides cross-beat character consistency. S05 also attempts a separate company-logo lookup even when the main PD hunt is disabled, saving `03_assets/pd/company_logo.png` plus `03_assets/title_logo.json`; that logo is marked as title-card-only and is intentionally excluded from the normal beat-asset manifest so S08 does not reuse it as a generic prop.
 - Phase 0: catalog whatever's already on disk (operator drops + prior runs).
 - Phase 1: Wikimedia Commons via `pipeline/wikimedia.py` — highest-quality source.
 - Phase 1b: institutional PD archives (Smithsonian / Europeana / Pixabay) — scaffolded behind config gates.
@@ -514,6 +514,9 @@ S09 stores `image_qa.prompt_hash` and `image_qa.visual_prompt_version` *(Batch M
 Grok backup cost control *(Batch M.3 2026-05-30)*: `config.yaml > grok.resolution` is now `1k`; `grok._upscale_if_needed()` upscales returned images below 1920×1080 locally. Images already at or above target resolution are left untouched.
 
 Also renders `title.png` for S12 to pick up; `credits.png` is rendered only when `production.closing_card_enabled` is true and `closing_card_seconds > 0`.
+
+### S12 — Video Assembly (`s12_video_assembly.py`)
+Builds per-beat clips, prepends the opening title card, appends the configured music-only tail / optional closing material, muxes against `04_audio/final_mix.wav`, and writes captions. The opening title card starts from `03_assets/flux/title.png` when present, then composites the real company logo from `03_assets/title_logo.json` / `03_assets/pd/company_logo.png` with Pillow. `production.title_card_logo_corner` controls the logo corner (default top-right); the yellow Pillow title is forced to the diagonal opposite corner, and `05_video/title_card_meta.json` records the resolved corners.
 
 ### S10 — Kokoro TTS (`s10_kokoro_render.py`)
 Per-narrator voice render. Pronunciation overrides at `pipeline/lexicon/pronunciation_overrides.yaml` (Bezos, Theranos, Zuckerberg, Wirecard, EBITDA, IPO, etc.). Output: per-beat WAV chunks + `voice_full.wav`.

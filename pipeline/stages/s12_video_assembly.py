@@ -154,6 +154,7 @@ def run(episode: dict, queue: dict) -> str | None:
             prod = cfg.production
             _render_title_card(
                 out_path=title_card_png,
+                workspace=ws,
                 backdrop=flux_title_png if flux_title_png.exists() else None,
                 episode_title=episode["incident"]["company_name"],
                 year=episode["incident"].get("year_anchor"),
@@ -166,6 +167,9 @@ def run(episode: dict, queue: dict) -> str | None:
                 corner=str(prod.get("title_card_corner", "random")),
                 uppercase=bool(prod.get("title_card_uppercase", True)),
                 show_year=bool(prod.get("title_card_show_year", True)),
+                logo_enabled=bool(prod.get("title_card_logo_enabled", True)),
+                logo_corner=str(prod.get("title_card_logo_corner", "top-right")),
+                logo_width_pct=float(prod.get("title_card_logo_width_pct", 0.24)),
             )
             try:
                 ken_burns_clip(
@@ -613,6 +617,7 @@ def _hex_to_rgb(h: str) -> tuple[int, int, int]:
 def _render_title_card(
     *,
     out_path: Path,
+    workspace: Path | None,
     backdrop: Path | None,
     episode_title: str,
     year,
@@ -625,6 +630,9 @@ def _render_title_card(
     corner: str = "random",
     uppercase: bool = True,
     show_year: bool = True,
+    logo_enabled: bool = True,
+    logo_corner: str = "top-right",
+    logo_width_pct: float = 0.24,
 ) -> None:
     """Render the opening title card in YouTube-thumbnail style.
 
@@ -657,8 +665,23 @@ def _render_title_card(
     body_rgb = _hex_to_rgb(text_color)
     stroke_rgb = _hex_to_rgb(stroke_color)
 
-    # ---- corner selection ----
-    corner_id = _resolve_title_corner(corner, episode_id)
+    # ---- logo + corner selection ----
+    logo_path = _find_title_logo(workspace) if logo_enabled else None
+    logo_corner_id = (
+        _resolve_title_corner(logo_corner, episode_id)
+        if logo_path is not None else None
+    )
+    if logo_path is not None and logo_corner_id is not None:
+        _paste_title_logo(
+            img,
+            logo_path=logo_path,
+            corner_id=logo_corner_id,
+            padding_pct=padding_pct,
+            width_pct=logo_width_pct,
+        )
+        corner_id = _opposite_corner(logo_corner_id)
+    else:
+        corner_id = _resolve_title_corner(corner, episode_id)
     pad = int(OUT_H * max(0.0, padding_pct))
 
     # ---- title text fit ----
@@ -722,7 +745,7 @@ def _render_title_card(
         cursor_y += line_h
 
     # ---- year tag in the opposite corner (small, plain) ----
-    if show_year and year:
+    if show_year and year and logo_corner_id is None:
         year_font_size = max(28, int(OUT_H * font_size_pct * 0.25))
         year_font = _bold_font(year_font_size)
         year_text = str(year)
@@ -747,6 +770,90 @@ def _render_title_card(
         )
 
     img.save(out_path, "PNG")
+    meta = {
+        "title_corner": corner_id,
+        "logo_corner": logo_corner_id,
+        "logo_path": str(logo_path.relative_to(workspace))
+        if logo_path is not None and workspace is not None else None,
+    }
+    try:
+        (out_path.parent / "title_card_meta.json").write_text(
+            json.dumps(meta, indent=2)
+        )
+    except Exception:
+        logger.debug("title_card_meta.json write failed", exc_info=True)
+
+
+def _find_title_logo(workspace: Path | None) -> Path | None:
+    if workspace is None:
+        return None
+    meta_path = workspace / "03_assets" / "title_logo.json"
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text())
+            rel = meta.get("local_path")
+            if rel:
+                p = workspace / rel
+                if p.exists():
+                    return p
+        except Exception:
+            logger.debug("title_logo.json parse failed", exc_info=True)
+    pd_dir = workspace / "03_assets" / "pd"
+    for name in ("company_logo.png", "company_logo.jpg", "company_logo.jpeg"):
+        p = pd_dir / name
+        if p.exists():
+            return p
+    matches = sorted(pd_dir.glob("*logo*"))
+    for p in matches:
+        if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            return p
+    return None
+
+
+def _paste_title_logo(
+    img: Image.Image, *,
+    logo_path: Path,
+    corner_id: str,
+    padding_pct: float,
+    width_pct: float,
+) -> None:
+    try:
+        with Image.open(logo_path) as raw:
+            logo = raw.convert("RGBA")
+    except Exception as e:
+        logger.warning("title logo load failed (%s): %s", logo_path, e)
+        return
+    max_w = max(120, int(OUT_W * max(0.05, min(width_pct, 0.45))))
+    max_h = max(80, int(OUT_H * 0.20))
+    scale = min(max_w / logo.width, max_h / logo.height)
+    logo = logo.resize(
+        (max(1, int(logo.width * scale)), max(1, int(logo.height * scale))),
+        Image.LANCZOS,
+    )
+    shadow = Image.new("RGBA", logo.size, (0, 0, 0, 0))
+    shadow.putalpha(logo.getchannel("A").filter(ImageFilter.GaussianBlur(8)))
+    shadow = Image.eval(shadow, lambda v: int(v * 0.45))
+
+    pad = int(OUT_H * max(0.0, padding_pct))
+    if corner_id.endswith("right"):
+        x = OUT_W - pad - logo.width
+    else:
+        x = pad
+    if corner_id.startswith("bottom"):
+        y = OUT_H - pad - logo.height
+    else:
+        y = pad
+
+    base = img.convert("RGBA")
+    base.alpha_composite(shadow, (x + 4, y + 6))
+    base.alpha_composite(logo, (x, y))
+    img.paste(base.convert("RGB"))
+
+
+def _opposite_corner(corner_id: str) -> str:
+    top = "bottom" if corner_id.startswith("top") else "top"
+    side = "left" if corner_id.endswith("right") else "right"
+    return f"{top}-{side}"
 
 
 def _resolve_title_corner(corner: str, episode_id: str) -> str:

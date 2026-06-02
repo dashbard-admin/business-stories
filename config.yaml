@@ -137,6 +137,11 @@ production:
   title_card_uppercase: true              # SCREAM CASE for the title text
   title_card_show_year: false             # set true to add a small year
                                           # tag in the opposite corner
+  title_card_logo_enabled: true           # S12 adds the real company logo
+                                          # from 03_assets/title_logo.json
+  title_card_logo_corner: "top-right"     # logo corner; title text is forced
+                                          # to the diagonal opposite corner
+  title_card_logo_width_pct: 0.24         # max logo width as fraction of frame
 
 quality_gates:
   min_verified_facts: 5
