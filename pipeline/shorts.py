@@ -272,6 +272,7 @@ def build_teaser_short(
     )
     for i, img in enumerate(images, start=1):
         clip = work_dir / f"img_{i:02d}.mp4"
+        frames = max(1, int(round(base_dur * 30)))
         vf = _shorts_motion_filter(
             index=i,
             duration_seconds=base_dur,
@@ -280,10 +281,10 @@ def build_teaser_short(
         cmd = [
             require_ffmpeg(), "-y",
             "-loop", "1",
-            "-t", f"{base_dur:.3f}",
             "-i", str(img),
             "-vf", vf,
             "-r", "30",
+            "-frames:v", str(frames),
             "-an",
             "-c:v", "libx264",
             "-preset", "medium",
@@ -687,22 +688,27 @@ def _shorts_motion_filter(
 ) -> str:
     frames = max(1, int(round(duration_seconds * 30)))
     strength = max(0.0, min(0.35, float(motion_strength)))
-    progress = f"on/{max(1, frames - 1)}"
-    zoom = f"1+{strength:.4f}*{progress}"
+    progress = f"(on/{max(1, frames - 1)})"
+    ease = f"{progress}*{progress}*(3-2*{progress})"
     x_center = "(iw-iw/zoom)/2"
     y_center = "(ih-ih/zoom)/2"
     if index % 3 == 1:
+        zoom = f"1+{strength:.4f}*{ease}"
         x_expr = x_center
         y_expr = y_center
     elif index % 3 == 2:
-        x_expr = f"(iw-iw/zoom)*{progress}"
+        zoom = f"{1.0 + strength:.4f}"
+        # Crop origin moves right, so the visible image pans left.
+        x_expr = f"(iw-iw/zoom)*{ease}"
         y_expr = y_center
     else:
-        x_expr = f"(iw-iw/zoom)*(1-{progress})"
+        zoom = f"{1.0 + strength:.4f}"
+        # Crop origin moves left, so the visible image pans right.
+        x_expr = f"(iw-iw/zoom)*(1-{ease})"
         y_expr = y_center
     return (
-        "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,"
-        "crop=1080:1920,"
+        "scale=2160:3840:force_original_aspect_ratio=increase:flags=lanczos,"
+        "crop=2160:3840,"
         f"zoompan=z='{zoom}':x='{x_expr}':y='{y_expr}'"
         f":d={frames}:s=1080x1920:fps=30,"
         "setsar=1"

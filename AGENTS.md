@@ -832,9 +832,10 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-06-02 — slower motion-rich Shorts.*
+*This file last updated: 2026-06-02 — smoother alternating Shorts motion.*
 
 ### Batch N — Topic And Script Generation Reliability — 2026-05-31
+- **Shorts Ken Burns motion is smoother and alternates modes** — still panels render an exact output frame count from the looped image, supersample to 2160×3840 before `zoompan`, use eased motion, and repeat `zoom in → pan left → pan right` across consecutive panels.
 - **Shorts TTS speed now matters** — `shorts_enforce_tts_wpm` defaults false, so `shorts_tts_speed` controls Kokoro duration directly. `shorts_tts_wpm` defaults 175 and mainly guides the teaser script word budget unless enforcement is re-enabled.
 - **Shorts now use smaller caption cues** — teaser captions are split by `shorts_caption_max_words` / `shorts_caption_max_chars`, preventing long sentences from overflowing or disappearing in the burned-in overlay.
 - **Shorts images now move** — still panels render with fast Ken Burns zoom/pan and slide-left xfade transitions; xfade failures fall back to hard cuts instead of failing S13.
