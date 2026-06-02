@@ -4,7 +4,7 @@
 channel:
   name: "Winners & Wrecks"
   brand_color: "#1a2b3c"
-  channel_id: "UCiCKJprQSKLPjGnAew3iStA"                   # fill after YouTube channel creation
+  channel_id: "UChFCUfFacP9mzM4ovd1x8EA"                   # fill after YouTube channel creation
   contact_email: "you@example.com"
 
 paths:
@@ -248,7 +248,7 @@ youtube_analytics:
   enabled: false                  # flip to true once OAuth is set up
                                   # AND at least 3-5 episodes have been
                                   # published with --set-video-id
-  channel_id: "UCiCKJprQSKLPjGnAew3iStA"                  # leave blank; "channel==MINE" works
+  channel_id: "UChFCUfFacP9mzM4ovd1x8EA"                  # leave blank; "channel==MINE" works
   summary_window: 20              # last N episodes considered when
                                   # building the prompt-injection
                                   # summary (Q-E2: pattern + up to 3
