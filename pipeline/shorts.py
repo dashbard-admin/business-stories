@@ -303,7 +303,7 @@ def build_teaser_short(
         return False
 
     if burn_subtitles and subtitles:
-        vf = _drawtext_filter(subtitles, duration_seconds)
+        vf = _drawtext_filter(subtitles, duration_seconds, work_dir=work_dir)
         cmd = [
             require_ffmpeg(), "-y",
             "-i", str(temp_mp4),
@@ -327,10 +327,11 @@ def build_teaser_short(
                        stdin=subprocess.DEVNULL, timeout=300)
         return out_mp4.exists() and out_mp4.stat().st_size > 1000
     except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or b"").decode("utf-8", errors="replace")
         logger.warning(
             "Shorts teaser final encode failed: %s — stderr=%s",
             e.returncode,
-            (e.stderr or b"")[:1000],
+            stderr[-2000:],
         )
         return False
     except Exception as e:
@@ -615,18 +616,25 @@ def _split_sentences(text: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
-def _drawtext_filter(subtitles: list[Segment], duration_seconds: float) -> str:
+def _drawtext_filter(
+    subtitles: list[Segment],
+    duration_seconds: float,
+    *,
+    work_dir: Path,
+) -> str:
     parts = ["scale=1080:1920,setsar=1"]
-    for seg in subtitles:
+    for idx, seg in enumerate(subtitles, start=1):
         start = max(0.0, float(seg.start_seconds))
         end = min(float(duration_seconds), float(seg.end_seconds))
         if end <= start:
             continue
-        text = _drawtext_escape(seg.text.strip()[:96])
+        text = seg.text.strip()[:96]
         if not text:
             continue
+        text_file = work_dir / f"caption_{idx:02d}.txt"
+        text_file.write_text(text)
         parts.append(
-            f"drawtext=text='{text}':fontsize=64"
+            f"drawtext=textfile='{_filter_path(text_file)}':fontsize=64"
             f":fontcolor=white:borderw=6:bordercolor=black"
             f":x=(w-text_w)/2:y=h-260"
             f":enable='between(t,{start:.2f},{end:.2f})'"
@@ -634,13 +642,11 @@ def _drawtext_filter(subtitles: list[Segment], duration_seconds: float) -> str:
     return ",".join(parts)
 
 
-def _drawtext_escape(text: str) -> str:
+def _filter_path(path: Path) -> str:
+    text = path.as_posix()
     text = text.replace("\\", "\\\\")
     text = text.replace("'", "\\'")
     text = text.replace(":", "\\:")
-    text = text.replace(",", "\\,")
-    text = text.replace("%", "\\%")
-    text = text.replace("\n", " ")
     return text
 
 
