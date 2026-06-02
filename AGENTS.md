@@ -153,6 +153,7 @@ The diagram is approximate — for the authoritative wiring, read `pipeline/herm
 ```
 business_success_stories/
 ├── AGENTS.md                    ← this file
+├── HERMES.md                    ← autonomous-agent runbook for CLI args, QA gates, and log signatures
 ├── README.md                    ← operator-facing quickstart
 ├── config.yaml                  ← all runtime knobs
 ├── .env / .env.example          ← secrets (gitignored / template)
