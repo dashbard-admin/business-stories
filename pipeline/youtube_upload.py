@@ -560,10 +560,13 @@ def _build_shorts_package(
     hashtags = cfg_upload.get("shorts_hashtags") or ["Shorts"]
     entries: list[dict[str, Any]] = []
     for item in manifest.get("shorts") or []:
-        src = Path(item.get("path") or "")
-        if not src.is_absolute():
-            src = ws / src
-        if not src.exists():
+        src = _resolve_short_source(ws=ws, src_dir=src_dir, item=item)
+        if src is None:
+            logger.warning(
+                "youtube package: short source missing for rank=%s path=%r",
+                item.get("rank"),
+                item.get("path"),
+            )
             continue
         rank = int(item.get("rank") or (len(entries) + 1))
         out_dir = shorts_dir / f"short_{rank:02d}"
@@ -602,6 +605,35 @@ def _build_shorts_package(
         (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
         entries.append(metadata)
     return entries
+
+
+def _resolve_short_source(
+    *, ws: Path, src_dir: Path, item: dict[str, Any]
+) -> Path | None:
+    """Resolve a Short video path, tolerating moved episode workspaces."""
+    raw = str(item.get("path") or "").strip()
+    candidates: list[Path] = []
+    if raw:
+        p = Path(raw)
+        candidates.append(p if p.is_absolute() else ws / p)
+        if p.name:
+            candidates.append(src_dir / p.name)
+
+    try:
+        rank = int(item.get("rank") or 0)
+    except (TypeError, ValueError):
+        rank = 0
+    if rank > 0:
+        candidates.append(src_dir / f"short_{rank:02d}.mp4")
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
 
 
 def _copy_if_exists(src: Path, dst: Path) -> None:
