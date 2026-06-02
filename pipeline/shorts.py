@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from PIL import Image, ImageDraw, ImageFont
+
 from .asr import Segment, transcribe
 from .config import load_config
 from .ffmpeg_builder import get_duration_seconds, require_ffmpeg, time_stretch_audio
@@ -302,12 +304,22 @@ def build_teaser_short(
         logger.warning("Shorts teaser mux failed: %s", e)
         return False
 
-    if burn_subtitles and subtitles:
-        vf = _drawtext_filter(subtitles, duration_seconds, work_dir=work_dir)
+    overlays = (
+        _caption_overlays(subtitles, duration_seconds, work_dir=work_dir)
+        if burn_subtitles and subtitles else []
+    )
+    if overlays:
+        inputs: list[str] = ["-i", str(temp_mp4)]
+        for overlay_path, _start, _end in overlays:
+            inputs.extend(["-loop", "1", "-i", str(overlay_path)])
+        filter_complex = _overlay_filter(overlays)
         cmd = [
             require_ffmpeg(), "-y",
-            "-i", str(temp_mp4),
-            "-vf", vf,
+            *inputs,
+            "-filter_complex", filter_complex,
+            "-map", f"[v{len(overlays)}]",
+            "-map", "0:a:0?",
+            "-t", f"{duration_seconds:.3f}",
             "-c:v", "libx264",
             "-preset", "medium",
             "-crf", "20",
@@ -616,13 +628,14 @@ def _split_sentences(text: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
-def _drawtext_filter(
+def _caption_overlays(
     subtitles: list[Segment],
     duration_seconds: float,
     *,
     work_dir: Path,
-) -> str:
-    parts = ["scale=1080:1920,setsar=1"]
+) -> list[tuple[Path, float, float]]:
+    overlays: list[tuple[Path, float, float]] = []
+    font = _caption_font(62)
     for idx, seg in enumerate(subtitles, start=1):
         start = max(0.0, float(seg.start_seconds))
         end = min(float(duration_seconds), float(seg.end_seconds))
@@ -631,23 +644,94 @@ def _drawtext_filter(
         text = seg.text.strip()[:96]
         if not text:
             continue
-        text_file = work_dir / f"caption_{idx:02d}.txt"
-        text_file.write_text(text)
-        parts.append(
-            f"drawtext=textfile='{_filter_path(text_file)}':fontsize=64"
-            f":fontcolor=white:borderw=6:bordercolor=black"
-            f":x=(w-text_w)/2:y=h-260"
-            f":enable='between(t,{start:.2f},{end:.2f})'"
+        path = work_dir / f"caption_{idx:02d}.png"
+        _write_caption_overlay(text=text, font=font, out_path=path)
+        overlays.append((path, start, end))
+    return overlays
+
+
+def _write_caption_overlay(
+    *, text: str, font: ImageFont.ImageFont, out_path: Path
+) -> None:
+    img = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    lines = _wrap_caption(text, font=font, max_width=900)
+    line_heights = [
+        draw.textbbox((0, 0), line, font=font, stroke_width=4)[3]
+        for line in lines
+    ]
+    line_gap = 10
+    text_h = sum(line_heights) + line_gap * max(0, len(lines) - 1)
+    box_pad_x = 42
+    box_pad_y = 30
+    box_w = 980
+    box_h = text_h + box_pad_y * 2
+    box_x = (1080 - box_w) // 2
+    box_y = 1920 - box_h - 190
+    draw.rounded_rectangle(
+        [box_x, box_y, box_x + box_w, box_y + box_h],
+        radius=28,
+        fill=(0, 0, 0, 178),
+    )
+    y = box_y + box_pad_y
+    for line, line_h in zip(lines, line_heights):
+        bbox = draw.textbbox((0, 0), line, font=font, stroke_width=4)
+        x = (1080 - (bbox[2] - bbox[0])) // 2
+        draw.text(
+            (x, y),
+            line,
+            font=font,
+            fill=(255, 255, 255, 255),
+            stroke_width=4,
+            stroke_fill=(0, 0, 0, 255),
         )
-    return ",".join(parts)
+        y += line_h + line_gap
+    img.save(out_path)
 
 
-def _filter_path(path: Path) -> str:
-    text = path.as_posix()
-    text = text.replace("\\", "\\\\")
-    text = text.replace("'", "\\'")
-    text = text.replace(":", "\\:")
-    return text
+def _overlay_filter(overlays: list[tuple[Path, float, float]]) -> str:
+    parts = ["[0:v]setsar=1[v0]"]
+    for idx, (_path, start, end) in enumerate(overlays, start=1):
+        parts.append(
+            f"[v{idx - 1}][{idx}:v]overlay=0:0"
+            f":enable='between(t,{start:.2f},{end:.2f})'"
+            f"[v{idx}]"
+        )
+    return ";".join(parts)
+
+
+def _wrap_caption(
+    text: str, *, font: ImageFont.ImageFont, max_width: int
+) -> list[str]:
+    draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        bbox = draw.textbbox((0, 0), candidate, font=font, stroke_width=4)
+        if current and (bbox[2] - bbox[0]) > max_width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines[:3] or [text[:60]]
+
+
+def _caption_font(size: int) -> ImageFont.ImageFont:
+    candidates = [
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Helvetica.ttc",
+        "/Library/Fonts/Arial Bold.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size=size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
 
 
 def _ts_srt(seconds: float) -> str:

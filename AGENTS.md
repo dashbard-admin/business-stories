@@ -832,10 +832,10 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 
 ---
 
-*This file last updated: 2026-06-02 — Shorts caption textfile burn-in.*
+*This file last updated: 2026-06-02 — Pillow overlay Shorts captions.*
 
 ### Batch N — Topic And Script Generation Reliability — 2026-05-31
-- **Shorts caption burn uses drawtext text files** — teaser captions are written to per-cue `caption_NN.txt` files and passed via `drawtext=textfile=...`, so LLM punctuation never enters the ffmpeg filter graph. This is more robust than escaping raw text in `drawtext=text=...`.
+- **Shorts caption burn uses Pillow overlays** — teaser captions are rendered to transparent `caption_NN.png` overlays with Pillow and composited via ffmpeg `overlay`, avoiding the `drawtext` filter entirely. This supports Homebrew ffmpeg builds without freetype/drawtext.
 - **Shorts ffmpeg warnings show the useful tail** — final encode failures log the tail of ffmpeg stderr, where the actual filter/codec error usually appears.
 - **Shorts are now fast teaser scripts, not long-form excerpts** — S13 uses `shorts_teaser_script.txt` to create one 30-second viral teaser script, renders fast Kokoro TTS around 230 WPM, reuses beat images with 3-5 second cuts, omits music/SFX, and writes per-Short `.srt` captions.
 - **YouTube upload packages include multilingual subtitles** — `upload.subtitle_languages` defaults to English plus zh-Hans, es, hi, ar, fr, bn, pt, ru, ur, and id. Package build translates long-form and Shorts SRT tracks with the writer LLM and upload loops through every `caption_track`.
