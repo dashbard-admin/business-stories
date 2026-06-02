@@ -998,8 +998,9 @@ def _load_short_logo(path: Path | None) -> Image.Image | None:
                 r, g, b, a = px[x, y]
                 if a and r > 245 and g > 245 and b > 245:
                     px[x, y] = (r, g, b, 0)
-    max_w = int(1080 * 0.54)
-    max_h = int(1920 * 0.16)
+    edge_pad = int(1080 * 0.06)
+    max_w = 1080 - (edge_pad * 2)
+    max_h = int(1920 * 0.32)
     scale = min(max_w / logo.width, max_h / logo.height)
     return logo.resize(
         (max(1, int(logo.width * scale)), max(1, int(logo.height * scale))),
@@ -1086,8 +1087,8 @@ def _fit_short_title_font(
     line_gap: int,
 ) -> ImageFont.ImageFont:
     max_w = 980
-    max_h = 1320
-    for size in range(132, 71, -6):
+    max_h = 1500
+    for size in range(264, 95, -6):
         font = _short_title_font(size)
         total_h = 0
         ok = True
@@ -1106,7 +1107,7 @@ def _fit_short_title_font(
         total_h += line_gap * max(0, len(lines) - 1)
         if ok and total_h <= max_h:
             return font
-    return _short_title_font(72)
+    return _short_title_font(96)
 
 
 def _caption_overlays(

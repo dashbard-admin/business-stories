@@ -823,8 +823,17 @@ def _paste_title_logo(
     except Exception as e:
         logger.warning("title logo load failed (%s): %s", logo_path, e)
         return
-    max_w = max(120, int(OUT_W * max(0.05, min(width_pct, 0.45))))
-    max_h = max(80, int(OUT_H * 0.20))
+    pad = int(OUT_H * max(0.0, padding_pct))
+    inner_w = max(1, OUT_W - (pad * 2))
+    inner_h = max(1, OUT_H - (pad * 2))
+    max_w = min(
+        inner_w,
+        max(120, int(OUT_W * max(0.05, min(width_pct, 0.60)))),
+    )
+    max_h = min(
+        inner_h,
+        max(80, int(OUT_H * 0.32)),
+    )
     scale = min(max_w / logo.width, max_h / logo.height)
     logo = logo.resize(
         (max(1, int(logo.width * scale)), max(1, int(logo.height * scale))),
@@ -834,7 +843,6 @@ def _paste_title_logo(
     shadow.putalpha(logo.getchannel("A").filter(ImageFilter.GaussianBlur(8)))
     shadow = Image.eval(shadow, lambda v: int(v * 0.45))
 
-    pad = int(OUT_H * max(0.0, padding_pct))
     if corner_id.endswith("right"):
         x = OUT_W - pad - logo.width
     else:
