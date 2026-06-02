@@ -41,9 +41,9 @@
       ],
       "gain_db_hint": 0.0,
       "_source_hint": "YouTube Audio Library: filter Cinematic + Slow + Inspirational; Pixabay: 'inspiring piano strings slow build'",
-      "license": "unknown",
-      "attribution": "",
-      "source_url": ""
+      "license": "Pixabay Music - https://pixabay.com/service/license-summary/",
+      "attribution": "Monument_Music - Melancholy (Piano)",
+      "source_url": "https://pixabay.com/music/modern-classical-melancholy-piano-191520/"
     },
     {
       "file": "ambient_warmth_piano_01.mp3",
@@ -81,9 +81,9 @@
       ],
       "gain_db_hint": 0.0,
       "_source_hint": "YouTube Audio Library: Ambient + Calm + Inspirational; Pixabay: 'warm piano ambient documentary'",
-      "license": "unknown",
-      "attribution": "",
-      "source_url": ""
+      "license": "Pixabay Music - https://pixabay.com/service/license-summary/",
+      "attribution": "VinceMcGill - Documentary Piano",
+      "source_url": "https://pixabay.com/music/modern-classical-documentary-piano-535030/"
     },
     {
       "file": "cinematic_hopeful_strings_01.mp3",
@@ -125,9 +125,9 @@
       ],
       "gain_db_hint": -1.0,
       "_source_hint": "Pixabay: 'hopeful cinematic strings'; Epidemic Sound: search 'documentary uplift mid-tempo strings'",
-      "license": "unknown",
-      "attribution": "",
-      "source_url": ""
+      "license": "Pixabay Music - https://pixabay.com/service/license-summary/",
+      "attribution": "Sonican - Cinematic Orchestral - Slow Cinematic Mood",
+      "source_url": "https://pixabay.com/music/classical-string-quartet-cinematic-orchestral-slow-cinematic-mood-448437/"
     },
     {
       "file": "ambient_tension_minor_01.mp3",
@@ -168,9 +168,9 @@
       ],
       "gain_db_hint": -1.0,
       "_source_hint": "YouTube Audio Library: Dark + Dramatic; Pixabay: 'dark tension piano strings minor'",
-      "license": "unknown",
-      "attribution": "",
-      "source_url": ""
+      "license": "Pixabay Music - https://pixabay.com/service/license-summary/",
+      "attribution": "leberch - Tension",
+      "source_url": "https://pixabay.com/music/suspense-tension-510483/"
     },
     {
       "file": "cinematic_brooding_strings_01.mp3",
@@ -211,9 +211,9 @@
       ],
       "gain_db_hint": -1.5,
       "_source_hint": "Pixabay: 'brooding cinematic strings low brass'; Epidemic Sound: 'corporate scandal documentary'",
-      "license": "unknown",
-      "attribution": "",
-      "source_url": ""
+      "license": "Pixabay Music - https://pixabay.com/service/license-summary/",
+      "attribution": "Alex_Kizenkov - Epic Cinematic Motivational Inspiration",
+      "source_url": "https://pixabay.com/music/main-title-epic-cinematic-motivational-inspiration-141635/"
     },
     {
       "file": "ambient_noir_synth_01.mp3",
@@ -254,9 +254,9 @@
       ],
       "gain_db_hint": -2.0,
       "_source_hint": "YouTube Audio Library: Cinematic + Dark + Suspense; Pixabay: 'noir ambient synth pad dark'",
-      "license": "unknown",
-      "attribution": "",
-      "source_url": ""
+      "license": "Pixabay Music - https://pixabay.com/service/license-summary/",
+      "attribution": "FreeMusicForVideo - Dark Ambient Soundscape Dreamscape 2",
+      "source_url": "https://pixabay.com/music/ambient-dark-ambient-soundscape-dreamscape-2-524023/"
     },
     {
       "file": "ambient_modern_synth_01.mp3",
@@ -295,9 +295,9 @@
       ],
       "gain_db_hint": 0.0,
       "_source_hint": "Pixabay: 'modern tech synth ambient documentary'; YouTube Audio Library: Ambient + Bright",
-      "license": "unknown",
-      "attribution": "",
-      "source_url": ""
+      "license": "Pixabay Music - https://pixabay.com/service/license-summary/",
+      "attribution": "StudioKolomna - Path Of Discovery - Documentary Corporate",
+      "source_url": "https://pixabay.com/music/upbeat-path-of-discovery-documentary-corporate-342298/"
     },
     {
       "file": "cinematic_motion_pulse_01.mp3",
@@ -337,9 +337,9 @@
       ],
       "gain_db_hint": -0.5,
       "_source_hint": "YouTube Audio Library: Cinematic + Mid + Inspirational; Pixabay: 'forward motion piano pulse documentary'",
-      "license": "unknown",
-      "attribution": "",
-      "source_url": ""
+      "license": "Pixabay Music - https://pixabay.com/service/license-summary/",
+      "attribution": "The_Mountain - Documentary",
+      "source_url": "https://pixabay.com/music/modern-classical-documentary-483804/"
     },
     {
       "file": "ambient_decision_clock_01.mp3",
@@ -378,9 +378,9 @@
       ],
       "gain_db_hint": -1.0,
       "_source_hint": "YouTube Audio Library: Suspense + Slow; Pixabay: 'suspenseful strings clock ticking documentary'",
-      "license": "unknown",
-      "attribution": "",
-      "source_url": ""
+      "license": "Pixabay Music - https://pixabay.com/service/license-summary/",
+      "attribution": "PaulYudin - Documentary",
+      "source_url": "https://pixabay.com/music/modern-classical-documentary-513010/"
     },
     {
       "file": "ambient_investigative_slow_01.mp3",
@@ -423,9 +423,9 @@
       ],
       "gain_db_hint": -1.5,
       "_source_hint": "Epidemic Sound: 'investigative documentary slow'; YouTube Audio Library: Dramatic + Slow + Suspense",
-      "license": "unknown",
-      "attribution": "",
-      "source_url": ""
+      "license": "Pixabay Music - https://pixabay.com/service/license-summary/",
+      "attribution": "DesiFreeMusic - Emotional Investigative Documentary Soundtrack with Slow Build.",
+      "source_url": "https://pixabay.com/music/crime-scene-emotional-investigative-documentary-soundtrack-with-slow-build-390512/"
     },
     {
       "file": "ambient_neutral_pad_01.mp3",
@@ -451,9 +451,9 @@
       "suits_story_kinds": [],
       "gain_db_hint": -1.0,
       "_source_hint": "Pixabay: 'soft ambient pad documentary background long'",
-      "license": "unknown",
-      "attribution": "",
-      "source_url": ""
+      "license": "Pixabay Music - https://pixabay.com/service/license-summary/",
+      "attribution": "leberch - Atmospheric Documentary",
+      "source_url": "https://pixabay.com/music/meditationspiritual-atmospheric-documentary-509386/"
     },
     {
       "file": "ambient_neutral_documentary_01.mp3",
@@ -481,9 +481,9 @@
       "suits_story_kinds": [],
       "gain_db_hint": 0.0,
       "_source_hint": "YouTube Audio Library: Cinematic + Calm + Inspirational; Pixabay: 'documentary background music piano strings'",
-      "license": "unknown",
-      "attribution": "",
-      "source_url": ""
+      "license": "Pixabay Music - https://pixabay.com/service/license-summary/",
+      "attribution": "AlexGrohl - Timeless Glimpse (Documentary History Piano)",
+      "source_url": "https://pixabay.com/music/modern-classical-timeless-glimpse-documentary-history-piano-370164/"
     },
     {
       "file": "cinematic_resolution_strings_01.mp3",
@@ -526,9 +526,9 @@
       ],
       "gain_db_hint": 0.0,
       "_source_hint": "Pixabay: 'cinematic resolution warm strings ending'; Epidemic Sound: 'documentary epilogue strings'",
-      "license": "unknown",
-      "attribution": "",
-      "source_url": ""
+      "license": "Pixabay Music - https://pixabay.com/service/license-summary/",
+      "attribution": "Juraganvisi - heroic journey music",
+      "source_url": "https://pixabay.com/music/acoustic-group-heroic-journey-music-419658/"
     }
   ]
 }
