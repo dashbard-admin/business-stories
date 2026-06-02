@@ -585,7 +585,7 @@ sfx_library:
   # ≥1 file per cue into assets/sfx_library/. With enabled=false
   # S11 Phase 2 is a no-op and the audio mix is identical to pre-
   # Batch-C.
-  enabled: false
+  enabled: true 
   path: "${root}/assets/sfx_library"
   manifest: "${root}/assets/sfx_library/manifest.json"
   default_gain_db: -18.0          # SFX level vs. voice (-18 dB
@@ -593,7 +593,7 @@ sfx_library:
                                   # below voice; the operator can
                                   # override per-track via the
                                   # manifest's gain_db_hint field)
-  crossfade_ms: 50                # short fade-in/out at SFX edges
+  crossfade_ms: 100               # short fade-in/out at SFX edges
                                   # so the bed doesn't click
 
 callouts:
