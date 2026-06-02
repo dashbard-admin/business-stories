@@ -92,6 +92,7 @@ def build_upload_package(episode_id: str) -> UploadPackageResult:
     description = _build_long_description(ws, incident)
     thumb = _pick_thumbnail(ws)
     publish_at = _normalize_publish_at(cfg.upload.get("publish_at"))
+    thumbnails_dir_rel = _copy_thumbnail_folder(ws, package_dir)
 
     long_video = long_dir / "final.mp4"
     shutil.copy2(final_mp4, long_video)
@@ -156,6 +157,7 @@ def build_upload_package(episode_id: str) -> UploadPackageResult:
             "long_form_caption": long_metadata["caption_path"],
             "long_form_caption_tracks": len(long_caption_tracks),
             "long_form_thumbnail": long_metadata["thumbnail_path"],
+            "thumbnails_dir": thumbnails_dir_rel,
             "shorts_count": len(short_entries),
             "shorts_caption_tracks": sum(
                 len(s.get("caption_tracks") or []) for s in short_entries
@@ -845,6 +847,14 @@ def _build_shorts_package(
         out_dir.mkdir(parents=True, exist_ok=True)
         out_video = out_dir / f"short_{rank:02d}.mp4"
         shutil.copy2(src, out_video)
+        title_card_src = _resolve_short_title_card_source(
+            ws=ws, src_dir=src_dir, item=item, rank=rank,
+        )
+        title_card_rel = None
+        if title_card_src:
+            out_title_card = out_dir / f"short_{rank:02d}_title_card.png"
+            shutil.copy2(title_card_src, out_title_card)
+            title_card_rel = _rel(out_title_card, package_dir)
         caption_src = _resolve_short_caption_source(
             ws=ws, src_dir=src_dir, item=item, rank=rank
         )
@@ -873,6 +883,7 @@ def _build_shorts_package(
             "default_language": str(cfg_upload.get("default_language", "en")),
             "made_for_kids": bool(cfg_upload.get("made_for_kids", False)),
             "video_path": f"shorts/short_{rank:02d}/short_{rank:02d}.mp4",
+            "thumbnail_path": title_card_rel,
             "caption_tracks": caption_tracks,
             "playlist_id": (cfg_upload.get("shorts_playlist_id") or ""),
             "source_window": {
@@ -887,6 +898,20 @@ def _build_shorts_package(
         (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
         entries.append(metadata)
     return entries
+
+
+def _copy_thumbnail_folder(ws: Path, package_dir: Path) -> str | None:
+    src = ws / "05_video" / "thumbnails"
+    if not src.exists() or not src.is_dir():
+        return None
+    dst = package_dir / "thumbnails"
+    dst.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for p in sorted(src.iterdir()):
+        if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
+            shutil.copy2(p, dst / p.name)
+            copied += 1
+    return "thumbnails" if copied else None
 
 
 def _resolve_short_source(
@@ -930,6 +955,23 @@ def _resolve_short_caption_source(
             candidates.append(src_dir / p.name)
     candidates.append(src_dir / f"short_{rank:02d}.srt")
     candidates.append(src_dir / "teaser_captions.srt")
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def _resolve_short_title_card_source(
+    *, ws: Path, src_dir: Path, item: dict[str, Any], rank: int
+) -> Path | None:
+    raw = str(item.get("title_card_path") or "").strip()
+    candidates: list[Path] = []
+    if raw:
+        p = Path(raw)
+        candidates.append(p if p.is_absolute() else ws / p)
+        if p.name:
+            candidates.append(src_dir / p.name)
+    candidates.append(src_dir / f"short_{rank:02d}_title_card.png")
     for candidate in candidates:
         if candidate.exists() and candidate.is_file():
             return candidate
@@ -1133,6 +1175,7 @@ def _write_summary(package_dir: Path, manifest: dict[str, Any]) -> None:
         f"- tags: {', '.join(manifest['long_form'].get('tags') or [])}",
         f"- publish_at: {manifest['long_form'].get('publish_at')}",
         f"- thumbnail: {manifest['long_form'].get('thumbnail_path')}",
+        f"- thumbnail candidates: {manifest['contents'].get('thumbnails_dir')}",
         "- captions: "
         f"{len(manifest['long_form'].get('caption_tracks') or [])} tracks",
         "",
@@ -1141,7 +1184,8 @@ def _write_summary(package_dir: Path, manifest: dict[str, Any]) -> None:
     for s in manifest.get("shorts") or []:
         lines.append(
             f"- {s['video_path']}: {s['title']} "
-            f"({len(s.get('caption_tracks') or [])} subtitle tracks)"
+            f"({len(s.get('caption_tracks') or [])} subtitle tracks; "
+            f"thumbnail={s.get('thumbnail_path')})"
         )
     lines.extend([
         "",

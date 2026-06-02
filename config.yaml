@@ -391,6 +391,8 @@ packaging:
   shorts_seconds_per_image: 3.75        # fast visual cuts, ~3-5 sec
   shorts_transition_seconds: 0.22       # fast slide transition between images
   shorts_motion_strength: 0.10          # Ken Burns zoom/pan intensity
+  shorts_title_card_enabled: true        # prepend 1s title/thumbnail frame
+  shorts_title_card_seconds: 1.0         # duration before voice starts
   shorts_caption_max_words: 6
   shorts_caption_max_chars: 44
   shorts_exclude_callout_beats: true

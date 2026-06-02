@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from .asr import Segment, transcribe
 from .config import load_config
@@ -204,6 +204,22 @@ def write_srt(segments: list[Segment], path: Path) -> None:
     path.write_text("\n".join(lines))
 
 
+def shift_subtitles(
+    segments: list[Segment],
+    offset_seconds: float,
+) -> list[Segment]:
+    if offset_seconds <= 0:
+        return list(segments)
+    return [
+        Segment(
+            start_seconds=seg.start_seconds + offset_seconds,
+            end_seconds=seg.end_seconds + offset_seconds,
+            text=seg.text,
+        )
+        for seg in segments
+    ]
+
+
 def collect_story_images(
     *,
     ws: Path,
@@ -251,6 +267,8 @@ def build_teaser_short(
     seconds_per_image: float,
     transition_seconds: float = 0.22,
     motion_strength: float = 0.10,
+    title_card_path: Path | None = None,
+    title_card_seconds: float = 0.0,
 ) -> bool:
     """Create a vertical Short from still images plus standalone teaser audio."""
     if not image_paths:
@@ -310,12 +328,39 @@ def build_teaser_short(
     ):
         return False
 
+    audio_offset = (
+        max(0.0, float(title_card_seconds))
+        if title_card_path and title_card_path.exists() else 0.0
+    )
+    video_for_mux = video_only
+    if audio_offset > 0:
+        title_clip = work_dir / "short_title_card.mp4"
+        if _render_still_clip(
+            image_path=title_card_path,
+            out_path=title_clip,
+            duration_seconds=audio_offset,
+        ):
+            joined = work_dir / "video_with_title.mp4"
+            if _concat_hard_cut([title_clip, video_only], joined):
+                video_for_mux = joined
+            else:
+                logger.warning("Shorts title prepend failed; continuing without it")
+                audio_offset = 0.0
+        else:
+            logger.warning("Shorts title clip render failed; continuing without it")
+            audio_offset = 0.0
+
     temp_mp4 = work_dir / "with_audio.mp4"
+    total_duration = float(duration_seconds) + audio_offset
     cmd = [
         require_ffmpeg(), "-y",
-        "-i", str(video_only),
+        "-i", str(video_for_mux),
+    ]
+    if audio_offset > 0:
+        cmd.extend(["-itsoffset", f"{audio_offset:.3f}"])
+    cmd.extend([
         "-i", str(audio_path),
-        "-t", f"{duration_seconds:.3f}",
+        "-t", f"{total_duration:.3f}",
         "-map", "0:v:0",
         "-map", "1:a:0",
         "-c:v", "libx264",
@@ -324,9 +369,8 @@ def build_teaser_short(
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "192k",
-        "-shortest",
         str(temp_mp4),
-    ]
+    ])
     try:
         subprocess.run(cmd, check=True, capture_output=True,
                        stdin=subprocess.DEVNULL, timeout=300)
@@ -335,7 +379,7 @@ def build_teaser_short(
         return False
 
     overlays = (
-        _caption_overlays(subtitles, duration_seconds, work_dir=work_dir)
+        _caption_overlays(subtitles, total_duration, work_dir=work_dir)
         if burn_subtitles and subtitles else []
     )
     if overlays:
@@ -349,7 +393,7 @@ def build_teaser_short(
             "-filter_complex", filter_complex,
             "-map", f"[v{len(overlays)}]",
             "-map", "0:a:0?",
-            "-t", f"{duration_seconds:.3f}",
+            "-t", f"{total_duration:.3f}",
             "-c:v", "libx264",
             "-preset", "medium",
             "-crf", "20",
@@ -379,6 +423,34 @@ def build_teaser_short(
     except Exception as e:
         logger.warning("Shorts teaser final encode failed: %s", e)
         return False
+
+
+def render_short_title_card(
+    *,
+    image_path: Path,
+    logo_path: Path | None,
+    out_path: Path,
+    incident: dict[str, Any],
+    rank: int,
+    enabled: bool = True,
+) -> Path | None:
+    if not enabled or not image_path.exists():
+        return None
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(image_path) as raw:
+        img = _cover_vertical(raw.convert("RGB")).convert("RGBA")
+    shade = Image.new("RGBA", img.size, (0, 0, 0, 118))
+    img.alpha_composite(shade)
+
+    company = str(incident.get("company_name") or "Company").strip()
+    category = _story_outcome_category(incident)
+    template = _short_title_template(
+        company=company, category=category, rank=rank
+    )
+    logo = _load_short_logo(logo_path) if logo_path else None
+    _draw_short_title_lines(img, template, logo=logo, company=company)
+    img.convert("RGB").save(out_path, "PNG")
+    return out_path
 
 
 def pick_windows(
@@ -620,6 +692,7 @@ def write_teaser_manifest(
     out_paths: list[Path | None],
     srt_paths: list[Path | None],
     image_sets: list[list[Path]],
+    title_card_paths: list[Path | None] | None = None,
     manifest_path: Path,
     duration_seconds: float,
     target_wpm: float,
@@ -636,6 +709,13 @@ def write_teaser_manifest(
             "reasoning": teaser.hook_notes,
             "path": str(path) if path else None,
             "caption_path": str(srt_paths[idx - 1]) if idx - 1 < len(srt_paths) and srt_paths[idx - 1] else None,
+            "title_card_path": (
+                str(title_card_paths[idx - 1])
+                if title_card_paths
+                and idx - 1 < len(title_card_paths)
+                and title_card_paths[idx - 1]
+                else None
+            ),
             "target_wpm": target_wpm,
             "script_word_count": teaser.word_count,
             "images": [p.name for p in image_sets[idx - 1]] if idx - 1 < len(image_sets) else [],
@@ -786,6 +866,247 @@ def _join_short_clips(
     except Exception as e:
         logger.warning("Shorts hard-cut concat failed: %s", e)
         return False
+
+
+def _render_still_clip(
+    *,
+    image_path: Path,
+    out_path: Path,
+    duration_seconds: float,
+) -> bool:
+    frames = max(1, int(round(float(duration_seconds) * 30)))
+    cmd = [
+        require_ffmpeg(), "-y",
+        "-loop", "1",
+        "-i", str(image_path),
+        "-vf", "scale=1080:1920:flags=lanczos,setsar=1",
+        "-r", "30",
+        "-frames:v", str(frames),
+        "-an",
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        str(out_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True,
+                       stdin=subprocess.DEVNULL, timeout=120)
+        return out_path.exists() and out_path.stat().st_size > 1000
+    except Exception as e:
+        logger.warning("Shorts still clip failed for %s: %s", image_path.name, e)
+        return False
+
+
+def _concat_hard_cut(clip_paths: list[Path], out_path: Path) -> bool:
+    concat_file = out_path.parent / f"{out_path.stem}.concat.txt"
+    concat_file.write_text(
+        "".join(f"file '{p.as_posix()}'\n" for p in clip_paths)
+    )
+    cmd = [
+        require_ffmpeg(), "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", str(concat_file),
+        "-an",
+        "-c", "copy",
+        str(out_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True,
+                       stdin=subprocess.DEVNULL, timeout=120)
+        return out_path.exists() and out_path.stat().st_size > 1000
+    except Exception as e:
+        logger.warning("Shorts title concat failed: %s", e)
+        return False
+
+
+WINNING_SHORT_TITLES = [
+    ["How", "[LOGO]", "won it"],
+    ["The", "[LOGO]", "path to victory"],
+    ["How", "[LOGO]", "pulled it off"],
+    ["The", "[LOGO]", "winning method"],
+    ["The", "[LOGO]", "road to win"],
+    ["How", "[LOGO]", "came out", "on top"],
+    ["[LOGO]", "secret to", "success"],
+]
+
+LOSING_SHORT_TITLES = [
+    ["How", "[LOGO]", "fell short"],
+    ["How", "[LOGO]", "lost its way"],
+    ["[LOGO]", "road to", "defeat"],
+    ["How", "[LOGO]", "came up", "short"],
+    ["[LOGO]", "downfall"],
+    ["[LOGO]", "path to", "defeat"],
+    ["How", "[LOGO]", "let it go"],
+]
+
+
+def _story_outcome_category(incident: dict[str, Any]) -> str:
+    story_kind = str(incident.get("story_kind") or "").lower()
+    text = " ".join([
+        story_kind,
+        str(incident.get("one_line_pitch") or ""),
+        str(incident.get("conflict") or ""),
+    ]).lower()
+    losing_markers = (
+        "fall", "fell", "failure", "failed", "lost", "defeat", "collapse",
+        "bankrupt", "scandal", "postmortem", "decline", "shutdown",
+        "missed", "cautionary",
+    )
+    if any(marker in text for marker in losing_markers):
+        return "losing"
+    return "winning"
+
+
+def _short_title_template(
+    *, company: str, category: str, rank: int
+) -> list[str]:
+    choices = LOSING_SHORT_TITLES if category == "losing" else WINNING_SHORT_TITLES
+    import hashlib
+    seed = hashlib.md5(f"{company}|{category}|{rank}".encode()).hexdigest()
+    return choices[int(seed[:8], 16) % len(choices)]
+
+
+def _cover_vertical(img: Image.Image) -> Image.Image:
+    target_w, target_h = 1080, 1920
+    src_w, src_h = img.size
+    scale = max(target_w / src_w, target_h / src_h)
+    new_size = (max(target_w, int(src_w * scale)), max(target_h, int(src_h * scale)))
+    img = img.resize(new_size, Image.LANCZOS)
+    x0 = (img.width - target_w) // 2
+    y0 = (img.height - target_h) // 2
+    return img.crop((x0, y0, x0 + target_w, y0 + target_h))
+
+
+def _load_short_logo(path: Path | None) -> Image.Image | None:
+    if path is None or not path.exists():
+        return None
+    try:
+        with Image.open(path) as raw:
+            logo = raw.convert("RGBA")
+    except Exception as e:
+        logger.warning("Shorts logo load failed (%s): %s", path, e)
+        return None
+    bg = Image.new("RGBA", logo.size, logo.getpixel((0, 0)))
+    bbox = ImageChops.difference(logo, bg).getbbox()
+    if bbox:
+        logo = logo.crop(bbox)
+    px = logo.load()
+    if px is not None:
+        for y in range(logo.height):
+            for x in range(logo.width):
+                r, g, b, a = px[x, y]
+                if a and r > 245 and g > 245 and b > 245:
+                    px[x, y] = (r, g, b, 0)
+    max_w = int(1080 * 0.54)
+    max_h = int(1920 * 0.16)
+    scale = min(max_w / logo.width, max_h / logo.height)
+    return logo.resize(
+        (max(1, int(logo.width * scale)), max(1, int(logo.height * scale))),
+        Image.LANCZOS,
+    )
+
+
+def _draw_short_title_lines(
+    img: Image.Image,
+    lines: list[str],
+    *,
+    logo: Image.Image | None,
+    company: str,
+) -> None:
+    draw = ImageDraw.Draw(img)
+    stroke_w = 8
+    line_gap = 24
+    font = _fit_short_title_font(
+        draw=draw,
+        lines=lines,
+        logo=logo,
+        company=company,
+        stroke_w=stroke_w,
+        line_gap=line_gap,
+    )
+    metrics: list[tuple[str, int, int]] = []
+    total_h = 0
+    for line in lines:
+        if line == "[LOGO]" and logo is not None:
+            w, h = logo.size
+        else:
+            text = company if line == "[LOGO]" else line
+            bbox = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_w)
+            w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        metrics.append((line, w, h))
+        total_h += h
+    total_h += line_gap * max(0, len(lines) - 1)
+    y = (1920 - total_h) // 2
+    for line, w, h in metrics:
+        if line == "[LOGO]" and logo is not None:
+            x = (1080 - logo.width) // 2
+            shadow = Image.new("RGBA", logo.size, (0, 0, 0, 0))
+            shadow.putalpha(
+                logo.getchannel("A").filter(ImageFilter.GaussianBlur(10))
+            )
+            img.alpha_composite(shadow, (x + 5, y + 7))
+            img.alpha_composite(logo, (x, y))
+        else:
+            text = company if line == "[LOGO]" else line
+            x = (1080 - w) // 2
+            draw.text(
+                (x, y),
+                text,
+                font=font,
+                fill=(255, 230, 0, 255),
+                stroke_width=stroke_w,
+                stroke_fill=(0, 0, 0, 255),
+            )
+        y += h + line_gap
+
+
+def _short_title_font(size: int) -> ImageFont.ImageFont:
+    candidates = [
+        "/System/Library/Fonts/Supplemental/Impact.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Black.ttf",
+        "/System/Library/Fonts/HelveticaNeue.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size=size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _fit_short_title_font(
+    *,
+    draw: ImageDraw.ImageDraw,
+    lines: list[str],
+    logo: Image.Image | None,
+    company: str,
+    stroke_w: int,
+    line_gap: int,
+) -> ImageFont.ImageFont:
+    max_w = 980
+    max_h = 1320
+    for size in range(132, 71, -6):
+        font = _short_title_font(size)
+        total_h = 0
+        ok = True
+        for line in lines:
+            if line == "[LOGO]" and logo is not None:
+                w, h = logo.size
+            else:
+                text = company if line == "[LOGO]" else line
+                bbox = draw.textbbox((0, 0), text, font=font,
+                                     stroke_width=stroke_w)
+                w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            if w > max_w:
+                ok = False
+                break
+            total_h += h
+        total_h += line_gap * max(0, len(lines) - 1)
+        if ok and total_h <= max_h:
+            return font
+    return _short_title_font(72)
 
 
 def _caption_overlays(

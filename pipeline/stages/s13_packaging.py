@@ -36,7 +36,9 @@ from ..shorts import (
     build_teaser_subtitles,
     collect_story_images,
     generate_teaser_script,
+    render_short_title_card,
     render_teaser_audio,
+    shift_subtitles,
     write_srt,
     write_teaser_manifest,
 )
@@ -162,16 +164,23 @@ def run(episode: dict, queue: dict) -> str | None:
     out_paths: list = []
     srt_paths: list = []
     image_sets: list = []
+    title_card_paths: list = []
     burn_subs = bool(pack_cfg.get("shorts_burn_subtitles", True))
     seconds_per_image = float(pack_cfg.get("shorts_seconds_per_image", 3.75))
+    title_card_enabled = bool(pack_cfg.get("shorts_title_card_enabled", True))
+    title_card_seconds = (
+        max(0.0, float(pack_cfg.get("shorts_title_card_seconds", 1.0)))
+        if title_card_enabled else 0.0
+    )
+    subtitles_for_video = shift_subtitles(subtitles, title_card_seconds)
     images_per_short = max(
         1, int(round(audio_seconds / max(1.0, seconds_per_image)))
     )
+    logo_path = _find_company_logo(ws)
 
     for rank in range(1, shorts_count + 1):
         out_path = shorts_dir / f"short_{rank:02d}.mp4"
         short_srt = shorts_dir / f"short_{rank:02d}.srt"
-        short_srt.write_text(base_srt.read_text())
         image_paths = collect_story_images(
             ws=ws,
             beat_sheet=beat_sheet,
@@ -179,19 +188,33 @@ def run(episode: dict, queue: dict) -> str | None:
             offset=(rank - 1) * max(1, images_per_short // 2),
         )
         image_sets.append(image_paths)
+        short_title = None
+        if image_paths and title_card_seconds > 0:
+            short_title = render_short_title_card(
+                image_path=image_paths[0],
+                logo_path=logo_path,
+                out_path=shorts_dir / f"short_{rank:02d}_title_card.png",
+                incident=incident,
+                rank=rank,
+                enabled=title_card_enabled,
+            )
+        title_card_paths.append(short_title)
+        write_srt(subtitles_for_video, short_srt)
 
         ok = build_teaser_short(
             image_paths=image_paths,
             audio_path=teaser_audio,
             out_mp4=out_path,
             duration_seconds=audio_seconds,
-            subtitles=subtitles,
+            subtitles=subtitles_for_video,
             burn_subtitles=burn_subs,
             seconds_per_image=seconds_per_image,
             transition_seconds=float(
                 pack_cfg.get("shorts_transition_seconds", 0.22)
             ),
             motion_strength=float(pack_cfg.get("shorts_motion_strength", 0.10)),
+            title_card_path=short_title,
+            title_card_seconds=title_card_seconds,
         )
         if ok:
             out_paths.append(out_path)
@@ -208,10 +231,33 @@ def run(episode: dict, queue: dict) -> str | None:
         out_paths=out_paths,
         srt_paths=srt_paths,
         image_sets=image_sets,
+        title_card_paths=title_card_paths,
         manifest_path=shorts_dir / "manifest.json",
-        duration_seconds=audio_seconds,
+        duration_seconds=audio_seconds + title_card_seconds,
         target_wpm=target_wpm,
     )
     logger.info("S13 complete: %d titles, %d shorts",
                 len(variants), sum(1 for p in out_paths if p))
+    return None
+
+
+def _find_company_logo(ws):
+    title_meta = ws / "03_assets" / "title_logo.json"
+    if title_meta.exists():
+        try:
+            rel = json.loads(title_meta.read_text()).get("local_path")
+            if rel:
+                p = ws / rel
+                if p.exists():
+                    return p
+        except Exception:
+            pass
+    pd_dir = ws / "03_assets" / "pd"
+    for name in ("company_logo.png", "company_logo.jpg", "logo.png", "logo.jpg"):
+        p = pd_dir / name
+        if p.exists():
+            return p
+    for p in sorted(pd_dir.glob("*logo*")):
+        if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            return p
     return None
