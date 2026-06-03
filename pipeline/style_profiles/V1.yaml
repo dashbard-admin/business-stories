@@ -13,7 +13,7 @@ negative_prompt: |
   signature in corner, anatomical errors, melted faces, extra fingers,
   extra limbs, distorted hands, illegible signage, glyph soup,
   legible logo text on signage, brand wordmarks rendered as letters,
-  random alphanumeric clutter
+  random alphanumeric clutter, blood, violence
 guidance_for_llm: |
   Use this style for upbeat / origin / rise / disruption beats — the
   default for the channel.

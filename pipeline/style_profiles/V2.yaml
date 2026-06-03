@@ -12,7 +12,8 @@ negative_prompt: |
   rounded shapes, photorealistic, photograph, 3D render,
   garbled text, watermark, signature in corner, anatomical errors,
   melted faces, extra fingers, distorted hands, illegible signage,
-  glyph soup, legible logo text on signage, brand wordmarks as letters
+  glyph soup, legible logo text on signage, brand wordmarks as letters, 
+  blood, violence
 guidance_for_llm: |
   Use this style for scandal / failure / postmortem / decline beats —
   Theranos collapse, Enron implosion, WeWork meltdown, Pets.com bust.

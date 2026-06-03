@@ -18,7 +18,7 @@ negative_prompt: |
   anatomical errors, melted faces, extra fingers, extra limbs,
   distorted hands, illegible signage, glyph soup, legible logo text
   on signage, brand wordmarks rendered as letters, random alphanumeric
-  clutter
+  clutter, blood, violence
 guidance_for_llm: |
   Use this style for upbeat origin stories, underdog comebacks,
   constructive pivots, and optimistic disruption stories where the
