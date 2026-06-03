@@ -29,7 +29,7 @@ import re
 import textwrap
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageFilter
 
 from ..config import load_config
 from ..ffmpeg_builder import (
@@ -823,16 +823,17 @@ def _paste_title_logo(
     except Exception as e:
         logger.warning("title logo load failed (%s): %s", logo_path, e)
         return
+    logo = _trim_title_logo(logo)
     pad = int(OUT_H * max(0.0, padding_pct))
     inner_w = max(1, OUT_W - (pad * 2))
     inner_h = max(1, OUT_H - (pad * 2))
     max_w = min(
         inner_w,
-        max(120, int(OUT_W * max(0.05, min(width_pct, 0.60)))),
+        max(120, int(OUT_W * max(0.05, min(width_pct, 0.80)))),
     )
     max_h = min(
         inner_h,
-        max(80, int(OUT_H * 0.32)),
+        max(80, int(OUT_H * 0.48)),
     )
     scale = min(max_w / logo.width, max_h / logo.height)
     logo = logo.resize(
@@ -856,6 +857,29 @@ def _paste_title_logo(
     base.alpha_composite(shadow, (x + 4, y + 6))
     base.alpha_composite(logo, (x, y))
     img.paste(base.convert("RGB"))
+
+
+def _trim_title_logo(logo: Image.Image) -> Image.Image:
+    """Remove transparent or near-white canvas around fetched logos.
+
+    Many web logo files arrive as a small wordmark centered on a large
+    white rectangle. If we fit that full rectangle, the visible logo
+    looks tiny even with a large width cap.
+    """
+    bg = Image.new("RGBA", logo.size, logo.getpixel((0, 0)))
+    bbox = ImageChops.difference(logo, bg).getbbox()
+    if bbox:
+        logo = logo.crop(bbox)
+
+    px = logo.load()
+    if px is not None:
+        for y in range(logo.height):
+            for x in range(logo.width):
+                r, g, b, a = px[x, y]
+                if a and r > 245 and g > 245 and b > 245:
+                    px[x, y] = (r, g, b, 0)
+    bbox = logo.getbbox()
+    return logo.crop(bbox) if bbox else logo
 
 
 def _opposite_corner(corner_id: str) -> str:

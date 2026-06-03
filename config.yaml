@@ -141,7 +141,7 @@ production:
                                           # from 03_assets/title_logo.json
   title_card_logo_corner: "top-right"     # logo corner; title text is forced
                                           # to the diagonal opposite corner
-  title_card_logo_width_pct: 0.48         # max logo width as fraction of frame
+  title_card_logo_width_pct: 0.80         # max logo width as fraction of frame
 
 quality_gates:
   min_verified_facts: 5
