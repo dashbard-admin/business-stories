@@ -1125,7 +1125,7 @@ Representative stage logs:
 2026-06-03 11:57:08,600 hermes.ffmpeg INFO composite_callouts: BEAT_12_callout.mp4 <- 1 overlays via BEAT_12.mp4 (fonts=/System/Library/Fonts/Supplemental/Impact.ttf @ 108 px, variants=corner_ribbon)
 2026-06-03 12:04:20,700 hermes.stage.s12 INFO S12 conclusion music tail: 5.0s using final beat image
 2026-06-03 12:04:21,100 hermes.stage.s12 INFO S12 closing card: disabled (production.closing_card_enabled=false or seconds=0)
-2026-06-03 12:04:22,500 hermes.stage.s12 INFO S12 like/subscribe clip appended: assets/video/like_and_subscribe.mp4
+2026-06-03 12:04:22,500 hermes.stage.s12 INFO S12 like/subscribe outro: disabled (production.append_like_subscribe_clip=false)
 2026-06-03 12:04:44,340 hermes.ffmpeg INFO concat_clips: final_video.mp4 from 71 clips
 2026-06-03 12:05:01,800 hermes.ffmpeg INFO mux_audio_video: final.mp4
 2026-06-03 12:05:02,410 hermes.stage.s12 INFO S12 complete: final.mp4 (1355.3s)

@@ -400,6 +400,11 @@ def run(episode: dict, queue: dict) -> str | None:
                 return f"like/subscribe clip invalid: {like_subscribe_clip}: {e}"
         else:
             return f"like/subscribe clip missing: {like_subscribe_clip}"
+    else:
+        logger.info(
+            "S12 like/subscribe outro: disabled "
+            "(production.append_like_subscribe_clip=false)"
+        )
 
     # ----- concat -----
     # Preview mode (Batch B 2026-05-26): produces final_preview.mp4

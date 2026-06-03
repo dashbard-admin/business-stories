@@ -52,7 +52,7 @@ production:
   target_words: 3000                # 120wpm × 18 min ≈ 2160 spoken words;
                                     # +160 buffer for SFX/music pauses.
   word_count_tolerance: 250
-  wpm_effective: 170                # Anchored to script_generate.txt
+  wpm_effective: 160                # Anchored to script_generate.txt
                                     # which schedules Act 0-5 hook
                                     # cadence at 120 wpm. Changing this
                                     # invalidates the hook timing the
@@ -64,7 +64,7 @@ production:
   conclusion_music_tail_seconds: 5  # After the final voiced beat, hold
                                     # the last panel while music plays
                                     # with no voice.
-  append_like_subscribe_clip: true
+  append_like_subscribe_clip: false
   like_subscribe_clip_path: "${root}/assets/video/like_and_subscribe.mp4"
 
   # Operator-tunable retry budget for S06 script generation
@@ -434,7 +434,7 @@ music_library:
   path: "${root}/assets/music_library"
   manifest: "${root}/assets/music_library/manifest.json"
   crossfade_seconds: 4
-  music_gain_db: -31.0              # bed level under voice
+  music_gain_db: -34.0              # bed level under voice
   music_start_offset_seconds: 30.0  # Anchored to the new 6-act template:
                                     # Act 0 (the hook) runs 0:00-0:30 dry,
                                     # then the music bed swells in with
