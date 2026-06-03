@@ -382,7 +382,7 @@ packaging:
   titles_count: 10                      # title variants per episode
   thumbnails_enabled: true
   shorts_enabled: true
-  shorts_count: 3                       # vertical clips per episode
+  shorts_count: 2                       # vertical clips per episode
   shorts_target_seconds: 30.0
   shorts_tts_wpm: 175.0                 # teaser script word budget / optional WPM
   shorts_tts_speed: 1.05                # Kokoro speed; lower = slower
@@ -590,7 +590,7 @@ sfx_library:
   enabled: true 
   path: "${root}/assets/sfx_library"
   manifest: "${root}/assets/sfx_library/manifest.json"
-  default_gain_db: -18.0          # SFX level vs. voice (-18 dB
+  default_gain_db: -24.0          # SFX level vs. voice (-18 dB
                                   # = clearly audible but distinctly
                                   # below voice; the operator can
                                   # override per-track via the
