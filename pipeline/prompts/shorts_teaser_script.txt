@@ -15,6 +15,9 @@ FULL SCRIPT:
 BEAT TABLE:
 {beats_dump}
 
+VARIATION BRIEF:
+{variation_instruction}
+
 Write one extremely condensed teaser script with high viral potential.
 
 Requirements:

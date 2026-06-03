@@ -13,11 +13,11 @@ Post-S12 stage that runs three discovery/CTR features:
     founder_closeup, split_frame, big_number, shocked_face, noir.
 
   Phase 3: Shorts teaser builder
-    Calls pipeline.shorts.generate_teaser_script() to compress the
-    whole episode into a viral 30-second teaser, renders fast standalone
-    TTS, then cuts quickly across reused beat images as 1080x1920
-    vertical Shorts with no music/SFX. Outputs at
-    05_video/shorts/short_N.mp4 + manifest.json.
+    Calls pipeline.shorts.generate_teaser_script() once per Short to
+    compress the whole episode into separate viral 30-second teasers,
+    renders separate fast standalone TTS tracks, then cuts quickly
+    across reused beat images as 1080x1920 vertical Shorts with no
+    music/SFX. Outputs at 05_video/shorts/short_N.mp4 + manifest.json.
 
 S13 is in STAGE_DISPATCH so it auto-runs after S12. In preview
 mode (Act 0 + Act 5 only renders), S13 still runs but title and
@@ -122,49 +122,17 @@ def run(episode: dict, queue: dict) -> str | None:
     script_path = ws / "02_script" / "script.txt"
     script = script_path.read_text() if script_path.exists() else ""
 
-    target_wpm = float(pack_cfg.get("shorts_tts_wpm", 230.0))
-    teaser = generate_teaser_script(
-        incident=incident,
-        script=script,
-        beat_sheet=beat_sheet,
-        target_seconds=shorts_seconds,
-        target_wpm=target_wpm,
-    )
-    if not teaser:
-        logger.info("S13 shorts: no teaser generated")
-        return None
-
     shorts_dir = ws / "05_video" / "shorts"
     shorts_dir.mkdir(parents=True, exist_ok=True)
-    (shorts_dir / "teaser_script.txt").write_text(teaser.script)
+    _purge_stale_shorts(shorts_dir)
 
-    try:
-        teaser_audio, audio_seconds = render_teaser_audio(
-            teaser=teaser,
-            narrator_id=episode["narrator"],
-            out_dir=shorts_dir,
-            target_seconds=shorts_seconds,
-            target_wpm=target_wpm,
-            tts_speed=float(pack_cfg.get("shorts_tts_speed", 1.85)),
-            enforce_wpm=bool(pack_cfg.get("shorts_enforce_tts_wpm", False)),
-        )
-    except Exception as e:
-        logger.warning("S13 shorts teaser audio failed: %s", e)
-        return None
-
-    subtitles = build_teaser_subtitles(
-        teaser.script,
-        audio_seconds,
-        max_words=int(pack_cfg.get("shorts_caption_max_words", 6)),
-        max_chars=int(pack_cfg.get("shorts_caption_max_chars", 44)),
-    )
-    base_srt = shorts_dir / "teaser_captions.srt"
-    write_srt(subtitles, base_srt)
-
+    target_wpm = float(pack_cfg.get("shorts_tts_wpm", 230.0))
+    teasers: list = []
     out_paths: list = []
     srt_paths: list = []
     image_sets: list = []
     title_card_paths: list = []
+    durations: list[float] = []
     burn_subs = bool(pack_cfg.get("shorts_burn_subtitles", True))
     seconds_per_image = float(pack_cfg.get("shorts_seconds_per_image", 3.75))
     title_card_enabled = bool(pack_cfg.get("shorts_title_card_enabled", True))
@@ -172,13 +140,66 @@ def run(episode: dict, queue: dict) -> str | None:
         max(0.0, float(pack_cfg.get("shorts_title_card_seconds", 1.0)))
         if title_card_enabled else 0.0
     )
-    subtitles_for_video = shift_subtitles(subtitles, title_card_seconds)
-    images_per_short = max(
-        1, int(round(audio_seconds / max(1.0, seconds_per_image)))
-    )
     logo_path = _find_company_logo(ws)
 
     for rank in range(1, shorts_count + 1):
+        teaser = generate_teaser_script(
+            incident=incident,
+            script=script,
+            beat_sheet=beat_sheet,
+            target_seconds=shorts_seconds,
+            target_wpm=target_wpm,
+            variant_rank=rank,
+        )
+        if not teaser:
+            logger.warning("S13 short %d: no teaser generated", rank)
+            teasers.append(None)
+            out_paths.append(None)
+            srt_paths.append(None)
+            image_sets.append([])
+            title_card_paths.append(None)
+            durations.append(0.0)
+            continue
+        teasers.append(teaser)
+        script_path_rank = shorts_dir / f"teaser_script_{rank:02d}.txt"
+        script_path_rank.write_text(teaser.script)
+        if rank == 1:
+            (shorts_dir / "teaser_script.txt").write_text(teaser.script)
+
+        try:
+            teaser_audio, audio_seconds = render_teaser_audio(
+                teaser=teaser,
+                narrator_id=episode["narrator"],
+                out_dir=shorts_dir / f"short_{rank:02d}_audio",
+                target_seconds=shorts_seconds,
+                target_wpm=target_wpm,
+                tts_speed=float(pack_cfg.get("shorts_tts_speed", 1.85)),
+                enforce_wpm=bool(pack_cfg.get("shorts_enforce_tts_wpm", False)),
+            )
+        except Exception as e:
+            logger.warning("S13 short %d teaser audio failed: %s", rank, e)
+            out_paths.append(None)
+            srt_paths.append(None)
+            image_sets.append([])
+            title_card_paths.append(None)
+            durations.append(0.0)
+            continue
+
+        subtitles = build_teaser_subtitles(
+            teaser.script,
+            audio_seconds,
+            max_words=int(pack_cfg.get("shorts_caption_max_words", 6)),
+            max_chars=int(pack_cfg.get("shorts_caption_max_chars", 44)),
+        )
+        base_srt = shorts_dir / f"teaser_captions_{rank:02d}.srt"
+        write_srt(subtitles, base_srt)
+        if rank == 1:
+            write_srt(subtitles, shorts_dir / "teaser_captions.srt")
+
+        subtitles_for_video = shift_subtitles(subtitles, title_card_seconds)
+        images_per_short = max(
+            1, int(round(audio_seconds / max(1.0, seconds_per_image)))
+        )
         out_path = shorts_dir / f"short_{rank:02d}.mp4"
         short_srt = shorts_dir / f"short_{rank:02d}.srt"
         image_paths = collect_story_images(
@@ -219,21 +240,28 @@ def run(episode: dict, queue: dict) -> str | None:
         if ok:
             out_paths.append(out_path)
             srt_paths.append(short_srt)
+            durations.append(audio_seconds + title_card_seconds)
             logger.info("S13 short %d: %s (%.1fs teaser)",
                         rank, out_path.name, audio_seconds)
         else:
             out_paths.append(None)
             srt_paths.append(None)
+            durations.append(0.0)
             logger.warning("S13 short %d FAILED for teaser build", rank)
 
+    if not any(teasers):
+        logger.info("S13 shorts: no teasers generated")
+        return None
+
     write_teaser_manifest(
-        teaser=teaser,
+        teasers=teasers,
         out_paths=out_paths,
         srt_paths=srt_paths,
         image_sets=image_sets,
         title_card_paths=title_card_paths,
         manifest_path=shorts_dir / "manifest.json",
-        duration_seconds=audio_seconds + title_card_seconds,
+        duration_seconds=max(durations or [0.0]),
+        durations=durations,
         target_wpm=target_wpm,
     )
     logger.info("S13 complete: %d titles, %d shorts",
@@ -261,3 +289,21 @@ def _find_company_logo(ws):
         if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
             return p
     return None
+
+
+def _purge_stale_shorts(shorts_dir):
+    patterns = (
+        "short_*.mp4",
+        "short_*.srt",
+        "short_*_title_card.png",
+        "teaser_script*.txt",
+        "teaser_captions*.srt",
+        "manifest.json",
+    )
+    for pattern in patterns:
+        for path in shorts_dir.glob(pattern):
+            if path.is_file():
+                try:
+                    path.unlink()
+                except Exception:
+                    logger.debug("S13 shorts: could not purge %s", path)

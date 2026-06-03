@@ -64,6 +64,7 @@ def generate_teaser_script(
     beat_sheet: dict[str, Any],
     target_seconds: float = 30.0,
     target_wpm: float = 230.0,
+    variant_rank: int = 1,
 ) -> ShortTeaser | None:
     """Generate a fresh, compressed Shorts script from the full episode."""
     cfg = load_config()
@@ -78,6 +79,16 @@ def generate_teaser_script(
         text = (b.get("script_text") or "")[:260].replace("\n", " ")
         if bid and text:
             beat_lines.append(f"{bid}: {text}")
+    variation_instruction = (
+        "Short 1: use the default whole-story teaser angle. Open with "
+        "the strongest central contradiction, then sell the full episode."
+        if variant_rank <= 1 else
+        f"Short {variant_rank}: write a brand-new alternate teaser, not a "
+        "paraphrase of Short 1. Choose a different opening hook, focus on "
+        "a different tension from the story, and vary the title_hint and "
+        "curiosity hooks while still ending with a reason to watch the "
+        "full episode."
+    )
     prompt = template_path.read_text().format(
         company_name=incident.get("company_name", ""),
         hero=incident.get("hero", ""),
@@ -89,6 +100,7 @@ def generate_teaser_script(
         target_words_max=int(target_seconds * target_wpm / 60) + 8,
         script=script[:24000],
         beats_dump="\n".join(beat_lines[:120]),
+        variation_instruction=variation_instruction,
     )
     try:
         result = LLM(role="writer").complete_json(
@@ -688,25 +700,33 @@ def write_manifest(
 
 def write_teaser_manifest(
     *,
-    teaser: ShortTeaser,
+    teasers: list[ShortTeaser | None],
     out_paths: list[Path | None],
     srt_paths: list[Path | None],
     image_sets: list[list[Path]],
     title_card_paths: list[Path | None] | None = None,
     manifest_path: Path,
     duration_seconds: float,
+    durations: list[float] | None = None,
     target_wpm: float,
 ) -> None:
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     entries = []
     for idx, path in enumerate(out_paths, start=1):
+        teaser = teasers[idx - 1] if idx - 1 < len(teasers) else None
+        item_duration = (
+            float(durations[idx - 1])
+            if durations and idx - 1 < len(durations) else duration_seconds
+        )
         entries.append({
             "rank": idx,
             "mode": "teaser",
             "start_seconds": 0.0,
-            "end_seconds": round(duration_seconds, 3),
-            "title_hint": teaser.title_hint,
-            "reasoning": teaser.hook_notes,
+            "end_seconds": round(item_duration, 3),
+            "title_hint": teaser.title_hint if teaser else "",
+            "reasoning": teaser.hook_notes if teaser else "",
+            "teaser_script": teaser.script if teaser else "",
+            "teaser_script_path": f"teaser_script_{idx:02d}.txt" if teaser else None,
             "path": str(path) if path else None,
             "caption_path": str(srt_paths[idx - 1]) if idx - 1 < len(srt_paths) and srt_paths[idx - 1] else None,
             "title_card_path": (
@@ -717,12 +737,25 @@ def write_teaser_manifest(
                 else None
             ),
             "target_wpm": target_wpm,
-            "script_word_count": teaser.word_count,
+            "script_word_count": teaser.word_count if teaser else 0,
             "images": [p.name for p in image_sets[idx - 1]] if idx - 1 < len(image_sets) else [],
         })
+    first_teaser = next((t for t in teasers if t), None)
     manifest_path.write_text(json.dumps({
         "mode": "teaser",
-        "teaser_script": teaser.script,
+        "teaser_script": first_teaser.script if first_teaser else "",
+        "teaser_scripts": [
+            {
+                "rank": idx,
+                "path": f"teaser_script_{idx:02d}.txt",
+                "script": teaser.script,
+                "title_hint": teaser.title_hint,
+                "hook_notes": teaser.hook_notes,
+                "word_count": teaser.word_count,
+            }
+            for idx, teaser in enumerate(teasers, start=1)
+            if teaser
+        ],
         "shorts": entries,
     }, indent=2))
 

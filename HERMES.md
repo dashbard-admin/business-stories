@@ -1177,9 +1177,9 @@ Representative stage logs:
 2026-06-03 12:05:24,805 hermes.stage.s13 INFO S13 thumbnails: 6 variants -> thumbnails
 2026-06-03 12:05:38,565 hermes.shorts INFO shorts teaser TTS: 115 words, target 175 wpm, speed 1.05, enforce_wpm=False -> 33.8s
 2026-06-03 12:06:10,960 hermes.stage.s13 INFO S13 short 1: short_01.mp4 (33.8s teaser)
-2026-06-03 12:06:43,537 hermes.stage.s13 INFO S13 short 2: short_02.mp4 (33.8s teaser)
-2026-06-03 12:07:15,221 hermes.stage.s13 INFO S13 short 3: short_03.mp4 (33.8s teaser)
-2026-06-03 12:07:15,373 hermes.stage.s13 INFO S13 complete: 10 titles, 3 shorts
+2026-06-03 12:06:25,214 hermes.shorts INFO shorts teaser TTS: 108 words, target 175 wpm, speed 1.05, enforce_wpm=False -> 31.7s
+2026-06-03 12:06:56,537 hermes.stage.s13 INFO S13 short 2: short_02.mp4 (31.7s teaser)
+2026-06-03 12:06:56,873 hermes.stage.s13 INFO S13 complete: 10 titles, 2 shorts
 ```
 
 Stage-success signature:
@@ -1204,6 +1204,8 @@ Artifacts:
 05_video/shorts/short_01.mp4
 05_video/shorts/short_01.srt
 05_video/shorts/short_01_title_card.png
+05_video/shorts/teaser_script_01.txt
+05_video/shorts/teaser_script_02.txt
 05_video/shorts/manifest.json
 05_video/shorts/teaser_script.txt
 ```
@@ -1359,4 +1361,3 @@ Agent action: stop and retry after quota reset.
    Then use caption backfill rather than re-uploading completed videos.
 
 10. After code/config changes, regenerate only from the earliest affected stage.
-
