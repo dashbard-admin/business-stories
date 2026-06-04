@@ -285,10 +285,7 @@ LLM gateway client. `LLM(role)` where `role ∈ {"writer", "critic", "extractor"
 - `mock_mode` returns canned business-story shapes that satisfy the schemas of S1/S3/S4/S7 so end-to-end mock runs succeed.
 
 ### 5.6 `tts.py`
-TTS backend dispatcher. Kokoro remains the default and hits the local mlx-audio server with `{voice, speed, text}`; `make_tts(narrator_id)` can also return ElevenLabs or Qwen3-TTS depending on `cfg.tts.backend ∈ {kokoro, elevenlabs, qwen3}`. S10 chunks the script into beat-sized segments and concatenates with a brief silence between. Backend switch is one config-line flip with graceful fall-back to Kokoro on adapter init failure.
-
-### 5.6b `qwen3_tts.py` *(added 2026-06-04, opt-in)*
-Qwen3-TTS VoiceDesign adapter for the oMLX gateway at `10.0.4.250:9000`. Tested model: `Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16`. The working route is `POST /v1/audio/speech`; oMLX does **not** expose `/v1/audio/voice-design` on version 0.3.9. Voice variation is controlled by the request `instructions` field, not by `voice`; `voice` alone returned HTTP 500 during testing. Configure voices in `tts.qwen3.voice_instruction_map` by narrator ID, then set `tts.backend: qwen3` and rerun from S10. For ad-hoc samples, use `python3 -m pipeline.tools.test_qwen3_tts --narrator N5 --narrator N8`; add `--target-wpm 160` to also write a pitch-preserving ffmpeg-stretched WAV at an exact WPM target, with raw/target WPM recorded in `manifest.json`.
+TTS backend dispatcher. Kokoro is the production default and hits the local mlx-audio server with `{voice, speed, text}`. `make_tts(narrator_id)` can also return ElevenLabs when `cfg.tts.backend == "elevenlabs"`. S10 chunks the script into beat-sized segments and concatenates with a brief silence between. Backend switch is one config-line flip with graceful fall-back to Kokoro on ElevenLabs init failure.
 
 ### 5.7 `flux.py`
 `flux` CLI subprocess adapter. Replaces the maritime project's HTTP-server-based FLUX adapter. Calls:
@@ -524,7 +521,7 @@ Also renders `title.png` for S12 to pick up; `credits.png` is rendered only when
 Builds per-beat clips, prepends the opening title card, appends the configured music-only tail / optional closing material, muxes against `04_audio/final_mix.wav`, and writes captions. The opening title card starts from `03_assets/flux/title.png` when present, then composites the real company logo from `03_assets/title_logo.json` / `03_assets/pd/company_logo.png` with Pillow. `production.title_card_logo_corner` controls the logo corner (default top-right); the yellow Pillow title is forced to the diagonal opposite corner, `production.title_card_logo_width_pct` controls the logo cap with frame-edge guards, and `05_video/title_card_meta.json` records the resolved corners. S12 trims transparent/near-white canvas around the logo before fitting so wordmarks do not render tiny because of empty source-image padding.
 
 ### S10 — TTS Render (`s10_kokoro_render.py`)
-Per-narrator voice render through `make_tts()`. Default backend is Kokoro; optional backends are ElevenLabs and Qwen3-TTS VoiceDesign. Pronunciation overrides at `pipeline/lexicon/pronunciation_overrides.yaml` (Bezos, Theranos, Zuckerberg, Wirecard, EBITDA, IPO, etc.). Output: per-beat WAV chunks + `voice_full.wav`.
+Per-narrator voice render through `make_tts()`. Default backend is Kokoro; optional backend is ElevenLabs. Pronunciation overrides at `pipeline/lexicon/pronunciation_overrides.yaml` (Bezos, Theranos, Zuckerberg, Wirecard, EBITDA, IPO, etc.). Output: per-beat WAV chunks + `voice_full.wav`.
 
 **Configured WPM enforcement *(Batch N.3 2026-05-31)*:** Kokoro can speak far faster than the documentary cadence assumed by `production.wpm_effective`; EP004 rendered 2463 words to ~617s (~239 WPM) even though config expected ~110 WPM. When `production.enforce_tts_wpm_effective: true`, S10 writes `voice_full.raw_kokoro.wav`, computes target duration from the cleaned script word count and `wpm_effective`, then uses ffmpeg `atempo` chaining via `ffmpeg_builder.time_stretch_audio()` to create `voice_full.wav` at the configured cadence. `voice_timing.json` records `source_word_count`, `wpm_effective`, and `wpm_enforced`.
 
@@ -686,7 +683,7 @@ Resets `S5` AND every later stage to `pending`, points `current_stage` at `S5`, 
 | `visual_continuity.*` changed | `S8` |
 | `image_generation.backend` changed | `S9` |
 | `sfx_library.enabled` false → true | `S11` |
-| `tts.backend` kokoro → elevenlabs/qwen3 | `S10` |
+| `tts.backend` kokoro → elevenlabs | `S10` |
 | `wpm_effective` / `enforce_tts_wpm_effective` changed | `S10` |
 | Narrator persona edited in `narrators.yaml` | `S6` |
 | Callout styling changed in `config.yaml` | `S12` |

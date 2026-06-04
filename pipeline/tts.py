@@ -9,10 +9,9 @@ In mock mode, synthesizes silent WAVs at the same sample rate so the
 rest of the pipeline can run end-to-end without the GPU server.
 
 Batch D 2026-05-27 added `make_tts(narrator_id)` — a tiny factory that
-reads `cfg.tts.backend ∈ {kokoro, elevenlabs, qwen3}` and returns the
-matching adapter. S10 calls the factory instead of importing Kokoro
-directly, so the backend switch is a single config-line flip with no
-code change.
+reads `cfg.tts.backend ∈ {kokoro, elevenlabs}` and returns the matching
+adapter. S10 calls the factory instead of importing Kokoro directly,
+so the backend switch is a single config-line flip with no code change.
 """
 
 from __future__ import annotations
@@ -166,20 +165,6 @@ def make_tts(narrator_id: str):
         except Exception as e:
             logger.warning(
                 "ElevenLabs adapter init failed (%s); falling back to Kokoro",
-                e,
-            )
-            return Kokoro(narrator_id)
-
-    if backend in ("qwen3", "qwen3_tts"):
-        try:
-            from .qwen3_tts import Qwen3TTS
-            tts = Qwen3TTS(narrator_id)
-            logger.info("TTS backend: Qwen3-TTS (model=%s)",
-                        tts.model_id)
-            return tts
-        except Exception as e:
-            logger.warning(
-                "Qwen3-TTS adapter init failed (%s); falling back to Kokoro",
                 e,
             )
             return Kokoro(narrator_id)
