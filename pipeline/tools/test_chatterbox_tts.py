@@ -49,7 +49,15 @@ def main() -> int:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--api-key-env", default="OMLX_API_KEY")
     parser.add_argument("--api-key", default="")
-    parser.add_argument("--text", default=DEFAULT_TEXT)
+    parser.add_argument(
+        "--text",
+        default=None,
+        help=(
+            "Text to synthesize. If omitted and --ref-text is provided, "
+            "the reference transcript is synthesized; otherwise a short "
+            "default smoke-test sentence is used."
+        ),
+    )
     parser.add_argument("--text-file", type=Path)
     parser.add_argument(
         "--voice",
@@ -92,9 +100,25 @@ def main() -> int:
         default=[],
         help="Write a pitch-preserving ffmpeg-stretched full WAV at this WPM.",
     )
+    parser.add_argument(
+        "--max-stretch-ratio",
+        type=float,
+        default=1.8,
+        help=(
+            "Skip target-WPM files that would require more than this "
+            "tempo change. Use 0 to disable the guard."
+        ),
+    )
     args = parser.parse_args()
 
-    text = args.text_file.read_text(encoding="utf-8").strip() if args.text_file else args.text
+    if args.text_file:
+        text = args.text_file.read_text(encoding="utf-8").strip()
+    elif args.text:
+        text = args.text
+    elif args.ref_text:
+        text = args.ref_text
+    else:
+        text = DEFAULT_TEXT
     text = _clean_text(text)
     variants = _build_variants(args)
 
@@ -167,7 +191,12 @@ def main() -> int:
             }
             for target_wpm in args.target_wpm:
                 rec["targets"].append(
-                    _write_target_wpm_variant(raw_full, words, target_wpm)
+                    _write_target_wpm_variant(
+                        raw_full,
+                        words,
+                        target_wpm,
+                        max_stretch_ratio=args.max_stretch_ratio,
+                    )
                 )
             manifest.append(rec)
             print(
@@ -291,9 +320,33 @@ def _concat_wavs(paths: list[Path], out: Path, *, pause_ms: int) -> None:
             w.writeframes(frames)
 
 
-def _write_target_wpm_variant(raw_path: Path, words: int, target_wpm: float) -> dict[str, Any]:
+def _write_target_wpm_variant(
+    raw_path: Path,
+    words: int,
+    target_wpm: float,
+    *,
+    max_stretch_ratio: float,
+) -> dict[str, Any]:
     target_wpm = max(1.0, float(target_wpm))
     target_seconds = (words / target_wpm) * 60.0
+    raw_info = _wav_info(raw_path)
+    raw_seconds = float(raw_info.get("duration_seconds") or 0.0)
+    if raw_seconds <= 0:
+        return {"target_wpm": target_wpm, "error": "raw audio has no duration"}
+    tempo_ratio = raw_seconds / target_seconds
+    stretch_ratio = max(tempo_ratio, 1.0 / tempo_ratio)
+    if max_stretch_ratio > 0 and stretch_ratio > max_stretch_ratio:
+        return {
+            "target_wpm": target_wpm,
+            "requested_duration_seconds": round(target_seconds, 3),
+            "raw_duration_seconds": round(raw_seconds, 3),
+            "tempo_ratio": round(tempo_ratio, 3),
+            "max_stretch_ratio": max_stretch_ratio,
+            "error": (
+                "skipped: required tempo change is too large; raw TTS "
+                "output is likely broken or much slower/faster than target"
+            ),
+        }
     label = f"{target_wpm:g}".replace(".", "p")
     target_path = raw_path.with_name(f"{raw_path.stem}_{label}wpm.wav")
     try:
