@@ -1016,12 +1016,12 @@ Artifacts:
 03_assets/asset_manifest.json
 ```
 
-### 11. S10 Kokoro TTS
+### 11. S10 TTS Render
 
 Stage-begin signature:
 
 ```text
-2026-06-03 11:52:52,100 hermes.orchestrator INFO running S10 (Kokoro TTS) for episode EP_004 (topic=Vine, Inc.)
+2026-06-03 11:52:52,100 hermes.orchestrator INFO running S10 (TTS Render) for episode EP_004 (topic=Vine, Inc.)
 ```
 
 Representative stage logs:
@@ -1037,7 +1037,7 @@ Representative stage logs:
 Stage-success signature:
 
 ```text
-2026-06-03 11:53:55,700 hermes.orchestrator INFO stage S10 (Kokoro TTS) done for EP_004
+2026-06-03 11:53:55,700 hermes.orchestrator INFO stage S10 (TTS Render) done for EP_004
 ```
 
 Warning that does not necessarily block:
@@ -1049,7 +1049,7 @@ Warning that does not necessarily block:
 Blocker:
 
 ```text
-2026-06-03 11:53:55,700 hermes.orchestrator WARNING stage S10 (Kokoro TTS) needs_human for EP_004: TTS produced no chunks
+2026-06-03 11:53:55,700 hermes.orchestrator WARNING stage S10 (TTS Render) needs_human for EP_004: TTS produced no chunks
 ```
 
 Artifacts:

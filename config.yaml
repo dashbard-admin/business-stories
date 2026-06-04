@@ -345,11 +345,10 @@ search:
 
 tts:
   # TTS backend dispatcher (Batch D 2026-05-27). The orchestrator
-  # picks one of: kokoro (default, free, local) or elevenlabs
-  # (paid, perceived-quality step change). The factory in tts.py
-  # falls back to Kokoro on any ElevenLabs init failure (missing
-  # API key, etc.) so flipping `backend: elevenlabs` is safe to try.
-  backend: kokoro                  # kokoro | elevenlabs
+  # picks one of: kokoro (default, free, local), qwen3 (local oMLX
+  # VoiceDesign), or elevenlabs (paid, perceived-quality step change).
+  # The factory in tts.py falls back to Kokoro on adapter init failure.
+  backend: kokoro                  # kokoro | qwen3 | elevenlabs
 
   elevenlabs:
     # When backend==elevenlabs, this block is active. Keep
@@ -364,6 +363,31 @@ tts:
     # narrators.yaml; values are ElevenLabs voice_ids. Pin per
     # narrator if you want N1/N2/N3/N4 to be different voices.
     voice_id_map: {}                   # {N1: "voice_id_1", ...}
+
+  qwen3:
+    # Local oMLX VoiceDesign backend. Tested 2026-06-04 against
+    # Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16 on 10.0.4.250:9000.
+    # Voice control is via `instructions`, not the OpenAI-style
+    # `voice` field; `voice` alone returns HTTP 500 on this server.
+    enabled: false
+    base_url: "http://10.0.4.250:9000/v1/audio/speech"
+    model_id: "Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16"
+    api_key_env: "OMLX_API_KEY"         # falls back to local dev token
+    response_format: "wav"
+    temperature: 0.7
+    top_p: 0.9
+    timeout_seconds: 300
+    send_voice_field: false
+    voice_instruction: "Speak in a clear documentary narrator voice with natural pacing, clean articulation, and steady energy."
+    voice_instruction_map:
+      N1: "Speak in a measured, authoritative male business-editor voice. Calm, dry, precise, medium-low pitch, documentary cadence."
+      N2: "Speak in a skeptical investigative male narrator voice. Restrained, probing, lower pitch, careful emphasis, quiet tension."
+      N3: "Speak in a warm female documentary storyteller voice. Humane, novelistic, clear, emotionally intelligent, medium pitch."
+      N4: "Speak in an energetic modern female technology narrator voice. Bright, contemporary, sharp, crisp articulation, upbeat but professional."
+      N5: "Speak in a dry sardonic male outsider voice. Wry, observational, deadpan, medium-low pitch, controlled comic timing."
+      N6: "Speak in a curious young male tech narrator voice. Fast, clear, irreverent, simplicity-first, friendly but not childish."
+      N7: "Speak in a confident female executive narrator voice. Fast, polished, insider-cynical, jargon-fluent, crisp and assured."
+      N8: "Speak in a dry sardonic female outsider voice. Wry, observational, deadpan, warm but unsentimental, crisp documentary delivery."
 
 asr:
   # ASR backend for Shorts subtitles (Batch D 2026-05-27).

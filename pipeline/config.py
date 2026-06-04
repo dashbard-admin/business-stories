@@ -290,8 +290,8 @@ class Config:
 
     @property
     def tts(self) -> dict[str, Any]:
-        """TTS backend dispatcher (Batch D 2026-05-27). Kokoro is the
-        default; flip backend: elevenlabs to use premium TTS."""
+        """TTS backend dispatcher. Kokoro is the default; flip
+        backend to elevenlabs or qwen3 for alternate adapters."""
         defaults = {
             "backend": "kokoro",
             "elevenlabs": {
@@ -300,13 +300,31 @@ class Config:
                 "voice_id": "pNInz6obpgDQGcFmaJgB",
                 "voice_id_map": {},
             },
+            "qwen3": {
+                "enabled": False,
+                "base_url": "http://10.0.4.250:9000/v1/audio/speech",
+                "model_id": "Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16",
+                "api_key_env": "OMLX_API_KEY",
+                "response_format": "wav",
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "timeout_seconds": 300,
+                "send_voice_field": False,
+                "voice_instruction": (
+                    "Speak in a clear documentary narrator voice with "
+                    "natural pacing, clean articulation, and steady energy."
+                ),
+                "voice_instruction_map": {},
+            },
         }
         raw = self.raw.get("tts") or {}
         merged = {**defaults, **raw}
-        # Deep-merge the elevenlabs sub-dict.
+        # Deep-merge adapter sub-dicts.
         if "elevenlabs" in raw:
             merged["elevenlabs"] = {**defaults["elevenlabs"],
                                     **raw["elevenlabs"]}
+        if "qwen3" in raw:
+            merged["qwen3"] = {**defaults["qwen3"], **raw["qwen3"]}
         return merged
 
     @property

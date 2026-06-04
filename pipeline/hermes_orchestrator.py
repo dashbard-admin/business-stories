@@ -54,7 +54,7 @@ STAGE_DISPATCH = {
     "S7":  ("pipeline.stages.s07_script_critique",   "run", "Script Critique"),
     "S8":  ("pipeline.stages.s08_beat_sheet",        "run", "Beat Sheet"),
     "S9":  ("pipeline.stages.s09_flux_render",       "run", "FLUX Render"),
-    "S10": ("pipeline.stages.s10_kokoro_render",     "run", "Kokoro TTS"),
+    "S10": ("pipeline.stages.s10_kokoro_render",     "run", "TTS Render"),
     "S11": ("pipeline.stages.s11_audio_post",        "run", "Audio Post"),
     "S12": ("pipeline.stages.s12_video_assembly",    "run", "Video Assembly"),
     # Added Batch D 2026-05-27.

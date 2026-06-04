@@ -50,7 +50,7 @@ flowchart TB
         S7[S07 Script Critique]
         S8[S08 Beat Sheet]
         S9[S09 FLUX Render + Grok fallback]
-        S10[S10 Kokoro TTS]
+        S10[S10 TTS Render]
         S11[S11 Audio Post]
         S12[S12 Video Assembly]
         S13[S13 Packaging<br/>titles + thumbs + Shorts]
@@ -167,7 +167,7 @@ business_success_stories/
 │   ├── state.py                 ← queue, locks, rolling window, used_topics
 │   ├── constraints.py           ← A/N/V cooldown picker
 │   ├── llm.py                   ← LLM gateway client (writer/critic/extractor)
-│   ├── tts.py                   ← Kokoro TTS client
+│   ├── tts.py                   ← TTS backend dispatcher
 │   ├── flux.py                  ← `flux` CLI subprocess adapter
 │   ├── vlm.py                   ← Qwen3-VL judge + captioner
 │   ├── grok.py                  ← xAI image regeneration (S9 fallback)
@@ -285,7 +285,10 @@ LLM gateway client. `LLM(role)` where `role ∈ {"writer", "critic", "extractor"
 - `mock_mode` returns canned business-story shapes that satisfy the schemas of S1/S3/S4/S7 so end-to-end mock runs succeed.
 
 ### 5.6 `tts.py`
-Kokoro TTS client + backend dispatcher. Hits the gateway with `{voice, speed, text}` and writes WAV. S10 chunks the script into beat-sized segments and concatenates with a brief silence between. *(Batch D 2026-05-27 added `make_tts(narrator_id)` — a factory that reads `cfg.tts.backend ∈ {kokoro, elevenlabs}` and returns the matching adapter. S10 uses the factory; backend switch is one config-line flip with graceful fall-back.)*
+TTS backend dispatcher. Kokoro remains the default and hits the local mlx-audio server with `{voice, speed, text}`; `make_tts(narrator_id)` can also return ElevenLabs or Qwen3-TTS depending on `cfg.tts.backend ∈ {kokoro, elevenlabs, qwen3}`. S10 chunks the script into beat-sized segments and concatenates with a brief silence between. Backend switch is one config-line flip with graceful fall-back to Kokoro on adapter init failure.
+
+### 5.6b `qwen3_tts.py` *(added 2026-06-04, opt-in)*
+Qwen3-TTS VoiceDesign adapter for the oMLX gateway at `10.0.4.250:9000`. Tested model: `Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16`. The working route is `POST /v1/audio/speech`; oMLX does **not** expose `/v1/audio/voice-design` on version 0.3.9. Voice variation is controlled by the request `instructions` field, not by `voice`; `voice` alone returned HTTP 500 during testing. Configure voices in `tts.qwen3.voice_instruction_map` by narrator ID, then set `tts.backend: qwen3` and rerun from S10. For ad-hoc samples, use `python3 -m pipeline.tools.test_qwen3_tts --narrator N5 --narrator N8`.
 
 ### 5.7 `flux.py`
 `flux` CLI subprocess adapter. Replaces the maritime project's HTTP-server-based FLUX adapter. Calls:
@@ -520,8 +523,8 @@ Also renders `title.png` for S12 to pick up; `credits.png` is rendered only when
 ### S12 — Video Assembly (`s12_video_assembly.py`)
 Builds per-beat clips, prepends the opening title card, appends the configured music-only tail / optional closing material, muxes against `04_audio/final_mix.wav`, and writes captions. The opening title card starts from `03_assets/flux/title.png` when present, then composites the real company logo from `03_assets/title_logo.json` / `03_assets/pd/company_logo.png` with Pillow. `production.title_card_logo_corner` controls the logo corner (default top-right); the yellow Pillow title is forced to the diagonal opposite corner, `production.title_card_logo_width_pct` controls the logo cap with frame-edge guards, and `05_video/title_card_meta.json` records the resolved corners. S12 trims transparent/near-white canvas around the logo before fitting so wordmarks do not render tiny because of empty source-image padding.
 
-### S10 — Kokoro TTS (`s10_kokoro_render.py`)
-Per-narrator voice render. Pronunciation overrides at `pipeline/lexicon/pronunciation_overrides.yaml` (Bezos, Theranos, Zuckerberg, Wirecard, EBITDA, IPO, etc.). Output: per-beat WAV chunks + `voice_full.wav`.
+### S10 — TTS Render (`s10_kokoro_render.py`)
+Per-narrator voice render through `make_tts()`. Default backend is Kokoro; optional backends are ElevenLabs and Qwen3-TTS VoiceDesign. Pronunciation overrides at `pipeline/lexicon/pronunciation_overrides.yaml` (Bezos, Theranos, Zuckerberg, Wirecard, EBITDA, IPO, etc.). Output: per-beat WAV chunks + `voice_full.wav`.
 
 **Configured WPM enforcement *(Batch N.3 2026-05-31)*:** Kokoro can speak far faster than the documentary cadence assumed by `production.wpm_effective`; EP004 rendered 2463 words to ~617s (~239 WPM) even though config expected ~110 WPM. When `production.enforce_tts_wpm_effective: true`, S10 writes `voice_full.raw_kokoro.wav`, computes target duration from the cleaned script word count and `wpm_effective`, then uses ffmpeg `atempo` chaining via `ffmpeg_builder.time_stretch_audio()` to create `voice_full.wav` at the configured cadence. `voice_timing.json` records `source_word_count`, `wpm_effective`, and `wpm_enforced`.
 
@@ -683,7 +686,7 @@ Resets `S5` AND every later stage to `pending`, points `current_stage` at `S5`, 
 | `visual_continuity.*` changed | `S8` |
 | `image_generation.backend` changed | `S9` |
 | `sfx_library.enabled` false → true | `S11` |
-| `tts.backend` kokoro → elevenlabs | `S10` |
+| `tts.backend` kokoro → elevenlabs/qwen3 | `S10` |
 | `wpm_effective` / `enforce_tts_wpm_effective` changed | `S10` |
 | Narrator persona edited in `narrators.yaml` | `S6` |
 | Callout styling changed in `config.yaml` | `S12` |
@@ -847,7 +850,7 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 - **Shorts images now move** — still panels render with fast Ken Burns zoom/pan and slide-left xfade transitions; xfade failures fall back to hard cuts instead of failing S13.
 - **Shorts caption burn uses Pillow overlays** — teaser captions are rendered to transparent `caption_NN.png` overlays with Pillow and composited via ffmpeg `overlay`, avoiding the `drawtext` filter entirely. This supports Homebrew ffmpeg builds without freetype/drawtext.
 - **Shorts ffmpeg warnings show the useful tail** — final encode failures log the tail of ffmpeg stderr, where the actual filter/codec error usually appears.
-- **Shorts are now fast teaser scripts, not long-form excerpts** — S13 uses `shorts_teaser_script.txt` to create separate viral teaser scripts per Short, renders separate fast Kokoro TTS tracks, reuses beat images with 3-5 second cuts, omits music/SFX, and writes per-Short `.srt` captions.
+- **Shorts are now fast teaser scripts, not long-form excerpts** — S13 uses `shorts_teaser_script.txt` to create separate viral teaser scripts per Short, renders separate fast TTS tracks, reuses beat images with 3-5 second cuts, omits music/SFX, and writes per-Short `.srt` captions.
 - **YouTube upload packages include multilingual subtitles** — `upload.subtitle_languages` defaults to English plus zh-Hans, es, hi, ar, fr, bn, pt, ru, ur, and id. Package build translates long-form and Shorts SRT tracks with the writer LLM and upload loops through every `caption_track`.
 - **YouTube Shorts packaging now survives project moves** — `youtube_upload.py` no longer drops Shorts when `05_video/shorts/manifest.json` points at an old absolute workspace path; it resolves by current filename/rank under the episode's `05_video/shorts/` directory.
 - **YouTube package/upload workflow added** — `youtube_upload.py` creates a self-contained upload package with long-form video, captions, thumbnail, Shorts, metadata, sparse story-derived tags, optional `publish_at`, and summaries. Upload requires `--upload-youtube-package EP_ID --approve-youtube-upload`, uses the expanded OAuth token (`youtube.force-ssl` required for captions), uploads long-form + Shorts, sets thumbnail/captions/playlists where configured, writes `upload_results.json`, and binds uploaded IDs back to the queue. Post-upload extras are non-fatal and recorded in `post_upload_warnings`. `backfill_caption_tracks()` supports caption-only retries from the saved package manifest and uploaded video IDs, skipping caption languages YouTube already reports as present.
