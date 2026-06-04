@@ -18,6 +18,7 @@ import wave
 from pathlib import Path
 
 from pipeline.config import load_config
+from pipeline.ffmpeg_builder import time_stretch_audio
 from pipeline.qwen3_tts import Qwen3TTS
 
 
@@ -39,6 +40,14 @@ def main() -> int:
     parser.add_argument("--voice-instruction", action="append", default=[])
     parser.add_argument("--out-dir", type=Path, default=Path("tmp/qwen3_tts_tests"))
     parser.add_argument("--max-words-per-chunk", type=int, default=300)
+    parser.add_argument(
+        "--target-wpm",
+        type=float,
+        help=(
+            "Also write a pitch-preserving ffmpeg-stretched WAV at this "
+            "exact words-per-minute target."
+        ),
+    )
     args = parser.parse_args()
 
     text = args.text
@@ -82,6 +91,7 @@ def main() -> int:
 
             for chunk in chunks:
                 info = _wav_info(chunk.wav_path)
+                words = _word_count(chunk.text)
                 rec = {
                     "narrator_id": narrator_id,
                     "instruction_index": idx,
@@ -89,17 +99,34 @@ def main() -> int:
                     "path": str(chunk.wav_path),
                     "voice_instruction": instruction,
                     "text": chunk.text,
+                    "word_count": words,
+                    "raw_actual_wpm": _actual_wpm(words, info),
                     "elapsed_seconds": round(time.time() - t0, 3),
                     **info,
                 }
+                if args.target_wpm:
+                    rec.update(_write_target_wpm_variant(
+                        chunk.wav_path,
+                        chunk.text,
+                        args.target_wpm,
+                    ))
                 manifest.append(rec)
                 print(
                     "OK "
                     f"{narrator_id}_{idx:02d}: "
                     f"{chunk.wav_path} "
                     f"duration={info.get('duration_seconds')}s "
+                    f"wpm={rec.get('raw_actual_wpm')} "
                     f"sha={info.get('sha256', '')[:12]}"
                 )
+                if args.target_wpm and rec.get("target_wpm_path"):
+                    print(
+                        "   target "
+                        f"{args.target_wpm:g}wpm: "
+                        f"{rec['target_wpm_path']} "
+                        f"duration={rec.get('target_duration_seconds')}s "
+                        f"actual_wpm={rec.get('target_actual_wpm')}"
+                    )
 
     manifest_path = out_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -134,6 +161,46 @@ def _wav_info(path: Path) -> dict:
     except Exception as e:
         info["wav_error"] = repr(e)
     return info
+
+
+def _write_target_wpm_variant(
+    raw_path: Path,
+    text: str,
+    target_wpm: float,
+) -> dict:
+    words = _word_count(text)
+    target_wpm = max(1.0, float(target_wpm))
+    target_seconds = (words / target_wpm) * 60.0
+    wpm_label = f"{target_wpm:g}".replace(".", "p")
+    target_path = raw_path.with_name(f"{raw_path.stem}_{wpm_label}wpm.wav")
+    try:
+        time_stretch_audio(raw_path, target_path, target_seconds)
+        info = _wav_info(target_path)
+        return {
+            "target_wpm": target_wpm,
+            "target_wpm_path": str(target_path),
+            "target_duration_requested_seconds": round(target_seconds, 3),
+            "target_duration_seconds": info.get("duration_seconds"),
+            "target_actual_wpm": _actual_wpm(words, info),
+            "target_bytes": info.get("bytes"),
+            "target_sha256": info.get("sha256"),
+        }
+    except Exception as e:
+        return {
+            "target_wpm": target_wpm,
+            "target_wpm_error": repr(e),
+        }
+
+
+def _word_count(text: str) -> int:
+    return len([w for w in text.split() if w.strip()])
+
+
+def _actual_wpm(words: int, wav_info: dict) -> float | None:
+    duration = wav_info.get("duration_seconds")
+    if not duration:
+        return None
+    return round((words / float(duration)) * 60.0, 1)
 
 
 if __name__ == "__main__":
