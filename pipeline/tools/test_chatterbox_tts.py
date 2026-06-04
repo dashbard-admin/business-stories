@@ -5,7 +5,7 @@ This is a test-only tool, not a production pipeline backend.
 Examples:
   python3 -m pipeline.tools.test_chatterbox_tts --voice female --target-wpm 160
   python3 -m pipeline.tools.test_chatterbox_tts --voice male --target-wpm 140 --target-wpm 180
-  python3 -m pipeline.tools.test_chatterbox_tts --ref-audio /path/on/server/voice.wav --ref-text "Reference transcript"
+  python3 -m pipeline.tools.test_chatterbox_tts --ref-audio /local/voice.wav --ref-text "Reference transcript"
 
 The oMLX route is OpenAI-style:
   POST /v1/audio/speech
@@ -14,6 +14,7 @@ The oMLX route is OpenAI-style:
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -67,9 +68,8 @@ def main() -> int:
         action="append",
         default=[],
         help=(
-            "Optional reference audio string/path accepted by oMLX. "
-            "If running this script from another machine, this path must "
-            "still be meaningful to the oMLX server."
+            "Optional reference audio file. The script reads it locally "
+            "and sends base64 in the oMLX ref_audio field."
         ),
     )
     parser.add_argument("--ref-text", default="")
@@ -146,7 +146,7 @@ def main() -> int:
                 "base_url": args.base_url,
                 "voice": variant.get("voice"),
                 "instructions": variant.get("instructions"),
-                "ref_audio": variant.get("ref_audio"),
+                "ref_audio_path": variant.get("ref_audio_path"),
                 "ref_text": args.ref_text or None,
                 "language": args.language or None,
                 "speed": args.speed,
@@ -195,7 +195,9 @@ def main() -> int:
 def _build_variants(args: argparse.Namespace) -> list[dict[str, str | None]]:
     voices: list[str | None] = args.voice or [None]
     instructions: list[str | None] = args.instructions or [None]
-    ref_audios: list[str | None] = args.ref_audio or [None]
+    ref_audios: list[dict[str, str] | None] = [
+        _load_ref_audio(path) for path in args.ref_audio
+    ] or [None]
     variants: list[dict[str, str | None]] = []
     for voice in voices:
         for instruction in instructions:
@@ -203,7 +205,8 @@ def _build_variants(args: argparse.Namespace) -> list[dict[str, str | None]]:
                 variants.append({
                     "voice": voice,
                     "instructions": instruction,
-                    "ref_audio": ref_audio,
+                    "ref_audio": ref_audio["base64"] if ref_audio else None,
+                    "ref_audio_path": ref_audio["path"] if ref_audio else None,
                 })
     return variants
 
@@ -342,8 +345,25 @@ def _clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _load_ref_audio(path: str) -> dict[str, str]:
+    p = Path(path).expanduser()
+    if not p.exists() or not p.is_file():
+        raise FileNotFoundError(f"reference audio not found: {p}")
+    data = p.read_bytes()
+    if not data:
+        raise RuntimeError(f"reference audio is empty: {p}")
+    return {
+        "path": str(p),
+        "base64": base64.b64encode(data).decode("ascii"),
+    }
+
+
 def _redact_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    return dict(payload)
+    redacted = dict(payload)
+    ref_audio = redacted.get("ref_audio")
+    if isinstance(ref_audio, str) and ref_audio:
+        redacted["ref_audio"] = f"<base64 audio: {len(ref_audio)} chars>"
+    return redacted
 
 
 if __name__ == "__main__":

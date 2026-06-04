@@ -290,7 +290,7 @@ LLM gateway client. `LLM(role)` where `role ∈ {"writer", "critic", "extractor"
 TTS backend dispatcher. Kokoro is the production default and hits the local mlx-audio server with `{voice, speed, text}`. `make_tts(narrator_id)` can also return ElevenLabs when `cfg.tts.backend == "elevenlabs"`. S10 chunks the script into beat-sized segments and concatenates with a brief silence between. Backend switch is one config-line flip with graceful fall-back to Kokoro on ElevenLabs init failure.
 
 ### 5.6b `tools/test_chatterbox_tts.py` *(added 2026-06-04, test-only)*
-Experimental Chatterbox sampler for the oMLX `/v1/audio/speech` route. Defaults to `Chatterbox-Multilingual-MLX-v2-Q4` on `10.0.4.250:9000`, and lets the operator test `voice`, `instructions`, optional `ref_audio`/`ref_text`, sampling knobs, chunk size, and one or more exact `--target-wpm` stretched variants. It writes WAVs plus `tmp/chatterbox_tts_tests/manifest.json`. This is deliberately not wired into S10; promote it to a full backend only after manual voice/WPM tests are convincing.
+Experimental Chatterbox sampler for the oMLX `/v1/audio/speech` route. Defaults to `Chatterbox-Multilingual-MLX-v2-Q4` on `10.0.4.250:9000`, and lets the operator test `voice`, `instructions`, optional `--ref-audio`/`--ref-text`, sampling knobs, chunk size, and one or more exact `--target-wpm` stretched variants. `--ref-audio` accepts a local file and base64-encodes it for oMLX's `ref_audio` field. It writes WAVs plus `tmp/chatterbox_tts_tests/manifest.json`. This is deliberately not wired into S10; promote it to a full backend only after manual voice/WPM tests are convincing.
 
 ### 5.7 `flux.py`
 `flux` CLI subprocess adapter. Replaces the maritime project's HTTP-server-based FLUX adapter. Calls:
