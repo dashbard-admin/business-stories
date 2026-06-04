@@ -187,7 +187,9 @@ business_success_stories/
 │   ├── style_profiles/          ← V1/V2/V3 visual styles, archetypes, narrators
 │   ├── prompts/                 ← every LLM prompt template
 │   └── tools/
-│       └── scan_music_library.py          ← music manifest scaffolder
+│       ├── scan_music_library.py          ← music manifest scaffolder
+│       ├── scan_sfx_library.py            ← SFX manifest scaffolder
+│       └── test_chatterbox_tts.py         ← experimental Chatterbox TTS sampler
 ├── drafts/                      ← operator-authored manual-topic JSONs
 ├── assets/
 │   ├── music_library/           ← operator-curated music + manifest.json
@@ -286,6 +288,9 @@ LLM gateway client. `LLM(role)` where `role ∈ {"writer", "critic", "extractor"
 
 ### 5.6 `tts.py`
 TTS backend dispatcher. Kokoro is the production default and hits the local mlx-audio server with `{voice, speed, text}`. `make_tts(narrator_id)` can also return ElevenLabs when `cfg.tts.backend == "elevenlabs"`. S10 chunks the script into beat-sized segments and concatenates with a brief silence between. Backend switch is one config-line flip with graceful fall-back to Kokoro on ElevenLabs init failure.
+
+### 5.6b `tools/test_chatterbox_tts.py` *(added 2026-06-04, test-only)*
+Experimental Chatterbox sampler for the oMLX `/v1/audio/speech` route. Defaults to `Chatterbox-Multilingual-MLX-v2-Q4` on `10.0.4.250:9000`, and lets the operator test `voice`, `instructions`, optional `ref_audio`/`ref_text`, sampling knobs, chunk size, and one or more exact `--target-wpm` stretched variants. It writes WAVs plus `tmp/chatterbox_tts_tests/manifest.json`. This is deliberately not wired into S10; promote it to a full backend only after manual voice/WPM tests are convincing.
 
 ### 5.7 `flux.py`
 `flux` CLI subprocess adapter. Replaces the maritime project's HTTP-server-based FLUX adapter. Calls:
