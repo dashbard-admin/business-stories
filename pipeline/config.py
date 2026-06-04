@@ -290,10 +290,37 @@ class Config:
 
     @property
     def tts(self) -> dict[str, Any]:
-        """TTS backend dispatcher. Kokoro is the default; flip
-        backend to elevenlabs for premium TTS."""
+        """TTS backend dispatcher.
+
+        Chatterbox is the production default; Kokoro remains the local
+        fallback, and ElevenLabs remains available as an optional paid
+        backend.
+        """
         defaults = {
-            "backend": "kokoro",
+            "backend": "chatterbox",
+            "chatterbox": {
+                "enabled": True,
+                "base_url": "http://10.0.4.250:9000/v1/audio/speech",
+                "model_id": "chatterbox-turbo-4bit",
+                "api_key_env": "OMLX_API_KEY",
+                "response_format": "wav",
+                "timeout_seconds": 300,
+                "max_words_per_chunk": 180,
+                "speed": 1.0,
+                "language": "",
+                "voice": "",
+                "voice_map": {},
+                "instructions": "",
+                "instructions_map": {},
+                "ref_audio": "",
+                "ref_text": "",
+                "voice_ref_map": {},
+                "temperature": None,
+                "top_k": None,
+                "top_p": None,
+                "repetition_penalty": None,
+                "max_tokens": None,
+            },
             "elevenlabs": {
                 "enabled": False,
                 "model_id": "eleven_multilingual_v2",
@@ -304,9 +331,12 @@ class Config:
         raw = self.raw.get("tts") or {}
         merged = {**defaults, **raw}
         # Deep-merge adapter sub-dicts.
+        if "chatterbox" in raw:
+            merged["chatterbox"] = {**defaults["chatterbox"],
+                                    **(raw["chatterbox"] or {})}
         if "elevenlabs" in raw:
             merged["elevenlabs"] = {**defaults["elevenlabs"],
-                                    **raw["elevenlabs"]}
+                                    **(raw["elevenlabs"] or {})}
         return merged
 
     @property
@@ -329,9 +359,9 @@ class Config:
             "shorts_enabled": True,
             "shorts_count": 3,
             "shorts_target_seconds": 30.0,
-            "shorts_tts_wpm": 175.0,
-            "shorts_tts_speed": 1.05,
-            "shorts_enforce_tts_wpm": False,
+            "shorts_tts_wpm": 200.0,
+            "shorts_tts_speed": 1.0,
+            "shorts_enforce_tts_wpm": True,
             "shorts_seconds_per_image": 3.75,
             "shorts_transition_seconds": 0.22,
             "shorts_motion_strength": 0.10,

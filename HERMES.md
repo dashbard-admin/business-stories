@@ -628,7 +628,7 @@ Common blockers:
 | S04 | not enough verified claims | Inspect `01_factcheck/fact_ledger.json`, rerun S2-S4 if source quality is poor. |
 | S05 | no episode workspace | Queue/workspace corruption; inspect state. |
 | S06 | forbidden phrase, bad word count, too few/many beats | Rerun S06; if repeated, inspect prompts/config and script logs. |
-| S10 | `TTS produced no chunks` | Check Kokoro gateway and `04_audio/chunks/`. |
+| S10 | `TTS produced no chunks` | Check the configured TTS backend and `04_audio/chunks/`. |
 | S11 | `audio_post_mix failed...` | Check ffmpeg, music/SFX files, `04_audio/final_mix.wav`. |
 | S12 | `video/audio timeline mismatch`, `final concat failed`, missing image | Stop. Inspect `05_video/clips/`, `voice_timing.json`, `final_mix.wav`, ffmpeg logs. |
 | S13 | Shorts/thumbnail/package failures | Inspect `05_video/shorts/`, `06_metadata/`, ffmpeg logs. |
@@ -1027,9 +1027,10 @@ Stage-begin signature:
 Representative stage logs:
 
 ```text
-2026-06-03 11:52:52,220 hermes.tts INFO kokoro: 293 words, voice=am_eric, speed=0.86 -> chunk_000.wav
-2026-06-03 11:52:57,770 hermes.tts INFO kokoro: 293 words, voice=am_eric, speed=0.86 -> chunk_001.wav
-2026-06-03 11:53:03,120 hermes.tts INFO kokoro: 296 words, voice=am_eric, speed=0.86 -> chunk_002.wav
+2026-06-03 11:52:52,180 hermes.tts INFO TTS backend: Chatterbox (voice=bf_emma, model=chatterbox-turbo-4bit)
+2026-06-03 11:52:52,220 hermes.chatterbox INFO chatterbox: 180 words, voice=bf_emma, model=chatterbox-turbo-4bit, speed=1.00 -> chunk_000.wav
+2026-06-03 11:52:57,770 hermes.chatterbox INFO chatterbox: 174 words, voice=bf_emma, model=chatterbox-turbo-4bit, speed=1.00 -> chunk_001.wav
+2026-06-03 11:53:03,120 hermes.chatterbox INFO chatterbox: 168 words, voice=bf_emma, model=chatterbox-turbo-4bit, speed=1.00 -> chunk_002.wav
 2026-06-03 11:53:55,550 hermes.stage.s10 INFO voice_full.wav: 1342.3s
 2026-06-03 11:53:55,640 hermes.stage.s10 INFO S10 complete: 68 beats, 1342.3s voice
 ```
@@ -1175,9 +1176,9 @@ Representative stage logs:
 2026-06-03 12:05:24,666 hermes.stage.s13 INFO S13 titles: 10 variants -> titles.json
 2026-06-03 12:05:24,805 hermes.thumbnails INFO thumbnails: generated 6 variants in /.../05_video/thumbnails
 2026-06-03 12:05:24,805 hermes.stage.s13 INFO S13 thumbnails: 6 variants -> thumbnails
-2026-06-03 12:05:38,565 hermes.shorts INFO shorts teaser TTS: 115 words, target 175 wpm, speed 1.05, enforce_wpm=False -> 33.8s
+2026-06-03 12:05:38,565 hermes.shorts INFO shorts teaser TTS: 115 words, target 200 wpm, speed 1.00, enforce_wpm=True -> 34.5s
 2026-06-03 12:06:10,960 hermes.stage.s13 INFO S13 short 1: short_01.mp4 (33.8s teaser)
-2026-06-03 12:06:25,214 hermes.shorts INFO shorts teaser TTS: 108 words, target 175 wpm, speed 1.05, enforce_wpm=False -> 31.7s
+2026-06-03 12:06:25,214 hermes.shorts INFO shorts teaser TTS: 108 words, target 200 wpm, speed 1.00, enforce_wpm=True -> 32.4s
 2026-06-03 12:06:56,537 hermes.stage.s13 INFO S13 short 2: short_02.mp4 (31.7s teaser)
 2026-06-03 12:06:56,873 hermes.stage.s13 INFO S13 complete: 10 titles, 2 shorts
 ```

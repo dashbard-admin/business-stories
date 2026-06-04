@@ -1,17 +1,18 @@
-"""Kokoro TTS adapter + backend dispatcher.
+"""TTS adapters + backend dispatcher.
 
-Calls the local mlx-audio Kokoro server at
-http://127.0.0.1:8001/v1/audio/speech (OpenAI-compatible API) and writes
-per-chunk WAVs into the directory S10 hands us. Narrator voice + speed
-come from `config.yaml`'s `narrators` block via `cfg.narrator_by_id()`.
+Kokoro remains available as the local fallback backend. Production now
+defaults to Chatterbox through the oMLX audio gateway, and ElevenLabs is
+still wired as an optional paid backend. Every adapter exposes the same
+`synthesize_script()` surface and writes per-chunk WAVs into the
+directory S10/Shorts hands us.
 
 In mock mode, synthesizes silent WAVs at the same sample rate so the
 rest of the pipeline can run end-to-end without the GPU server.
 
-Batch D 2026-05-27 added `make_tts(narrator_id)` — a tiny factory that
-reads `cfg.tts.backend ∈ {kokoro, elevenlabs}` and returns the matching
-adapter. S10 calls the factory instead of importing Kokoro directly,
-so the backend switch is a single config-line flip with no code change.
+`make_tts(narrator_id)` reads `cfg.tts.backend ∈ {chatterbox, kokoro,
+elevenlabs}` and returns the matching adapter. S10 calls the factory
+instead of importing any backend directly, so backend switches are a
+single config-line flip.
 """
 
 from __future__ import annotations
@@ -143,10 +144,25 @@ def _write_silent_wav(path: Path, seconds: float) -> None:
 def make_tts(narrator_id: str):
     """Return a TTS adapter instance for `narrator_id`, choosing the
     backend per cfg.tts.backend. On adapter init errors, falls back to
-    Kokoro with a warning log rather than crashing — keeps the channel
-    running."""
+    Kokoro with a warning log rather than crashing."""
     cfg = load_config()
-    backend = (cfg.tts.get("backend") or "kokoro").lower()
+    backend = (cfg.tts.get("backend") or "chatterbox").lower()
+
+    if backend == "chatterbox":
+        try:
+            from .chatterbox import ChatterboxTTS
+            tts = ChatterboxTTS(narrator_id)
+            logger.info(
+                "TTS backend: Chatterbox (voice=%s, model=%s)",
+                tts.voice or "default", tts.model_id,
+            )
+            return tts
+        except Exception as e:
+            logger.warning(
+                "Chatterbox adapter init failed (%s); falling back to Kokoro",
+                e,
+            )
+            return Kokoro(narrator_id)
 
     if backend == "elevenlabs":
         try:
@@ -169,7 +185,10 @@ def make_tts(narrator_id: str):
             )
             return Kokoro(narrator_id)
 
-    # Default / unknown backend → Kokoro.
+    if backend in ("kokoro", "default", ""):
+        return Kokoro(narrator_id)
+
+    # Unknown backend → Kokoro.
     if backend not in ("kokoro", "default", ""):
         logger.warning("unknown tts.backend=%r; using Kokoro", backend)
     return Kokoro(narrator_id)

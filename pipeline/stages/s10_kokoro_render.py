@@ -1,8 +1,8 @@
-"""S10 — Kokoro TTS Rendering.
+"""S10 — TTS Rendering.
 
 Strips BEAT markers from the script, applies pronunciation overrides
-and number-to-word conversion, renders chunked WAVs via the Kokoro
-adapter, then concatenates into a single voice_full.wav. Writes a
+and number-to-word conversion, renders chunked WAVs via the configured
+TTS backend, then concatenates into a single voice_full.wav. Writes a
 voice_timing.json that maps each beat to start/end timestamp.
 
 Inputs:  02_script/script.txt + 02_script/beat_sheet.json
@@ -23,7 +23,7 @@ import yaml
 from ..config import load_config
 from ..ffmpeg_builder import get_duration_seconds, time_stretch_audio
 from ..state import find_episode_workspace
-from ..tts import KOKORO_SAMPLE_RATE, make_tts
+from ..tts import KOKORO_SAMPLE_RATE as TTS_SAMPLE_RATE, make_tts
 
 logger = logging.getLogger("hermes.stage.s10")
 
@@ -34,8 +34,8 @@ PAUSE_RE = re.compile(r"\[PAUSE\s+(\d+(?:\.\d+)?)s\]", re.IGNORECASE)
 EMPHASIS_RE = re.compile(r"\[EMPHASIS\]\s*", re.IGNORECASE)
 # Batch J 2026-05-29: strip `[CALLOUT: "TEXT"]` markers before TTS.
 # S08's beat-sheet parser also strips them from its per-beat
-# `script_text` field, but Kokoro reads `02_script/script.txt` raw,
-# so the markers reach the synthesizer and get spoken verbatim as
+# `script_text` field, but S10 reads `02_script/script.txt` raw, so
+# the markers reach the synthesizer and get spoken verbatim as
 # "callout dec 1 comma 2020" if we don't strip here too. The regex
 # tolerates straight + curly quotes and any whitespace around the
 # colon — same character classes as s08's _CALLOUT_RE.
@@ -46,8 +46,8 @@ CALLOUT_STRIP_RE = re.compile(
 
 # Batch K 2026-05-29: strip markdown emphasis/code formatting before
 # TTS. Pre-Batch-K the writer LLM was emitting `*Pretty Woman*` and
-# `*Lion King*` for italicised movie/book titles and Kokoro read the
-# asterisks aloud as the word "asterisk" — final3.mp4 had at least
+# `*Lion King*` for italicised movie/book titles and the synthesizer
+# read the asterisks aloud as the word "asterisk" — final3.mp4 had at least
 # two "asterisk pretty woman asterisk" / "asterisk Lion King asterisk"
 # moments in the first 90 seconds. The substitution preserves the
 # emphasised text (we just want the surrounding glyphs gone). Strip
@@ -61,7 +61,7 @@ MD_CODE_RE       = re.compile(r"`([^`\n]+?)`")
 
 
 def _strip_markdown(text: str) -> str:
-    """Strip the markdown formatting characters Kokoro will otherwise
+    """Strip the markdown formatting characters TTS may otherwise
     speak aloud. Bold pairs are removed before italic singles so the
     longer pattern doesn't get half-consumed."""
     text = MD_BOLD_AST_RE.sub(r"\1", text)
@@ -101,15 +101,15 @@ def run(episode: dict, queue: dict) -> str | None:
     # the post-strip n_chars and skew voice_timing.json. The bracketed
     # CALLOUT text lives in beat_sheet.json (set by S08) and is
     # composited as a Pillow overlay by S12; it must NOT be read
-    # aloud (Batch J 2026-05-29 — Kokoro was speaking "callout dec one
+    # aloud (Batch J 2026-05-29 — TTS was speaking "callout dec one
     # comma twenty twenty" verbatim).
     raw_script = CALLOUT_STRIP_RE.sub("", raw_script)
     raw_script = EMPHASIS_RE.sub("", raw_script)
     # Strip markdown emphasis/code BEFORE the beat-position scan so
     # the bold/italic glyphs don't shift char_pos relative to
-    # post-strip n_chars. Kokoro speaks every literal "*" and "_"
-    # aloud — final3.mp4 (Batch J ship) had "asterisk pretty woman
-    # asterisk" because the writer LLM italicised the movie title.
+    # post-strip n_chars. Some TTS backends speak every literal "*"
+    # and "_" aloud — final3.mp4 (Batch J ship) had "asterisk pretty
+    # woman asterisk" because the writer LLM italicised the movie title.
     raw_script = _strip_markdown(raw_script)
     # Collapse any double-spaces the strips leave behind, but preserve
     # newlines so BEAT_RE.match() still anchors to line starts cleanly.
@@ -165,9 +165,9 @@ def run(episode: dict, queue: dict) -> str | None:
     # Render
     chunks_dir = ws / "04_audio" / "chunks"
     chunks_dir.mkdir(parents=True, exist_ok=True)
-    kokoro = make_tts(narrator_id=episode["narrator"])
+    tts = make_tts(narrator_id=episode["narrator"])
 
-    chunk_results = kokoro.synthesize_script(
+    chunk_results = tts.synthesize_script(
         speech_only, chunks_dir, max_words_per_chunk=300
     )
     if not chunk_results:
@@ -175,20 +175,20 @@ def run(episode: dict, queue: dict) -> str | None:
 
     # Concatenate with crossfade
     crossfade_ms = 80
-    crossfade_samples = int(KOKORO_SAMPLE_RATE * crossfade_ms / 1000)
+    crossfade_samples = int(TTS_SAMPLE_RATE * crossfade_ms / 1000)
 
     voice_chunks: list[np.ndarray] = []
     for r in chunk_results:
         audio, sr = sf.read(str(r.wav_path), dtype="float32")
-        if sr != KOKORO_SAMPLE_RATE:
+        if sr != TTS_SAMPLE_RATE:
             logger.warning("unexpected sample rate %d in %s", sr, r.wav_path)
         voice_chunks.append(audio)
 
     full = _crossfade_concat(voice_chunks, crossfade_samples)
     voice_full = ws / "04_audio" / "voice_full.wav"
-    raw_voice_full = ws / "04_audio" / "voice_full.raw_kokoro.wav"
-    sf.write(str(raw_voice_full), full, KOKORO_SAMPLE_RATE, subtype="PCM_16")
-    voice_total_seconds = len(full) / KOKORO_SAMPLE_RATE
+    raw_voice_full = ws / "04_audio" / "voice_full.raw_tts.wav"
+    sf.write(str(raw_voice_full), full, TTS_SAMPLE_RATE, subtype="PCM_16")
+    voice_total_seconds = len(full) / TTS_SAMPLE_RATE
 
     wpm_effective = max(1.0, float(cfg.production.get("wpm_effective", 110)))
     target_voice_seconds = (source_word_count / wpm_effective) * 60.0
@@ -203,19 +203,19 @@ def run(episode: dict, queue: dict) -> str | None:
             stretched_seconds = get_duration_seconds(voice_full)
             logger.info(
                 "S10 WPM enforcement: %d words at %.1f wpm -> %.1fs "
-                "(raw Kokoro %.1fs, stretched %.1fs)",
+                "(raw TTS %.1fs, stretched %.1fs)",
                 source_word_count, wpm_effective, target_voice_seconds,
                 voice_total_seconds, stretched_seconds,
             )
             voice_total_seconds = stretched_seconds
         except Exception as e:
             logger.warning(
-                "S10 WPM enforcement failed (%s); using raw Kokoro timing",
+                "S10 WPM enforcement failed (%s); using raw TTS timing",
                 e,
             )
-            sf.write(str(voice_full), full, KOKORO_SAMPLE_RATE, subtype="PCM_16")
+            sf.write(str(voice_full), full, TTS_SAMPLE_RATE, subtype="PCM_16")
     else:
-        sf.write(str(voice_full), full, KOKORO_SAMPLE_RATE, subtype="PCM_16")
+        sf.write(str(voice_full), full, TTS_SAMPLE_RATE, subtype="PCM_16")
     logger.info("voice_full.wav: %.1fs", voice_total_seconds)
 
     # Per-beat timing
@@ -237,7 +237,7 @@ def run(episode: dict, queue: dict) -> str | None:
 
     (ws / "04_audio" / "voice_timing.json").write_text(json.dumps({
         "total_seconds": voice_total_seconds,
-        "sample_rate": KOKORO_SAMPLE_RATE,
+        "sample_rate": TTS_SAMPLE_RATE,
         "source_word_count": source_word_count,
         "wpm_effective": wpm_effective,
         "wpm_enforced": bool(cfg.production.get("enforce_tts_wpm_effective", True)),

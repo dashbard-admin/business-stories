@@ -1,8 +1,8 @@
-# Pronunciation overrides for Kokoro TTS — keyed by surface form,
-# value is the text Kokoro should actually speak. Used by S10 as a
-# simple word-level substitution pass before chunking.
+# Pronunciation overrides for S10 TTS — keyed by surface form,
+# value is the text the active backend should actually speak. Used
+# by S10 as a simple word-level substitution pass before chunking.
 #
-# Keep entries minimal — only add when Kokoro pronounces a name
+# Keep entries minimal — only add when the backend pronounces a name
 # noticeably wrong on the default voices. Most common names render
 # fine without an override.
 

@@ -2,7 +2,7 @@
 
 A faceless YouTube long-form pipeline that produces 10–15 minute comic-book-styled videos about business origin / rise-and-fall / disruption / underdog stories. Built on the same one-stage-per-cron-invocation pattern as the maritime pipeline at `/Users/cantemir/Projects/maritime/`, but with a different domain, visual style, and audio model:
 
-**Stack**: Qwen3.6 (writer + extractor) + Gemma-4 (critic) + Kokoro TTS by default (ElevenLabs optional) + FLUX via local CLI (images) + ffmpeg (assembly) + curated local music library (no audio generation).
+**Stack**: Qwen3.6 (writer + extractor) + Gemma-4 (critic) + Chatterbox TTS by default (Kokoro fallback, ElevenLabs optional) + FLUX via local CLI (images) + ffmpeg (assembly) + curated local music library (no audio generation).
 
 > 📖 **For the full engineering reference — module-by-module description, prompt catalog, architecture diagram, state schemas, and the maintenance contract — see [`AGENTS.md`](./AGENTS.md).** That file is the canonical source of truth for how this project is built; every code change must update it in the same commit.
 
@@ -19,7 +19,7 @@ A faceless YouTube long-form pipeline that produces 10–15 minute comic-book-st
 | S07 | `pipeline/stages/s07_script_critique`    | Retention + voice audit; fuzzy-replace rewrites.                                           |
 | S08 | `pipeline/stages/s08_beat_sheet`         | Per-beat visual + sfx hints; PD-vs-FLUX semantic routing.                                  |
 | S09 | `pipeline/stages/s09_flux_render`        | FLUX rendering via local CLI subprocess + VLM-judged QA retry loop.                        |
-| S10 | `pipeline/stages/s10_kokoro_render`      | Kokoro TTS render with pronunciation overrides; ElevenLabs optional; per-beat timing.      |
+| S10 | `pipeline/stages/s10_kokoro_render`      | TTS render with pronunciation overrides; Chatterbox default, Kokoro/ElevenLabs optional; per-beat timing. |
 | S11 | `pipeline/stages/s11_audio_post`         | Music bed from local library, sidechain duck, loudnorm. **No SFX, no MusicGen.**           |
 | S12 | `pipeline/stages/s12_video_assembly`     | Per-beat Ken Burns clips, FLUX title + credits cards, concat + mux, SRT/VTT.               |
 
@@ -86,7 +86,7 @@ Cron suggestion:
 ## External requirements
 
 - **FLUX CLI** on `$PATH`, invokable as `flux "<prompt>" --height 1080 --width 1920 --steps 24 --seed N --output <path.png>`.
-- **TTS backend**: Kokoro server on `127.0.0.1:8001` by default.
+- **TTS backend**: Chatterbox via the oMLX gateway at `10.0.4.250:9000` by default. Kokoro remains available with `tts.backend: kokoro`.
 - **LLM gateway** at `10.0.4.250:9000` (oMLX OpenAI-compatible) with Qwen3.6, Gemma-4, and Qwen3-VL loaded.
 - **SearXNG** at `10.0.4.252:8080` with JSON output enabled.
 - **ffmpeg + ffprobe** on `$PATH`.

@@ -1,9 +1,9 @@
 """ElevenLabs TTS adapter — wired but disabled by default.
 
-Drop-in replacement for the Kokoro adapter at the same call site.
-S10 selects between backends via `cfg.tts.backend ∈ {kokoro, elevenlabs}`.
+Drop-in replacement for the other TTS adapters at the same call site.
+S10 selects between backends via `cfg.tts.backend`.
 ElevenLabs is the perceived-quality step change (premium voice
-synthesis vs. Kokoro's mechanical edge); enable when you're ready to
+synthesis vs. local voices); enable when you're ready to
 pay $5-22/mo and want the channel to read like a real documentary.
 
 Setup:
@@ -23,7 +23,7 @@ Falls back gracefully:
     needs_human. The operator can flip tts.backend back to kokoro
     in config and re-run.
   - In mock_mode, returns silent WAVs at 24kHz (same shape as the
-    Kokoro mock).
+    local mock backends).
 
 Added Batch D 2026-05-27.
 """
@@ -46,7 +46,7 @@ logger = logging.getLogger("hermes.elevenlabs")
 ELEVENLABS_BASE = "https://api.elevenlabs.io/v1"
 DEFAULT_VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # "Adam" preset
 DEFAULT_MODEL_ID = "eleven_multilingual_v2"
-SAMPLE_RATE = 24000  # matches Kokoro for downstream symmetry
+SAMPLE_RATE = 24000  # matches local TTS for downstream symmetry
 
 
 @dataclass

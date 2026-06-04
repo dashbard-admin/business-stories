@@ -31,7 +31,7 @@ models:
   llm_writer: "Qwen3.6-35B-A3B-UD-MLX-4bit"
   llm_critic: "gemma-4-26B-A4B-it-MLX-8bit"
   llm_extractor: "Qwen3.6-35B-A3B-UD-MLX-4bit"
-  tts: "mlx-community/Kokoro-82M-bf16"
+  tts: "chatterbox-turbo-4bit"
   vlm: "Qwen3-VL-4B-Instruct-MLX-8bit"
 
   # When true, all model calls return deterministic synthetic output
@@ -54,13 +54,11 @@ production:
   word_count_tolerance: 250
   wpm_effective: 160                # Anchored to script_generate.txt
                                     # which schedules Act 0-5 hook
-                                    # cadence at 120 wpm. Changing this
-                                    # invalidates the hook timing the
-                                    # writer prompt is calibrated for.
+                                    # cadence. Long-form narration is
+                                    # normalized to this effective WPM.
   enforce_tts_wpm_effective: true   # S10 time-stretches rendered TTS
-                                    # to match wpm_effective, because
-                                    # Kokoro can speak much faster than
-                                    # the prompt's documentary cadence.
+                                    # to match wpm_effective when the
+                                    # selected backend drifts.
   conclusion_music_tail_seconds: 5  # After the final voiced beat, hold
                                     # the last panel while music plays
                                     # with no voice.
@@ -344,11 +342,33 @@ search:
   request_timeout_seconds: 30
 
 tts:
-  # TTS backend dispatcher (Batch D 2026-05-27). The orchestrator
-  # picks one of: kokoro (default, free, local) or elevenlabs
-  # (paid, perceived-quality step change). The factory in tts.py
-  # falls back to Kokoro on ElevenLabs init failure.
-  backend: kokoro                  # kokoro | elevenlabs
+  # TTS backend dispatcher. Chatterbox is the production default via
+  # the oMLX /v1/audio/speech gateway. Kokoro remains a local fallback;
+  # ElevenLabs remains available for paid experiments.
+  backend: chatterbox              # chatterbox | kokoro | elevenlabs
+
+  chatterbox:
+    enabled: true
+    base_url: "http://10.0.4.250:9000/v1/audio/speech"
+    model_id: "chatterbox-turbo-4bit"
+    api_key_env: "OMLX_API_KEY"     # falls back to pass123 for local oMLX
+    response_format: "wav"
+    timeout_seconds: 300
+    max_words_per_chunk: 180        # caps S10 chunks even if caller asks higher
+    speed: 1.0                      # backend hint; WPM enforcement is authoritative
+    language: ""
+    voice: ""
+    voice_map: {}                   # {N1: "voice_name", ...} if server honors it
+    instructions: ""
+    instructions_map: {}            # {N8: "dry sardonic female...", ...}
+    ref_audio: ""                   # global reference audio path, optional
+    ref_text: ""                    # transcript for global ref_audio, optional
+    voice_ref_map: {}               # {N8: {path: "...", ref_text: "..."}}
+    temperature:
+    top_k:
+    top_p:
+    repetition_penalty:
+    max_tokens:
 
   elevenlabs:
     # When backend==elevenlabs, this block is active. Keep
@@ -383,10 +403,9 @@ packaging:
   shorts_enabled: true
   shorts_count: 2                       # vertical clips per episode
   shorts_target_seconds: 30.0
-  shorts_tts_wpm: 175.0                 # teaser script word budget / optional WPM
-  shorts_tts_speed: 1.05                # Kokoro speed; lower = slower
-  shorts_enforce_tts_wpm: false         # false lets Kokoro speed control duration;
-                                        # true time-stretches to shorts_tts_wpm
+  shorts_tts_wpm: 200.0                 # teaser script budget + enforced WPM
+  shorts_tts_speed: 1.0                 # backend speed hint; WPM enforcement wins
+  shorts_enforce_tts_wpm: true          # time-stretch Shorts voice to shorts_tts_wpm
   shorts_seconds_per_image: 3.75        # fast visual cuts, ~3-5 sec
   shorts_transition_seconds: 0.22       # fast slide transition between images
   shorts_motion_strength: 0.10          # Ken Burns zoom/pan intensity

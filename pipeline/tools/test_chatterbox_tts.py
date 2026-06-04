@@ -30,7 +30,7 @@ from pipeline.ffmpeg_builder import time_stretch_audio
 
 
 DEFAULT_BASE_URL = "http://10.0.4.250:9000/v1/audio/speech"
-DEFAULT_MODEL = "Chatterbox-Multilingual-MLX-v2-Q4"
+DEFAULT_MODEL = "chatterbox-turbo-4bit"
 DEFAULT_TEXT = (
     "A small team thought six seconds could change the internet. "
     "For a while, they were right. Then the product that felt magical "
