@@ -363,7 +363,15 @@ tts:
     instructions_map: {}            # {N8: "dry sardonic female...", ...}
     ref_audio: ""                   # global reference audio path, optional
     ref_text: ""                    # transcript for global ref_audio, optional
-    voice_ref_map: {}               # {N8: {path: "...", ref_text: "..."}}
+    voice_ref_map:
+      N5:
+        path: "${root}/assets/voice_samples/male1.wav"
+      N6:
+        path: "${root}/assets/voice_samples/male2.wav"
+      N7:
+        path: "${root}/assets/voice_samples/female1.wav"
+      N8:
+        path: "${root}/assets/voice_samples/female2.wav"
     temperature:
     top_k:
     top_p:
