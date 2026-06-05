@@ -694,15 +694,14 @@ def _render_title_card(
     if uppercase:
         title = title.upper()
 
-    # Target font size, then shrink if we can't fit even a 1-word line.
-    # Allow up to 65% of the frame width for the title block (leaves
-    # breathing room on the side opposite the chosen corner).
+    # Target font size, then shrink until the company name fits as ONE
+    # row across the safe image width. The logo is placed in the
+    # diagonal opposite corner, so horizontal overlap is acceptable as
+    # long as the title stays inside the frame edges.
     target_size = max(48, int(OUT_H * font_size_pct))
-    max_block_w = int(OUT_W * 0.65)
-    # Allow the title to occupy up to ~55% of frame height before we
-    # call it too tall and reduce the font further.
+    max_block_w = max(120, OUT_W - (2 * pad))
     max_block_h = int(OUT_H * 0.55)
-    title_font, wrapped_lines = _fit_bold_title(
+    title_font, wrapped_lines = _fit_bold_title_single_line(
         text=title,
         target_size=target_size,
         max_block_w=max_block_w,
@@ -966,6 +965,36 @@ def _fit_bold_title(*, text: str, target_size: int, max_block_w: int,
     font = _bold_font(floor)
     lines = _wrap_to_width(text, font, max_block_w, draw, stroke_width)
     return font, lines
+
+
+def _fit_bold_title_single_line(
+    *,
+    text: str,
+    target_size: int,
+    max_block_w: int,
+    max_block_h: int,
+    stroke_width: int,
+) -> tuple[ImageFont.FreeTypeFont, list[str]]:
+    """Return the largest title font that fits `text` on one line.
+
+    The title-card/thumbnail layout wants the company name to read as
+    one strong yellow wordmark-like row. Long company names therefore
+    shrink instead of wrapping.
+    """
+    clean = " ".join(str(text or "").split())
+    if not clean:
+        return _bold_font(max(18, target_size)), []
+    dummy = Image.new("RGB", (10, 10))
+    draw = ImageDraw.Draw(dummy)
+    size = max(18, int(target_size))
+    floor = 18
+    while size >= floor:
+        font = _bold_font(size)
+        w, h = _text_size(draw, clean, font, stroke_width=stroke_width)
+        if w <= max_block_w and h <= max_block_h:
+            return font, [clean]
+        size -= 4 if size > 64 else 2
+    return _bold_font(floor), [clean]
 
 
 def _wrap_to_width(text: str, font: ImageFont.FreeTypeFont,
