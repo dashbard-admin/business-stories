@@ -470,7 +470,7 @@ music_library:
   path: "${root}/assets/music_library"
   manifest: "${root}/assets/music_library/manifest.json"
   crossfade_seconds: 4
-  music_gain_db: -34.0              # bed level under voice
+  music_gain_db: -38.0              # bed level under voice
   music_start_offset_seconds: 30.0  # Anchored to the new 6-act template:
                                     # Act 0 (the hook) runs 0:00-0:30 dry,
                                     # then the music bed swells in with
