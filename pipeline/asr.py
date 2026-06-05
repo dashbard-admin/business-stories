@@ -1,6 +1,8 @@
-"""ASR adapter (Batch D 2026-05-27) — whisper.cpp wrapper for Shorts
-subtitles. Used by pipeline/shorts.py to generate word-level captions
-on the vertical Short cuts.
+"""ASR adapter (Batch D 2026-05-27) — whisper.cpp wrapper.
+
+Used by pipeline/shorts.py to generate word-level captions on the
+vertical Short cuts, and by S12 to align long-form subtitles/callouts
+to the rendered voice track when local ASR is available.
 
 Whisper.cpp is the recommended backend (D1 confirmed):
   - Free, local, no API key
@@ -8,9 +10,8 @@ Whisper.cpp is the recommended backend (D1 confirmed):
   - Runs ~30s per 30-second Short on a 2024 Mac
 
 If whisper.cpp isn't installed on PATH (binary name configurable via
-cfg.asr.binary), the adapter logs a warning and returns None — the
-Shorts get generated WITHOUT subtitles (just the cut + audio). The
-operator can install whisper.cpp later and re-run.
+cfg.asr.binary), the adapter logs a warning and returns None. Callers
+fall back to their non-ASR timing path.
 
 Mock mode returns a canned subtitle list so tests don't need a
 binary.
@@ -76,9 +77,10 @@ def transcribe(
     binary = asr_cfg.get("binary", "whisper-cli")
     if not _binary_available(binary):
         logger.warning(
-            "ASR: %s not on PATH; Shorts will be generated without "
-            "subtitles. Install whisper.cpp (https://github.com/"
-            "ggerganov/whisper.cpp) and retry to enable.", binary,
+            "ASR: %s not on PATH; falling back to estimated subtitle/"
+            "callout timings. Install whisper.cpp (https://github.com/"
+            "ggerganov/whisper.cpp) and retry to enable ASR alignment.",
+            binary,
         )
         return None
 

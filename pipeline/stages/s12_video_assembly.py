@@ -6,7 +6,8 @@ For each beat:
      specified motion.
 Then prepend a title-card clip and optionally append a closing
 source-attribution clip, concat with final_mix.wav, and generate
-SRT + VTT captions aligned to voice_timing.json.
+SRT + VTT captions from ASR when available, falling back to
+voice_timing.json estimates.
 
 Title and closing cards use the FLUX-rendered backdrops from S09
 (03_assets/flux/title.png and optional credits.png) when available,
@@ -31,6 +32,7 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageFilter
 
+from ..asr import Segment, transcribe
 from ..config import load_config
 from ..ffmpeg_builder import (
     composite_callouts_onto_clip,
@@ -71,6 +73,9 @@ def run(episode: dict, queue: dict) -> str | None:
     timing = json.loads(timing_path.read_text())
     timing_by_beat = {b["beat_id"]: b for b in timing["beats"]}
     beats = _align_beats_to_voice_timing(beats, timing)
+
+    voice_full = ws / "04_audio" / "voice_full.wav"
+    asr_segments = _load_or_build_voice_asr(ws, voice_full)
 
     final_mix = ws / "04_audio" / "final_mix.wav"
     if not final_mix.exists():
@@ -221,6 +226,8 @@ def run(episode: dict, queue: dict) -> str | None:
             beat=b,
             raw_beat_text=raw_beat_texts.get(_beat_id_to_int(beat_id) or -1, ""),
             beat_duration=float(beat_duration),
+            beat_start_seconds=float(t["start_seconds"]) if t else 0.0,
+            asr_segments=asr_segments,
             callout_cfg=co_cfg,
         )
         needs_callouts = bool(cs) and callouts_globally_enabled
@@ -449,7 +456,18 @@ def run(episode: dict, queue: dict) -> str | None:
     # When the title card is disabled (default per new prompt), the
     # offset is 0 and the first caption fires at t=0.
     try:
-        srt, vtt = _build_captions(beats, timing, caption_offset=title_card_seconds)
+        if asr_segments:
+            srt, vtt = _build_asr_captions(
+                asr_segments, caption_offset=title_card_seconds,
+            )
+            logger.info(
+                "S12 captions: ASR-aligned (%d segments)", len(asr_segments)
+            )
+        else:
+            srt, vtt = _build_captions(
+                beats, timing, caption_offset=title_card_seconds,
+            )
+            logger.info("S12 captions: estimated from voice_timing.json")
         (ws / "05_video" / "captions.srt").write_text(srt)
         (ws / "05_video" / "captions.vtt").write_text(vtt)
     except Exception as e:
@@ -597,6 +615,58 @@ def _any_newer(inputs: list[Path], cached: Path) -> bool:
         except OSError:
             continue
     return False
+
+
+def _load_or_build_voice_asr(ws: Path, voice_full: Path) -> list[Segment] | None:
+    cfg = load_config()
+    asr_cfg = cfg.asr
+    if not bool(asr_cfg.get("long_form_enabled", True)):
+        return None
+    if not voice_full.exists():
+        logger.warning("S12 ASR alignment skipped: no voice_full.wav")
+        return None
+
+    cache_path = ws / "04_audio" / "voice_asr_segments.json"
+    if cache_path.exists() and cache_path.stat().st_mtime >= voice_full.stat().st_mtime:
+        try:
+            data = json.loads(cache_path.read_text())
+            segments = [
+                Segment(
+                    start_seconds=float(s["start_seconds"]),
+                    end_seconds=float(s["end_seconds"]),
+                    text=str(s["text"]),
+                )
+                for s in data.get("segments", [])
+                if str(s.get("text") or "").strip()
+            ]
+            if segments:
+                logger.info(
+                    "S12 ASR alignment: loaded %d cached segments",
+                    len(segments),
+                )
+                return segments
+        except Exception as e:
+            logger.warning("S12 ASR cache parse failed; retranscribing: %s", e)
+
+    segments = transcribe(voice_full)
+    if not segments:
+        return None
+    cache_path.write_text(json.dumps({
+        "source": str(voice_full),
+        "segments": [
+            {
+                "start_seconds": round(s.start_seconds, 3),
+                "end_seconds": round(s.end_seconds, 3),
+                "text": s.text,
+            }
+            for s in segments
+        ],
+    }, indent=2))
+    logger.info(
+        "S12 ASR alignment: transcribed %d segments -> %s",
+        len(segments), cache_path.name,
+    )
+    return segments
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont:
@@ -1266,6 +1336,78 @@ def _build_captions(
     return "\n".join(srt_lines), "\n".join(vtt_lines)
 
 
+def _build_asr_captions(
+    segments: list[Segment],
+    *,
+    caption_offset: float = 0.0,
+    max_words: int = 10,
+    max_chars: int = 72,
+) -> tuple[str, str]:
+    """Build SRT + VTT from actual ASR timings.
+
+    Whisper segments can be too long for readable captions, so split
+    them into small proportional cues while preserving the real
+    segment start/end window.
+    """
+    offset = float(caption_offset)
+    srt_lines: list[str] = []
+    vtt_lines: list[str] = ["WEBVTT", ""]
+    cue_idx = 0
+    for seg in segments:
+        for start, end, text in _split_asr_caption_segment(
+            seg, max_words=max_words, max_chars=max_chars,
+        ):
+            if end <= start:
+                continue
+            cue_idx += 1
+            s_start = start + offset
+            s_end = end + offset
+            srt_lines.append(str(cue_idx))
+            srt_lines.append(f"{_ts_srt(s_start)} --> {_ts_srt(s_end)}")
+            srt_lines.append(text)
+            srt_lines.append("")
+            vtt_lines.append(f"{_ts_vtt(s_start)} --> {_ts_vtt(s_end)}")
+            vtt_lines.append(text)
+            vtt_lines.append("")
+    return "\n".join(srt_lines), "\n".join(vtt_lines)
+
+
+def _split_asr_caption_segment(
+    seg: Segment,
+    *,
+    max_words: int,
+    max_chars: int,
+) -> list[tuple[float, float, str]]:
+    words = seg.text.split()
+    if not words:
+        return []
+    units: list[str] = []
+    buf: list[str] = []
+    for word in words:
+        candidate = " ".join(buf + [word])
+        if buf and (
+            len(buf) >= max(1, max_words)
+            or len(candidate) > max(12, max_chars)
+        ):
+            units.append(" ".join(buf))
+            buf = [word]
+        else:
+            buf.append(word)
+    if buf:
+        units.append(" ".join(buf))
+
+    total_words = sum(len(u.split()) for u in units) or 1
+    duration = max(0.0, seg.end_seconds - seg.start_seconds)
+    cursor = seg.start_seconds
+    out: list[tuple[float, float, str]] = []
+    for idx, unit in enumerate(units):
+        share = len(unit.split()) / total_words
+        end = seg.end_seconds if idx == len(units) - 1 else cursor + duration * share
+        out.append((cursor, end, unit))
+        cursor = end
+    return out
+
+
 def _split_sentences(text: str) -> list[str]:
     parts = re.split(r"(?<=[.!?])\s+", text)
     return [p.strip() for p in parts if p.strip()]
@@ -1295,12 +1437,94 @@ def _infer_callout_sentence_indices(raw_beat_text: str, cap: int) -> list[int]:
     return indices
 
 
+def _asr_sentence_windows_for_beat(
+    *,
+    sentences: list[str],
+    beat_start_seconds: float,
+    beat_duration: float,
+    asr_segments: list[Segment] | None,
+) -> list[tuple[float, float]] | None:
+    if not asr_segments:
+        return None
+
+    beat_end = beat_start_seconds + beat_duration
+    candidates = [
+        s for s in asr_segments
+        if s.end_seconds >= beat_start_seconds - 1.0
+        and s.start_seconds <= beat_end + 1.0
+    ]
+    if not candidates:
+        return None
+
+    windows: list[tuple[float, float]] = []
+    matched = 0
+    for sentence in sentences:
+        best = _best_matching_asr_segment(sentence, candidates)
+        if best:
+            local_start = max(0.0, best.start_seconds - beat_start_seconds)
+            local_end = min(beat_duration, best.end_seconds - beat_start_seconds)
+            if local_end > local_start:
+                windows.append((local_start, local_end))
+                matched += 1
+                continue
+        windows.append((0.0, 0.0))
+
+    if matched == 0:
+        return None
+
+    # Fill any unmatched sentence windows with proportional estimates
+    # so callouts attached to a weak ASR match still have sane timing.
+    total_words = sum(len(s.split()) for s in sentences) or 1
+    cursor = 0.0
+    fallback: list[tuple[float, float]] = []
+    for sentence in sentences:
+        seg = beat_duration * (max(1, len(sentence.split())) / total_words)
+        start = cursor
+        end = min(beat_duration, cursor + seg)
+        fallback.append((start, end))
+        cursor = end
+    return [
+        window if window[1] > window[0] else fallback[idx]
+        for idx, window in enumerate(windows)
+    ]
+
+
+def _best_matching_asr_segment(
+    sentence: str,
+    candidates: list[Segment],
+) -> Segment | None:
+    target = _norm_tokens(sentence)
+    if not target:
+        return None
+    target_set = set(target)
+    best: tuple[float, Segment] | None = None
+    for seg in candidates:
+        toks = _norm_tokens(seg.text)
+        if not toks:
+            continue
+        overlap = len(target_set.intersection(toks))
+        if overlap == 0:
+            continue
+        score = overlap / max(1, min(len(target_set), len(set(toks))))
+        if best is None or score > best[0]:
+            best = (score, seg)
+    if best and best[0] >= 0.22:
+        return best[1]
+    return None
+
+
+def _norm_tokens(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
 def _prepare_callouts_for_beat(
     *,
     callouts: list[dict],
     beat: dict,
     raw_beat_text: str,
     beat_duration: float,
+    beat_start_seconds: float = 0.0,
+    asr_segments: list[Segment] | None = None,
     callout_cfg: dict,
 ) -> list[dict]:
     """Convert beat-sheet callout metadata into clip-local timings.
@@ -1323,14 +1547,21 @@ def _prepare_callouts_for_beat(
     inferred = _infer_callout_sentence_indices(raw_beat_text, len(callouts))
     prepared: list[dict] = []
 
-    cursor = 0.0
-    sentence_windows: list[tuple[float, float]] = []
-    for s in sentences:
-        seg = beat_duration * (max(1, len(s.split())) / total_words)
-        start = cursor
-        end = min(beat_duration, cursor + seg)
-        sentence_windows.append((start, end))
-        cursor = end
+    sentence_windows = _asr_sentence_windows_for_beat(
+        sentences=sentences,
+        beat_start_seconds=beat_start_seconds,
+        beat_duration=beat_duration,
+        asr_segments=asr_segments,
+    )
+    if sentence_windows is None:
+        cursor = 0.0
+        sentence_windows = []
+        for s in sentences:
+            seg = beat_duration * (max(1, len(s.split())) / total_words)
+            start = cursor
+            end = min(beat_duration, cursor + seg)
+            sentence_windows.append((start, end))
+            cursor = end
 
     for idx, c in enumerate(callouts):
         out = dict(c)

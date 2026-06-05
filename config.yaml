@@ -403,16 +403,17 @@ tts:
     voice_id_map: {}                   # {N1: "voice_id_1", ...}
 
 asr:
-  # ASR backend for Shorts subtitles (Batch D 2026-05-27).
+  # ASR backend for Shorts subtitles and long-form S12 subtitle/callout
+  # alignment. If unavailable, S12 falls back to estimated timings.
   # whisper.cpp is the recommended choice — free, local, accurate
-  # at base.en model size. If the binary isn't on PATH, Shorts get
-  # generated without subtitles (the cut still happens).
+  # at base.en model size.
   backend: whisper_cpp
   binary: whisper-cli                   # binary name on PATH
   model: base.en                        # base.en | small.en | medium.en
   model_path: ""                        # absolute path override for
                                         # the .bin model file; empty =
                                         # let whisper.cpp resolve
+  long_form_enabled: true               # align long-form captions/callouts
 
 packaging:
   # S13 packaging settings (Batch D 2026-05-27).

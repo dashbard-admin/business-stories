@@ -354,12 +354,13 @@ class Config:
 
     @property
     def asr(self) -> dict[str, Any]:
-        """ASR config for Shorts subtitles (Batch D 2026-05-27)."""
+        """ASR config for Shorts and long-form subtitle/callout timing."""
         defaults = {
             "backend": "whisper_cpp",
             "binary": "whisper-cli",
             "model": "base.en",
             "model_path": "",
+            "long_form_enabled": True,
         }
         return {**defaults, **(self.raw.get("asr") or {})}
 
