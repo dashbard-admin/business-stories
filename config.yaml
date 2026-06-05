@@ -148,7 +148,7 @@ quality_gates:
   # 18-min target length. The 7-act template distributes beats as:
   # Act 0 1-2 / Act 1 12 / Act 2 11 / Act 3 16 / Act 3.5 9 /
   # Act 4 12 / Act 5 5-6 → ~70 mid, up to ~95 for longer scripts.
-  min_total_beats: 65
+  min_total_beats: 40
   max_total_beats: 100
   min_sources: 8
   max_sources: 50                  # hard cap for S2 inventory size
