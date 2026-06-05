@@ -372,6 +372,7 @@ tts:
     instructions_map: {}            # {N8: "dry sardonic female...", ...}
     ref_audio: ""                   # global reference audio path, optional
     ref_text: ""                    # transcript for global ref_audio, optional
+    ref_text_fallback: "On paper, the company had global reach. It operated in over twenty-five countries, owned subsidiaries across several markets, and sat on assets worth billions. But inside the boardroom, the mood was not celebratory."
     voice_ref_map:
       N5:
         path: "${root}/assets/voice_samples/male1.wav"

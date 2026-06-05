@@ -321,6 +321,12 @@ class Config:
                 "instructions_map": {},
                 "ref_audio": "",
                 "ref_text": "",
+                "ref_text_fallback": (
+                    "On paper, the company had global reach. It operated in "
+                    "over twenty-five countries, owned subsidiaries across "
+                    "several markets, and sat on assets worth billions. But "
+                    "inside the boardroom, the mood was not celebratory."
+                ),
                 "voice_ref_map": {},
                 "temperature": None,
                 "top_k": None,

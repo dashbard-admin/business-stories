@@ -164,7 +164,16 @@ class ChatterboxTTS:
             ref_audio = entry.get("path") or entry.get("ref_audio") or ref_audio
             ref_text = entry.get("ref_text") or ref_text
         path = self._resolve_path(ref_audio) if ref_audio else None
-        return path, str(ref_text or "").strip()
+        ref_text = str(ref_text or "").strip()
+        if path and not ref_text:
+            ref_text = str(cb_cfg.get("ref_text_fallback") or "").strip()
+            if ref_text:
+                logger.warning(
+                    "chatterbox: narrator %s uses ref_audio without exact ref_text; "
+                    "using configured ref_text_fallback",
+                    self.narrator_id,
+                )
+        return path, ref_text
 
     def _resolve_path(self, value: str) -> Path:
         raw = str(value).replace("${root}", str(self._cfg_root))
