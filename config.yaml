@@ -40,7 +40,7 @@ models:
 
 production:
   target_episodes_per_week: 2
-  target_duration_seconds: 1100     # 18.3 min midpoint (15-22 min target)
+  target_duration_seconds: 600     # 18.3 min midpoint (15-22 min target)
                                     # (bumped 2026-05-26 — Batch A. YouTube
                                     # algo since mid-2024 rewards longer
                                     # videos: more mid-roll ad slots and
@@ -48,10 +48,10 @@ production:
                                     # Modern MBA / Business Casual / Cold
                                     # Fusion all pivoted to 18-25 min in
                                     # 2024-25.)
-  duration_tolerance_seconds: 210   # +/- 3.5 min around the 18.3-min mid
-  target_words: 3000                # 120wpm × 18 min ≈ 2160 spoken words;
+  duration_tolerance_seconds: 60    # +/- 3.5 min around the 18.3-min mid
+  target_words: 1600                # 120wpm × 18 min ≈ 2160 spoken words;
                                     # +160 buffer for SFX/music pauses.
-  word_count_tolerance: 250
+  word_count_tolerance: 100
   wpm_effective: 160                # Anchored to script_generate.txt
                                     # which schedules Act 0-5 hook
                                     # cadence. Long-form narration is
@@ -137,7 +137,7 @@ production:
                                           # tag in the opposite corner
   title_card_logo_enabled: true           # S12 adds the real company logo
                                           # from 03_assets/title_logo.json
-  title_card_logo_corner: "top-right"     # logo corner; title text is forced
+  title_card_logo_corner: "random"     # logo corner; title text is forced
                                           # to the diagonal opposite corner
   title_card_logo_width_pct: 0.80         # max logo width as fraction of frame
 
@@ -156,8 +156,8 @@ quality_gates:
   # Script-word window — bumped 2026-05-26 (Batch A) for 18-min target.
   # 120wpm × 18min ≈ 2160 spoken; we widen to 1900-2700 to allow
   # natural variance across narrators and story_kinds.
-  min_script_words: 2500 
-  max_script_words: 3500
+  min_script_words: 1500 
+  max_script_words: 1800
   audio_lufs_target: -14
   audio_lufs_min: -15
   audio_lufs_max: -13
