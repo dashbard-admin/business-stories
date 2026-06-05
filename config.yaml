@@ -275,16 +275,25 @@ topic_validation:
   #       company that filed for bankruptcy last week is a
   #       goldmine and the rolling-window news count tells you so.
   #
+  # Story mix keeps the channel mostly in high-retention disaster /
+  # postmortem territory while forcing occasional exceptional winner
+  # stories. With winner_ratio=0.25 and story_mix_lookback=4, S01
+  # targets about 3 disaster stories for every 1 optimistic winner.
+  #
   # The non-US ratio enforces geographic diversity. With
-  # non_us_ratio=0.33 and non_us_ratio_lookback=6, the last six
-  # picks must contain at least round(6*0.33) = 2 non-US topics;
-  # if they don't, the next pick is force-routed to non-US via a
-  # hard hint in the prompt and a post-validation country check.
+  # non_us_ratio=0.34 and non_us_ratio_lookback=6, the last six
+  # picks must contain at least 2 non-US topics: a 2:1 US/non-US
+  # mix. If they don't, the next pick is force-routed to non-US via
+  # a hard hint in the prompt and a post-validation country check.
   enabled: true
   min_youtube_results: 3            # below = topic too obscure
   max_youtube_results: 100          # above = topic too saturated
-  prefer_decline_stories: true      # bias prompt toward failure arcs
-  non_us_ratio: 0.33                # 1-in-3 episodes non-US
+  prefer_decline_stories: false     # legacy knob; story_mix now governs S01
+  story_mix_enabled: true
+  winner_ratio: 0.25                # 1 optimistic winner per 4 topics
+  story_mix_lookback: 4
+  story_mix_warmup: 3               # start with disaster arcs before forcing wins
+  non_us_ratio: 0.34                # 2 US : 1 non-US target
   non_us_ratio_lookback: 6          # measured over the last N picks
   trending_news_lookback_days: 30   # advisory; logged in signals dict
 

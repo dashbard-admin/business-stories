@@ -8,7 +8,7 @@ it against:
   - demand signals (SearXNG video saturation, news activity) via
     pipeline.trends
   - geographic-diversity floor (1-in-N non-US, configurable)
-  - decline-story bias (prompt-side hint, not a hard gate)
+  - configured story-mix target (3:1 disaster/winner by default)
 
 On success, persists incident.json + assignment.json into the per-
 episode workspace and pushes the assignment + country into the
@@ -41,6 +41,9 @@ from ..state import (
 from ..trends import is_incumbent_trap, non_us_required, validate_candidate
 
 logger = logging.getLogger("hermes.stage.s01")
+
+WINNING_STORY_KINDS = {"origin", "underdog_comeback", "pivot"}
+DISASTER_STORY_KINDS = {"rise_and_fall", "scandal_postmortem", "founder_drama"}
 
 
 def run(episode: dict, queue: dict) -> str | None:
@@ -83,7 +86,8 @@ def run(episode: dict, queue: dict) -> str | None:
         lookback=int(tv_cfg.get("non_us_ratio_lookback", 6)),
     )
 
-    decline_hint = _decline_hint(tv_cfg)
+    target_story_arc = _target_story_arc(queue, tv_cfg)
+    story_mix_hint = _story_mix_hint(target_story_arc, tv_cfg, recent_story_kinds)
     non_us_hint = _non_us_hint(require_non_us, tv_cfg, recent_countries)
 
     # Batch E 2026-05-27: pull summarised performance patterns to
@@ -104,15 +108,15 @@ def run(episode: dict, queue: dict) -> str | None:
             used_topics_list=exclusion + ("\n" + rejected_inline if rejected_inline else ""),
             recent_story_kinds=", ".join(recent_story_kinds) or "(none)",
             recent_countries=", ".join(recent_countries) or "(none)",
-            decline_preference_hint=decline_hint,
+            decline_preference_hint=story_mix_hint,
             non_us_required_hint=non_us_hint,
             top_performing_story_kinds=perf["top_performing_story_kinds"],
             worst_performing_story_kinds=perf["worst_performing_story_kinds"],
         )
         prompt = _batch_topic_prompt(single_prompt, batch_size)
         logger.info(
-            "topic discovery attempt %d (batch_size=%d, require_non_us=%s)",
-            attempt, batch_size, require_non_us,
+            "topic discovery attempt %d (batch_size=%d, target_arc=%s, require_non_us=%s)",
+            attempt, batch_size, target_story_arc, require_non_us,
         )
         try:
             raw_candidates = llm.complete_json(prompt, temperature=0.75, max_tokens=6000)
@@ -133,6 +137,7 @@ def run(episode: dict, queue: dict) -> str | None:
                 browser=browser,
                 max_year=max_year,
                 require_non_us=require_non_us,
+                target_story_arc=target_story_arc,
                 recent_countries=recent_countries,
             )
             if accepted is None:
@@ -226,6 +231,7 @@ def _validate_topic_candidate(
     browser: Browser,
     max_year: int,
     require_non_us: bool,
+    target_story_arc: str,
     recent_countries: list[str],
 ) -> tuple[dict | None, str, dict]:
     """Run the S01 gates for one candidate.
@@ -243,6 +249,9 @@ def _validate_topic_candidate(
         return None, f"{name}: missing hero field", {}
     if not (candidate.get("conflict") or "").strip():
         return None, f"{name}: missing conflict field", {}
+    story_kind = (candidate.get("story_kind") or "").strip().lower()
+    if not story_kind:
+        return None, f"{name}: missing story_kind", {}
 
     # gate 2: dedup
     if topic_already_used(name):
@@ -269,6 +278,18 @@ def _validate_topic_candidate(
     )
     if not ok:
         return None, f"{name}: {why}", {}
+
+    # gate 5a: configured story mix. The prompt asks for the target
+    # arc, but the validator enforces it so the LLM cannot keep
+    # slipping all-disaster or all-winner batches through.
+    arc = _story_arc_for_kind(story_kind)
+    if target_story_arc in {"winner", "disaster"} and arc != target_story_arc:
+        return (
+            None,
+            f"{name}: story_kind={story_kind} maps to arc={arc}; "
+            f"this slot requires arc={target_story_arc}",
+            {},
+        )
 
     # gate 5b: incumbent-trap filter.
     if tv_cfg.get("reject_incumbent_traps", True):
@@ -455,23 +476,38 @@ def _finalise_pick(
 # Prompt hint construction
 # ----------------------------------------------------------------------
 
-def _decline_hint(tv_cfg: dict) -> str:
-    """Build the decline-vs-rise editorial-line hint. Disabled when the
-    operator turns prefer_decline_stories off in config."""
-    if not tv_cfg.get("prefer_decline_stories", True):
-        return ("No editorial preference set. Pick any story_kind that "
-                "fits the topic.")
-    return (
-        "STRONGLY prefer decline-and-fall stories over rise-and-shine. "
-        "The audience for business documentaries is overwhelmingly "
-        "drawn to failures, scandals, and postmortems (WeWork, Theranos, "
-        "Blockbuster, Pets.com, Enron, FTX, Wirecard, Lehman, "
-        "Silicon Valley Bank). Of the seven story_kinds, prioritize "
-        "in this order: scandal_postmortem > rise_and_fall > "
-        "founder_drama > disruption > pivot > underdog_comeback > "
-        "origin. An origin story is acceptable only if the founder's "
-        "later arc is genuinely dramatic; otherwise pick a failure."
-    )
+def _story_mix_hint(target_arc: str, tv_cfg: dict, recent_story_kinds: list[str]) -> str:
+    """Build the prompt-side story-mix instruction for this exact slot."""
+    if target_arc == "winner":
+        return (
+            "REQUIRED for THIS pick: choose an exceptional optimistic "
+            "winner story. Acceptable story_kind values are origin, "
+            "underdog_comeback, or pivot. Do NOT propose a collapse, "
+            "fraud, bankruptcy, scandal_postmortem, or ordinary founder "
+            "drama. The winning story must still have real tension: a "
+            "named protagonist, a named adversary or constraint, a "
+            "specific turning-point decision, open sources, and a hook "
+            "more interesting than 'how X became a billion-dollar company'. "
+            f"Recent story_kind values: {', '.join(recent_story_kinds) or '(none)'}."
+        )
+    if target_arc == "disaster":
+        return (
+            "REQUIRED for THIS pick: choose a disaster/postmortem story. "
+            "Acceptable story_kind values are rise_and_fall, "
+            "scandal_postmortem, or founder_drama. The channel target is "
+            "about 3 disaster stories for every 1 exceptional optimistic "
+            "winner, so do not propose origin, pivot, or underdog_comeback "
+            "for this slot. Prefer a specific failure mechanism: a bad "
+            "bet, market shift, regulator, flawed incentive, supply-chain "
+            "break, competitor, or leadership contradiction. "
+            f"Recent story_kind values: {', '.join(recent_story_kinds) or '(none)'}."
+        )
+    if tv_cfg.get("prefer_decline_stories", False):
+        return (
+            "Soft preference: decline stories are preferred, but any "
+            "exceptional, well-sourced topic may pass."
+        )
+    return "No story-arc requirement for this pick. Choose the strongest sourced topic."
 
 
 def _non_us_hint(require: bool, tv_cfg: dict, recent_countries: list[str]) -> str:
@@ -505,6 +541,47 @@ def _non_us_hint(require: bool, tv_cfg: dict, recent_countries: list[str]) -> st
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
+
+def _target_story_arc(queue: dict, tv_cfg: dict) -> str:
+    """Return the required story arc for this S01 slot.
+
+    Default policy is 3 disaster/postmortem stories for every 1
+    exceptional optimistic winner. The first few episodes lean disaster
+    because that is still the channel's core retention lane.
+    """
+    if not tv_cfg.get("story_mix_enabled", True):
+        return "disaster" if tv_cfg.get("prefer_decline_stories", False) else "any"
+
+    lookback = max(1, int(tv_cfg.get("story_mix_lookback", 4)))
+    winner_ratio = max(0.0, min(1.0, float(tv_cfg.get("winner_ratio", 0.25))))
+    warmup = max(0, int(tv_cfg.get("story_mix_warmup", 3)))
+    recent_arcs = _recent_story_arcs(queue, keep=lookback)
+    if len(recent_arcs) < warmup:
+        return "disaster"
+    target_winners = max(1, int(round(lookback * winner_ratio))) if winner_ratio else 0
+    if recent_arcs.count("winner") < target_winners:
+        return "winner"
+    return "disaster"
+
+
+def _story_arc_for_kind(story_kind: str) -> str:
+    sk = (story_kind or "").strip().lower()
+    if sk in WINNING_STORY_KINDS:
+        return "winner"
+    if sk in DISASTER_STORY_KINDS:
+        return "disaster"
+    return "neutral"
+
+
+def _recent_story_arcs(queue: dict, keep: int = 4) -> list[str]:
+    eps = queue.get("episodes") or []
+    arcs: list[str] = []
+    for ep in eps:
+        inc = ep.get("incident") or {}
+        arc = _story_arc_for_kind(inc.get("story_kind") or "")
+        if arc in {"winner", "disaster"}:
+            arcs.append(arc)
+    return arcs[-keep:]
 
 def _recent_story_kinds(queue: dict, keep: int = 3) -> list[str]:
     """Pull story_kind values from the most recent N episodes that

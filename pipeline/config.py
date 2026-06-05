@@ -197,11 +197,14 @@ class Config:
         - prefer_decline_stories: when true, the S01 prompt is biased
           toward rise_and_fall / scandal_postmortem / disruption arcs
           via a hint injected at template-format time.
+        - winner_ratio / story_mix_lookback: target share of
+          optimistic winner stories in recent S01 picks. Default 0.25
+          creates a 3:1 disaster/winner mix.
         - non_us_ratio: target share of non-US picks in the rolling
-          window (0.33 = 1-in-3). Combined with non_us_ratio_lookback,
-          this drives the country-rotation hint into the prompt and
-          rejects US picks when the rolling window has fallen below
-          the floor.
+          window (0.34 = roughly 2 US : 1 non-US). Combined with
+          non_us_ratio_lookback, this drives the country-rotation hint
+          into the prompt and rejects US picks when the rolling window
+          has fallen below the floor.
         - trending_news_lookback_days: documented in the gate logic
           but currently advisory only (SearXNG news returns recent
           items by default; the count is the signal).
@@ -210,8 +213,12 @@ class Config:
             "enabled": True,
             "min_youtube_results": 3,
             "max_youtube_results": 100,
-            "prefer_decline_stories": True,
-            "non_us_ratio": 0.33,
+            "prefer_decline_stories": False,
+            "story_mix_enabled": True,
+            "winner_ratio": 0.25,
+            "story_mix_lookback": 4,
+            "story_mix_warmup": 3,
+            "non_us_ratio": 0.34,
             "non_us_ratio_lookback": 6,
             "trending_news_lookback_days": 30,
             # Batch F 2026-05-27 — reject over-covered topics outright.

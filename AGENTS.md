@@ -314,6 +314,7 @@ S1 demand-validation primitives. All probes go through SearXNG (same backend as 
 - `recent_news_count(query, browser)` — `categories=news` count. Advisory only.
 - `validate_candidate(candidate, cfg_validation, browser)` → `ValidationResult(ok, reason, signals)`. Rejects if YouTube count is below `min_youtube_results` (obscure) or above `max_youtube_results` (saturated).
 - `non_us_required(queue, ratio, lookback)` — reads rolling-window `countries` and returns True iff non-US share has fallen below target. Cold-start exempt (returns False for windows of length < 2).
+S01 also enforces the configured story mix locally: default `winner_ratio: 0.25` / `story_mix_lookback: 4` targets roughly 3 disaster/postmortem auto-picks for every 1 exceptional optimistic winner. Winning kinds are `origin`, `underdog_comeback`, and `pivot`; disaster kinds are `rise_and_fall`, `scandal_postmortem`, and `founder_drama`.
 
 ### 5.11 `browser.py`
 SearXNG search + plain `requests` fetch.
@@ -397,7 +398,7 @@ Each stage module exports a `run(episode_dict, queue_dict) -> str | None` functi
 ### S01 — Topic Discovery (`s01_topic_discovery.py`)
 Picks the next topic. Two paths:
 
-1. **LLM path (default)**: prompts the writer LLM with `topic_discovery.txt`, then appends a batch-mode override. The prompt is templated with `{decline_preference_hint}` (decline-bias editorial line), `{non_us_required_hint}` (hard requirement when rolling window is too US-heavy), `{recent_story_kinds}`, `{recent_countries}`, and the used-topics exclusion list. Each attempt asks for `orchestrator.topic_discovery_batch_size` candidates (default 8), validates them locally in order, and accepts the first candidate that clears every gate. Up to `max_topic_discovery_retries` batch attempts (default 100); failed candidates feed their rejection reason back into the next prompt.
+1. **LLM path (default)**: prompts the writer LLM with `topic_discovery.txt`, then appends a batch-mode override. The prompt is templated with `{decline_preference_hint}` (now the per-slot story-mix target), `{non_us_required_hint}` (hard requirement when rolling window is too US-heavy), `{recent_story_kinds}`, `{recent_countries}`, and the used-topics exclusion list. Each attempt asks for `orchestrator.topic_discovery_batch_size` candidates (default 8), validates them locally in order, and accepts the first candidate that clears every gate. Up to `max_topic_discovery_retries` batch attempts (default 100); failed candidates feed their rejection reason back into the next prompt.
 2. **Manual path (`incident_origin == "manual"`)**: skips the LLM call, runs only dedup + country normalisation + (optionally) demand validation. Honors pin fields on the episode record.
 
 Gates (in order, cheap first):
@@ -406,8 +407,9 @@ Gates (in order, cheap first):
 3. Recency (year_anchor ≤ current_year − 5).
 4. Risk markers (litigation, minors, etc.).
 5. `is_valid_topic()` structural.
-6. Country gate (rejects US when `require_non_us`).
-7. SearXNG demand gate (two network calls — slowest; runs last).
+6. Story-mix gate (default 3 disaster/postmortem slots for every 1 exceptional winner slot).
+7. Country gate (rejects US when `require_non_us`; default ratio is 2 US : 1 non-US).
+8. SearXNG demand gate (two network calls — slowest; runs last).
 
 On success: writes `incident.json` + `assignment.json`, updates the queue record, calls `push_rolling_window()` (archetype + narrator + visual_style + country), adds to `used_topics.json`.
 
@@ -587,7 +589,7 @@ Runs after S12 with three phases:
 
 | File | Used by | Placeholders | Purpose |
 |---|---|---|---|
-| `topic_discovery.txt` | S1 | `{current_year}, {max_year}, {used_topics_list}, {recent_story_kinds}, {recent_countries}, {decline_preference_hint}, {non_us_required_hint}` | Canonical topic schema; S01 appends a batch-mode override and asks for multiple candidates per attempt. Schema includes `hq_country` (ISO 3166-1 alpha-2). |
+| `topic_discovery.txt` | S1 | `{current_year}, {max_year}, {used_topics_list}, {recent_story_kinds}, {recent_countries}, {decline_preference_hint}, {non_us_required_hint}` | Canonical topic schema; S01 appends a batch-mode override and asks for multiple candidates per attempt. `{decline_preference_hint}` now carries the per-slot story-mix target. Schema includes `hq_country` (ISO 3166-1 alpha-2). |
 | `fact_extract.txt` | S3 | `{incident_name}` | Per-source fact extraction. |
 | `fact_merge.txt` | S3 | `{incident_name}` | Dedup near-identical claims. |
 | `fact_verify.txt` | S4 | `{incident_name}` | Adversarial skeptic. |

@@ -54,7 +54,7 @@ an existing audience signal:
   Likewise a founder back in headlines, a scandal anniversary, a
   documentary release, a court ruling. Trending tailwinds matter.
 
-DECLINE-OVER-RISE BIAS (this is the channel's editorial line):
+STORY ARC MIX (this exact slot is validated locally):
 {decline_preference_hint}
 
 GEOGRAPHIC DIVERSITY:
