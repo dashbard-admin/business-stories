@@ -233,31 +233,30 @@ def _attach_act_and_style(
     stories the locked episode-level style applies to every beat.
 
     The act lookup is based on the BEAT POSITION (rank within the
-    beat list), mapped to the 7-act distribution from
-    pipeline/prompts/script_generate.txt:
+    beat list), mapped to the compact 7-act distribution from S06:
         Act 0:    1-2 beats
-        Act 1:    ~12 beats
-        Act 2:    ~11 beats
-        Act 3:    ~16 beats
-        Act 3.5:  ~9 beats
-        Act 4:    ~12 beats
+        Act 1:    ~7 beats
+        Act 2:    ~7 beats
+        Act 3:    ~10 beats
+        Act 3.5:  ~5 beats
+        Act 4:    ~8 beats
         Act 5:    ~5-6 beats
-    Total ~67-72 mid. We compute the per-act cutoff PROPORTIONALLY so
-    the mapping still works for episodes with 65-95 beats.
+    Total ~40-50 mid. We compute the per-act cutoff PROPORTIONALLY so
+    the mapping still works for episodes with different beat counts.
     """
     n = len(beats)
     if n == 0:
         return
 
-    # Reference fractions (sum to 1.0) from the script_generate template.
+    # Reference fractions (sum to 1.0) from the compact S06 act template.
     fractions = [
-        ("0",   0.02),
-        ("1",   0.18),
+        ("0",   0.04),
+        ("1",   0.16),
         ("2",   0.16),
         ("3",   0.23),
-        ("3.5", 0.13),
+        ("3.5", 0.11),
         ("4",   0.18),
-        ("5",   0.10),
+        ("5",   0.12),
     ]
     cutoffs: list[tuple[str, int]] = []
     acc = 0.0
@@ -599,11 +598,14 @@ def run(episode: dict, queue: dict) -> str | None:
     # Batch E 2026-05-27 performance hints (soft guidance).
     from ..performance_summary import summarise_for_prompt
     perf = summarise_for_prompt()
+    wpm_effective = max(1.0, float(cfg.production.get("wpm_effective", 160)))
     prompt = template.format(
         visual_style_name=style_yaml["name"],
         visual_style_guidance=style_yaml.get("guidance_for_llm", ""),
         narrator_name=narrator["name"],
         script_with_beats=script,
+        wpm_effective=wpm_effective,
+        words_per_second=wpm_effective / 60.0,
         visual_intents_that_retained=perf["visual_intents_that_retained"],
         visual_intents_that_lost_viewers=perf["visual_intents_that_lost_viewers"],
     )

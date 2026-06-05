@@ -5,7 +5,7 @@ documentary frame.
 Each entry has:
 
 - beat_id: BEAT_NN (zero-padded to 2 digits, e.g. "BEAT_01")
-- estimated_seconds: word_count / 2.08  (i.e. ~125 wpm slow doc)
+- estimated_seconds: word_count / {words_per_second:.2f}  (i.e. ~{wpm_effective:.0f} wpm)
 - visual_intent: one of [
     founder_portrait,
     office_environment,

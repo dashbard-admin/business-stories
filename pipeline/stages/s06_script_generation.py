@@ -1,6 +1,6 @@
 """S06 — Script Generation.
 
-Writes a ~2000-word business-story script using the locked
+Writes a compact business-story script using the locked
 archetype/narrator/style and the verified fact ledger. Validates word
 count + BEAT marker count before passing on. Runs the
 forbidden-phrase lint with a single rewrite attempt on hit.
@@ -33,13 +33,13 @@ CALLOUT_RE = re.compile(
 SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]")
 
 ACT_SPECS = [
-    ("ACT_0", "The Hook", 80, 2),
-    ("ACT_1", "The Before", 430, 12),
-    ("ACT_2", "The Bet", 360, 11),
-    ("ACT_3", "The Crisis", 560, 16),
-    ("ACT_3_5", "The Investigation", 330, 9),
-    ("ACT_4", "The Pivot or Collapse", 440, 12),
-    ("ACT_5", "The Lesson", 300, 6),
+    ("ACT_0", "The Hook", 70, 2),
+    ("ACT_1", "The Before", 260, 7),
+    ("ACT_2", "The Bet", 230, 7),
+    ("ACT_3", "The Crisis", 360, 10),
+    ("ACT_3_5", "The Evidence", 180, 5),
+    ("ACT_4", "The Pivot or Collapse", 280, 8),
+    ("ACT_5", "The Lesson", 220, 6),
 ]
 
 # Strip Kokoro-poisoning terminal sign-offs ("End of script", "THE END",
@@ -687,7 +687,7 @@ def run(episode: dict, queue: dict) -> str | None:
 
     # Short-beat consolidation (Batch H 2026-05-28). The Quibi script
     # had ~13 beats with 1-2 sentences only (8-15 words each) — at
-    # 120 wpm those play for 4-7 seconds on screen, too fast for the
+    # current narration speed those play too quickly for the
     # viewer to register the image, and they fragment the prose
     # rhythmically. Merge any beat shorter than 15 words into the
     # NEXT beat. Skips on preview-mode (already-tight pacing).
@@ -806,8 +806,8 @@ def _generate_via_blueprint_and_acts(
 ) -> str:
     """Generate script as outline first, then one act at a time.
 
-    This lowers variance versus asking the writer for a full 2.5k-word
-    script in one pass. The old full-script generator remains the
+    This lowers variance versus asking the writer for a full script in
+    one pass. The old full-script generator remains the
     fallback when this staged path returns an unusable draft.
     """
     act_specs = _scaled_act_specs(target_words, target_beats)
@@ -1172,7 +1172,7 @@ def _redistribute_beats(script: str, target_count: int) -> str:
     splitting mid-sentence or mid-word.
 
     Hard floor: every beat must contain at least MIN_WORDS_PER_BEAT
-    (20) words. At 120 wpm that's ~10 seconds of narration per
+    (20) words. At 160 wpm that's ~7.5 seconds of narration per
     beat — the minimum needed for a viewer to register the image
     on screen. If the script is too short to hit `target_count`
     while respecting the floor, we return FEWER beats and let the

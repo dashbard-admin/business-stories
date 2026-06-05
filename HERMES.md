@@ -857,11 +857,11 @@ Representative stage logs:
 
 ```text
 2026-06-03 08:02:42,121 hermes.stage.s06 INFO S06 staged generation: creating blueprint
-2026-06-03 08:03:05,992 hermes.stage.s06 INFO S06 blueprint: 7 acts, target=2300 words, target_beats=70
+2026-06-03 08:03:05,992 hermes.stage.s06 INFO S06 blueprint: 7 acts, target=1600 words, target_beats=45
 2026-06-03 08:03:06,001 hermes.stage.s06 INFO S06 attempt 1 (temp=0.80)
-2026-06-03 08:04:10,730 hermes.stage.s06 INFO S06 attempt 1: 2145 words (dist=155, in_range=True, forbidden_hits=0)
+2026-06-03 08:04:10,730 hermes.stage.s06 INFO S06 attempt 1: 1588 words (dist=12, in_range=True, forbidden_hits=0)
 2026-06-03 08:04:11,200 hermes.stage.s06 INFO S06 forbidden-phrase substitutions applied: 0
-2026-06-03 08:04:11,550 hermes.stage.s06 INFO S06 complete: 2463 words, 68 beats
+2026-06-03 08:04:11,550 hermes.stage.s06 INFO S06 complete: 1604 words, 44 beats
 ```
 
 Stage-success signature:

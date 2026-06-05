@@ -31,9 +31,11 @@ Your job:
 - Assign the strongest available fact IDs to each act.
 - Design Act 0 around a first-15-second contradiction, mystery, or consequence.
 - Give every act a hook_or_turn that creates forward motion.
-- Include documentary-evidence facts in ACT_3_5 when available.
+- Build for a tight 9-11 minute episode: every act must earn its place.
+- Include documentary-evidence facts in ACT_3_5 when available, but keep it lean.
 - Identify 3-6 numeric callout opportunities across the whole episode.
 - Keep recurring props concrete and story-specific, not generic logos.
+- Plan one major mid-roll tension landing inside ACT_4 around the 8-minute mark.
 
 Return JSON only:
 {{

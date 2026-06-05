@@ -214,7 +214,7 @@ Major blocks:
 - `channel` — branding (channel name, brand color, contact email).
 - `paths` — `${root}` is optional; defaults to the directory containing `config.yaml`.
 - `models` — logical model keys consumed by the LLM gateway. `mock_mode: true` makes every adapter return canned data.
-- `production` — duration / word-count targets, title-card styling, fade timings. *(retuned 2026-05-26 Batch A — 18-min midpoint, 2300-word target. Batch J 2026-05-29 added title/closing-card audio padding; Batch M.3 2026-05-30 keeps `opening_title_card_seconds: 1` and adds `closing_card_enabled` so credits can be hidden without losing the configured duration. Batch N 2026-05-31 adds `script_act_by_act_enabled` so S06 writes from a blueprint + per-act prompts. Batch N.3 adds `enforce_tts_wpm_effective` and `conclusion_music_tail_seconds`.)*
+- `production` — duration / word-count targets, title-card styling, fade timings. *(retuned 2026-06-05 toward a 9-11 minute target: enough for one mid-roll slot without padding the topic. Batch J 2026-05-29 added title/closing-card audio padding; Batch M.3 2026-05-30 keeps `opening_title_card_seconds: 1` and adds `closing_card_enabled` so credits can be hidden without losing the configured duration. Batch N 2026-05-31 adds `script_act_by_act_enabled` so S06 writes from a blueprint + per-act prompts. Batch N.3 adds `enforce_tts_wpm_effective` and `conclusion_music_tail_seconds`.)*
 - `quality_gates` — minimum source counts, beat counts, script word counts, audio LUFS bounds. *(beat/word windows widened 2026-05-26 Batch A.)*
 - `constraints` — `rolling_window_*` cooldowns for archetype/narrator/style.
 - `orchestrator` — lock staleness, max topic-discovery retries, topic-discovery batch size, per-invocation budget.
@@ -443,15 +443,15 @@ Each ingested asset gets VLM-captioned at this stage (`pipeline.vlm.VLM.caption_
 - `asset_hunt.enabled_visual_intents` (default `[founder_portrait, document_or_headline]`) restricts which beat intents are eligible for PD routing at S08 — even when the manifest is full, off-list intents go to FLUX.
 
 ### S06 — Script Generation (`s06_script_generation.py`)
-Writer LLM with `script_generate.txt`. **Seven-act retention template at 120 wpm** *(retuned Batch A 2026-05-26 — was 6 acts; Act 3.5 "The Investigation" was inserted to lock retention through the 10-12min midpoint sag, and the overall target stretched to ~18 min spoken / 2300 words):*
-- Act 0 (cold open, ~60w) — first 30s, dramatic moment.
-- Act 1 (before, ~360w) — set the era + introduce founder + catalyst.
+Writer LLM with `script_generate.txt`. **Compact seven-act retention template at 160 wpm** *(retuned 2026-06-05 for a 9-11 minute target with one mid-roll tension landing):*
+- Act 0 (cold open, ~70w) — first 15-25s, dramatic moment.
+- Act 1 (before, ~260w) — set the era + introduce founder + catalyst.
 - *(Sponsor placeholder removed Batch I 2026-05-28 — the LLM read the commented placeholder as a literal output instruction and emitted `[SPONSOR_SLOT]` markers throughout the prose. Future sponsor reads will be injected by a dedicated post-S06 stage.)*
-- Act 2 (bet, ~300w) — the founding decision + cost + first product.
-- Act 3 (crisis, ~480w) — lawsuit / competitor / market crash / collapse.
-- **Act 3.5 (investigation, ~300w)** — walks the viewer through *how we know what happened*: SEC filing, leaked emails, deposition transcripts. Doesn't advance the narrative; locks the midpoint.
-- Act 4 (pivot, ~360w) — the decision that turned the arc (or the legal closure for decline stories).
-- Act 5 (lesson, ~300w) — present-day fact + takeaway + legacy + one clean outro line.
+- Act 2 (bet, ~230w) — the founding decision + cost + first product.
+- Act 3 (crisis, ~360w) — lawsuit / competitor / market crash / collapse.
+- **Act 3.5 (evidence, ~180w)** — compact proof pass: SEC filing, leaked emails, deposition transcripts. Doesn't advance the narrative; avoids padding.
+- Act 4 (pivot/collapse, ~280w) — the decision that turned the arc or the legal/financial closure for decline stories, with the single mid-roll tension landing near minute 8.
+- Act 5 (lesson, ~220w) — present-day fact + takeaway + legacy + one clean outro line.
 
 **BEAT 1 hook quality bar *(Batch M.1 2026-05-30)*:** Act 0 now explicitly requires the first 15 seconds to create a concrete mystery, contradiction, or consequence. A neutral fact is not enough, even if it has a date, filing, valuation, or court action. The opening must make the viewer ask "How did that happen?" or "Why does that matter?"
 
@@ -486,7 +486,7 @@ Critic LLM with `script_critique.txt`. Flags weak cold-open, missing forward tea
 **Brand-safety review pass *(added Batch B 2026-05-26)*:** after the rewrite loops, runs an independent skeptic with `brand_safety_review.txt` over the post-critique script. Output: `02_script/brand_safety_flags.json` with `{verdict, high_severity_count, low_severity_count, flags: [...]}`. Each flag has `severity ∈ {high, low}`, `flag_type ∈ {intent_attribution, criminal_characterization, corporate_defamation, unframed_speculation, subjective, missing_attribution, vague_time}`, and a `suggested_rewrite`. When `cfg.brand_safety.gate_on_severity == "high"` (default) AND any high-severity flag fires, S07 returns a `needs_human` reason; operator reviews the flag file then clears with `--approve <ep_id>`. Flag counts surface on the episode record as `safety_flags_count` and in `--status`.
 
 ### S08 — Beat Sheet (`s08_beat_sheet.py`)
-Splits the script into 65–95 beats *(beat window widened Batch A 2026-05-26 for the 18-min target)*. Per beat, the writer LLM emits a `visual_intent` (comic-panel catalog: `founder_portrait | office_environment | product_reveal | boardroom_meeting | street_scene | crowd_or_market | factory_or_workshop | document_or_headline | chart_abstraction | montage_panel`) and a `sfx_cue` (documentation only — S11 doesn't synthesise SFX). Three passes route beats to PD-direct / PD-reference / FLUX based on cosine similarity (sentence-transformers) between beat description and PD asset captions. PD-reference contributes the caption as text grounding to the FLUX prompt — img2img isn't available with the CLI flux binary.
+Splits the script into a compact beat sheet, expected to land around 35–55 beats for the 9-11 minute target when `config.yaml` quality gates are retuned accordingly. Per beat, the writer LLM emits a `visual_intent` (comic-panel catalog: `founder_portrait | office_environment | product_reveal | boardroom_meeting | street_scene | crowd_or_market | factory_or_workshop | document_or_headline | chart_abstraction | montage_panel`) and a `sfx_cue` (documentation only — S11 doesn't synthesise SFX). Three passes route beats to PD-direct / PD-reference / FLUX based on cosine similarity (sentence-transformers) between beat description and PD asset captions. PD-reference contributes the caption as text grounding to the FLUX prompt — img2img isn't available with the CLI flux binary.
 
 **Batch F 2026-05-28 additions, updated by Batch M 2026-05-30:**
 - `_diversify_ken_burns_motion()` — re-distributes the 5 motion variants across beats so 60+ panels don't all zoom in identically. Deterministic per episode_id; hero-centric intents keep face-friendly motions (`slow_zoom_in`/`slow_zoom_out`/`hold_still`).
@@ -594,7 +594,7 @@ Runs after S12 with three phases:
 | `fact_merge.txt` | S3 | `{incident_name}` | Dedup near-identical claims. |
 | `fact_verify.txt` | S4 | `{incident_name}` | Adversarial skeptic. |
 | `company_hq_consolidate.txt` | S3 | `{incident_name}` | Derive HQ `{city, state, country}` from facts. |
-| `script_generate.txt` | S6 fallback / preview | `{incident}, {narrator_block}, {archetype_block}, {target_words}, ...` | Full-script 7-act template at 120 wpm; now mainly fallback when staged generation fails, and preview-mode source. |
+| `script_generate.txt` | S6 fallback / preview | `{incident}, {narrator_block}, {archetype_block}, {target_words}, ...` | Compact full-script 7-act template at 160 wpm; now mainly fallback when staged generation fails, and preview-mode source. |
 | `script_blueprint.txt` *(added Batch N 2026-05-31)* | S6 primary | `{incident_name}, {fact_ledger_json}, {act_specs_json}, {narrator_*}, …` | Builds a validated act/beat/fact blueprint before prose generation. |
 | `script_act_generate.txt` *(added Batch N 2026-05-31)* | S6 primary | `{act_id}, {act_blueprint_json}, {beat_start}, {beat_end}, {prior_summary}, …` | Writes one act at a time using only the relevant blueprint slice and fact ledger. |
 | `script_critique.txt` | S7 | `{script}` | Retention + voice audit. |

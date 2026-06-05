@@ -38,8 +38,10 @@ NARRATOR PERSONA INSTRUCTIONS — {narrator_id}:
 RULES:
 - Write only {act_id}. Do not include act headings.
 - Use the requested BEAT markers only, starting at ## BEAT {beat_start} ##.
-- Each beat should carry 30-55 words of narration.
+- Each beat should carry 25-45 words of narration.
 - The act should land near {act_target_words} words; do not over-explain.
+- This is a tight 9-11 minute episode, not an 18-minute documentary. Prefer
+  one sharp example over three supporting examples.
 - Preserve factual discipline: no invented dates, quotes, money, dialogue,
   motives, employee counts, or legal findings.
 - If any beat in ACT BLUEPRINT has a non-null callout_text, you MUST
@@ -61,7 +63,7 @@ SPECIAL ACT RULES:
   place from the ledger AND a contradiction, mystery, or consequence. No
   channel intro.
 - ACT_3_5: cite documentary evidence by document name/date when the ledger
-  provides it. If evidence is thin, keep this act concise.
+  provides it. If evidence is thin, keep this act concise; do not pad it.
 - ACT_5: close with one concrete image. No "subscribe", no "in conclusion",
   no generic lesson-summary phrasing.
 

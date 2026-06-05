@@ -3,7 +3,7 @@ documentary channel. The voice is engaging, accurate, and quietly
 curious — uplifting and educational, low technical density, low MBA
 jargon. The STRUCTURE is engineered for retention: a viewer who
 lands here should be unable to put the video down at 15 seconds, at
-5 minutes, at 12 minutes, or at 18 minutes.
+5 minutes, or at the final minute.
 
 EPISODE PARAMETERS:
 - Company: {incident_name}
@@ -12,10 +12,9 @@ EPISODE PARAMETERS:
 - Conflict (locked at S1): {conflict}
 - Story kind: {story_kind}
 - Target words: {target_words} (acceptable range: {min_words}-{max_words})
-- Reading cadence assumed: 120 wpm — every timing below is computed
-  at that rate. 2300 words at 120 wpm ≈ 19.2 minutes spoken, which
-  combined with beat fades / SFX / music swells lands inside the
-  15-22 minute video target.
+- Reading cadence assumed: 160 wpm — every timing below is computed
+  at that rate. Aim for a tight 9-11 minute video: enough time for
+  one mid-roll slot after the 8-minute threshold, not a padded essay.
 - Archetype: {archetype_name}
   Archetype guidance: {archetype_guidance}
 - Narrator persona: {narrator_name} ({narrator_tone})
@@ -107,12 +106,13 @@ attaches to a numeric sentence):
 STRUCTURE — THE 7-ACT TEMPLATE  (mandatory; every act required)
 ================================================================
 The script follows a tightly engineered seven-act arc. Word counts
-below are at 120 wpm and total ~2300 words; you have up to
-{max_words} to use if needed. Insert ## BEAT N ## markers at the
+below are scaled for a compact 9-11 minute episode; you have up to
+{max_words} words, but do not use them unless the story earns it.
+Insert ## BEAT N ## markers at the
 visual transitions noted; the beat-count target is {target_beats}.
 
 ─────────────────────────────────────────────────────────────────
-ACT 0 — THE HOOK            0:00 – 0:30      (~60 words)
+ACT 0 — THE HOOK            0:00 – 0:25      (~60-80 words)
 ─────────────────────────────────────────────────────────────────
 BEAT 1 QUALITY BAR — this is the most important retention beat in
 the entire script. Within the first 15 seconds, create a concrete
@@ -156,31 +156,31 @@ Insert ## BEAT 1 ## at the very start of the script (Act 0
 opens on it).
 
 ─────────────────────────────────────────────────────────────────
-ACT 1 — THE BEFORE          0:30 – 3:30      (~360 words)
+ACT 1 — THE BEFORE          0:25 – 2:10      (~250-280 words)
 ─────────────────────────────────────────────────────────────────
-0:30-1:00  Set the era. What year, what world, what was
+0:25-0:45  Set the era. What year, what world, what was
            "normal" then. Time-stamp everything — month and
            year, not "back in the day". One sentence on
            market conditions, one on the technology of the
            era, one on the cultural context.
-1:00-2:15  Introduce the founder(s) — who they were BEFORE
+0:45-1:30  Introduce the founder(s) — who they were BEFORE
            they were famous. Their unremarkable previous life.
            Specific job titles, specific cities, specific
            failed earlier attempts if the ledger contains them.
-2:15-3:30  THE CATALYST: the moment / problem / observation
+1:30-2:10  THE CATALYST: the moment / problem / observation
            that triggered everything. Often: a personal
            frustration, a chance encounter, an industry gap.
            This is the moment the founder DECIDED — not yet the
            moment they acted.
 
->>> RE-HOOK at ~1:30 (~180 words in): land ONE sentence that
+>>> RE-HOOK at ~1:15 (~200 words in): land ONE sentence that
     forecloses the easy assumption. PATTERN: name a specific
     person + a specific moment from the ledger and reveal that
     something subtle was about to shift. Use the ledger's actual
     names, rooms, dates — never a stock phrasing. DO NOT WRITE
     a sentence about "nobody at the table" or anyone "noticing
     something nobody else had seen" — those phrasings are banned.
->>> RE-HOOK at ~3:00 (~360 words in): close the act on tension.
+>>> RE-HOOK at ~2:00 (~320 words in): close the act on tension.
     PATTERN: a two-sentence cliff where the second sentence flips
     the tone of the first. Bind both halves to ledger-specific
     facts (the founder's name, the cheque size, the partner who
@@ -195,28 +195,28 @@ sponsor reads become real, a dedicated post-S06 stage will inject
 them — they won't live in this prompt.)
 
 ─────────────────────────────────────────────────────────────────
-ACT 2 — THE BET             3:30 – 6:00      (~300 words)
+ACT 2 — THE BET             2:10 – 3:40      (~210-250 words)
 ─────────────────────────────────────────────────────────────────
-3:30-4:30  The FOUNDING DECISION and what it cost. Make the
+2:10-2:45  The FOUNDING DECISION and what it cost. Make the
            sacrifice concrete: savings drawn, job left, house
            mortgaged, partner objections, dollar amount on the
            first cheque. Risk made tangible.
-4:30-5:30  FIRST PRODUCT or first attempt. Often laughably
+2:45-3:20  FIRST PRODUCT or first attempt. Often laughably
            small or amateurish in retrospect — name the
            specifics: the workshop / garage / kitchen table,
            the first customer, the first failure.
-5:30-6:00  EARLY SIGNAL that something was working — and the
+3:20-3:40  EARLY SIGNAL that something was working — and the
            first sign of the problem coming. Two sentences,
            hinged with "but" or "and yet".
 
->>> RE-HOOK at ~4:30 (~540 words in): one sentence dropping
+>>> RE-HOOK at ~2:55 (~460 words in): one sentence dropping
     a forward tease that pays off in Act 3.
->>> RE-HOOK at ~5:30 (~660 words in): another. Different
+>>> RE-HOOK at ~3:35 (~570 words in): another. Different
     angle — one should be a number/date hook, the other a
     character/decision hook.
 
 ─────────────────────────────────────────────────────────────────
-*** MID-ROLL TENSION LANDING #1 — 6:00 (~720 words in) ***
+*** ACT 2 TENSION TURN — 3:40 (~580-620 words in) ***
 ─────────────────────────────────────────────────────────────────
 Land Act 2 on tension. The company is growing — but a problem
 the founder didn't anticipate is about to surface. Last words
@@ -228,37 +228,37 @@ WRITE any variant of "a problem nobody at the table had ever
 seen before" — that phrasing is banned. The cliff sentence
 must contain at least one specific number, date, or named
 party from the ledger.
-(This isn't a literal ad break in our pipeline — but treat the
-moment as if the viewer might leave here. Make them stay.)
+This is not the mid-roll landing anymore. It is the early hinge that
+pulls the viewer into the crisis without bloating the setup.
 
 ─────────────────────────────────────────────────────────────────
-ACT 3 — THE CRISIS          6:00 – 10:00     (~480 words)
+ACT 3 — THE CRISIS          3:40 – 6:00      (~330-380 words)
 ─────────────────────────────────────────────────────────────────
-6:00-6:15   POST-LANDING RE-ENTRY: brief restatement of where the
+3:40-3:55   POST-LANDING RE-ENTRY: brief restatement of where the
             company stood right before the crisis hit. One short
             paragraph re-orienting the viewer.
-6:15-7:30   THE CRISIS: lawsuit, competitor, market crash,
+3:55-4:45   THE CRISIS: lawsuit, competitor, market crash,
             internal mutiny, product failure, founder ousted —
             whichever the ledger supports. Name the date, the
             dollar amount, the specific filing or moment.
-7:30-9:00   WRONG TURNS: the bad decisions made under pressure.
+4:45-5:30   WRONG TURNS: the bad decisions made under pressure.
             The desperation phase. The pivot that didn't work.
             The hire that backfired. The competitor's move that
             the team underestimated.
-9:00-10:00  THE NEAR-DEATH MOMENT. The company is days or weeks
+5:30-6:00   THE NEAR-DEATH MOMENT. The company is days or weeks
             from collapse. Specific numbers required: "$X in the
             bank, Y days of runway, Z employees laid off."
 
->>> RE-HOOK at ~7:00 (~840 words in): PATTERN — escalation
+>>> RE-HOOK at ~4:40 (~740 words in): PATTERN — escalation
     forecast. Name a specific duration from the ledger ("the
     next eleven weeks", "the period from January to April") and
     tie it to a measurable cost. AVOID stock phrasings like
     "would have killed most companies".
->>> RE-HOOK at ~8:30 (~1020 words in): PATTERN — pivot into the
+>>> RE-HOOK at ~5:20 (~850 words in): PATTERN — pivot into the
     next wrong turn. Anchor it to a named decision in the ledger
     rather than "and that's when [the next thing went wrong]"
     style placeholders.
->>> RE-HOOK at ~9:30 (~1140 words in): PATTERN — dated metric
+>>> RE-HOOK at ~5:50 (~940 words in): PATTERN — dated metric
     inversion. Cite a specific calendar date + a specific
     dropped-by number, then signal worse ahead in concrete terms.
     DO NOT use a "by [date], they had [number]. And it was
@@ -266,7 +266,7 @@ ACT 3 — THE CRISIS          6:00 – 10:00     (~480 words)
     scratch against this fact.
 
 ─────────────────────────────────────────────────────────────────
-*** MID-ROLL TENSION LANDING #2 — 10:00 (~1200 words in) ***
+*** DARKEST-MOMENT LANDING — around 6:00 (~950-1050 words in) ***
 ─────────────────────────────────────────────────────────────────
 The darkest moment. The company is functionally dead. Land on a
 single brutal sentence. PATTERN: a dated state-of-affairs
@@ -278,37 +278,35 @@ already gone" — that phrasing is banned. Construct the sentence
 from the ledger's own numbers and named events.
 
 ─────────────────────────────────────────────────────────────────
-ACT 3.5 — THE INVESTIGATION 10:00 – 12:30    (~300 words)
+ACT 3.5 — THE EVIDENCE      6:00 – 7:10      (~160-210 words)
 ─────────────────────────────────────────────────────────────────
-This act is the new one added in Batch A 2026-05-26 — the part
-the breakout 18-min docs use to lock retention through what would
-otherwise be a "now what?" sag at the midpoint. Don't advance the
-narrative timeline. Instead, step the viewer through HOW WE KNOW
-WHAT HAPPENED.
+This is a compact evidence pass, not a second documentary inside the
+documentary. Don't advance the narrative timeline. Step the viewer
+through HOW WE KNOW WHAT HAPPENED, then move.
 
-10:00-10:30 THE FRAMING: "And here's the part the company didn't
+6:00-6:20  THE FRAMING: "And here's the part the company didn't
             want you to read." Or "But the public record tells
             a different story." Make explicit that you're about
             to walk the viewer through documentary evidence.
-10:30-11:30 THE EVIDENCE: name the specific SEC filing, the
+6:20-6:50  THE EVIDENCE: name the specific SEC filing, the
             leaked emails, the deposition transcript, the
             internal memo, the court exhibit, the FOIA release.
             Quote ONE specific line from the ledger if it has
             one — verbatim, in quotation marks. Name the
             page-number or filing-date when possible.
-11:30-12:30 WHAT THE EVIDENCE PROVED: connect the evidence back
+6:50-7:10  WHAT THE EVIDENCE PROVED: connect the evidence back
             to the human story. The number the company hid. The
             warning the board ignored. The internal name for
             the cover-up. The thing the founder said in
             deposition that contradicts what they said publicly.
 
->>> RE-HOOK at ~11:00 (~1320 words in): PATTERN — name the
+>>> RE-HOOK at ~6:35 (~1050 words in): PATTERN — name the
     specific document about to be quoted (the S-1 page, the
     deposition exhibit, the leaked memo), then promise the
     quote. AVOID "a single sentence that explained everything"
     style stock phrasing — anchor the tease to the named
     document and its date.
->>> RE-HOOK at ~12:00 (~1440 words in): pivot toward Act 4.
+>>> RE-HOOK at ~7:05 (~1130 words in): pivot toward Act 4.
     PATTERN — name the specific dated moment when the founder
     (or board, or court) made the decision that closed the
     investigation phase. DO NOT WRITE "made the call that should
@@ -340,23 +338,28 @@ Notes for Act 3.5:
   — only cite documents present in the ledger.
 
 ─────────────────────────────────────────────────────────────────
-ACT 4 — THE PIVOT           12:30 – 15:30    (~360 words)
+ACT 4 — THE PIVOT           7:10 – 8:50      (~260-300 words)
 ─────────────────────────────────────────────────────────────────
-12:30-12:45 POST-LANDING RE-ENTRY: restate the brink, then
+7:10-7:25  POST-LANDING RE-ENTRY: restate the brink, then
             deliver the pivot in the very next sentence.
-12:45-14:15 THE DECISION that changed everything. The unlikely
+7:25-8:15  THE DECISION that changed everything. The unlikely
             move, the bet on a new direction, the meeting that
             mattered, the product that worked. Quote from the
             ledger if it has one.
-14:15-15:30 THE TAKEOFF — survival to dominance. Visualize the
+8:15-8:50  THE TAKEOFF — survival to dominance. Visualize the
             inflection: market share doubling, users hockey-
             sticking, revenue exploding. Use specific numbers
             from the ledger; if the ledger says it generally,
             phrase it generally.
 
->>> RE-HOOK at ~13:30 (~1620 words in): name a single moment
+>>> RE-HOOK at ~7:50 (~1250 words in): name a single moment
     that proves the pivot worked.
->>> RE-HOOK at ~14:30 (~1740 words in): widen the lens —
+*** MID-ROLL TENSION LANDING — around 8:00 (~1280 words in) ***
+    Treat this as the one ad-slot retention moment. The viewer has
+    crossed the 8-minute threshold; land on a concrete unresolved
+    question, dated decision, or number-driven cliff before resolving
+    the story. Do not add a second ad-break structure elsewhere.
+>>> RE-HOOK at ~8:35 (~1370 words in): widen the lens —
     industry consequence or competitor reaction.
 
 NOTE FOR DECLINE STORIES (story_kind = scandal_postmortem /
@@ -367,24 +370,24 @@ but treat the takeoff slot as the moment of legal / financial
 closure rather than recovery.
 
 ─────────────────────────────────────────────────────────────────
-ACT 5 — THE LESSON          15:30 – 17:30    (~300 words)
+ACT 5 — THE LESSON          8:50 – 10:00     (~190-230 words)
 ─────────────────────────────────────────────────────────────────
-15:30-16:00 WHERE THE COMPANY IS TODAY — a present-day fact
+8:50-9:10  WHERE THE COMPANY IS TODAY — a present-day fact
             that mirrors and pays off the opening hook. If
             you opened with "$X billion", close by referencing
             a different specific from that same number.
-16:00-16:45 THE TAKEAWAY: what THIS story teaches us. ONE clear
+9:10-9:35  THE TAKEAWAY: what THIS story teaches us. ONE clear
             insight, not a list. Pattern:
               "What [Company] understood that nobody else did
                was…"
             Or for decline stories:
               "What [Company] missed that should have been
                obvious was..."
-16:45-17:15 THE LEGACY: what changed because of this story.
+9:35-9:50  THE LEGACY: what changed because of this story.
             One specific consequence outside the company itself
             (an industry standard, a regulation, a new role, a
             warning the next generation took to heart).
-17:15-17:30 ONE CLEAN OUTRO LINE. NO "subscribe" patter, NO
+9:50-10:00 ONE CLEAN OUTRO LINE. NO "subscribe" patter, NO
             "next time on the channel", NO "share if you
             liked it". A final concrete image instead — the
             kind of line a viewer screenshots.
@@ -394,9 +397,9 @@ HOOK CADENCE — STRICT RULES
 ================================================================
 - A STRONG hook fires in the first 15 seconds (Act 0, lines 1-3).
 - For the first 6 minutes, a re-hook fires every 60-90 seconds.
-  At 120 wpm that means a re-hook roughly every 120-180 words.
-- From 6 minutes to the end, a re-hook fires every 2-3 minutes,
-  i.e. every 240-360 words.
+  At 160 wpm that means a re-hook roughly every 160-240 words.
+- From 6 minutes to the end, a re-hook fires every 90-120 seconds,
+  i.e. every 240-320 words.
 - Each re-hook is exactly ONE sentence — short, declarative,
   forward-looking. It plants something the next 90-180 seconds
   will pay off.
@@ -517,15 +520,15 @@ above).
 ## BEAT N ## headers mark visual scene changes (one image per
 beat for the FLUX / Ken-Burns pipeline). Use approximately
 {target_beats} BEAT markers across the whole script,
-distributed in alignment with the act/timing structure above:
+distributed in alignment with the compact act/timing structure above:
   - Act 0:    1-2 beats
-  - Act 1:    ~12 beats
-  - Act 2:    ~11 beats
-  - Act 3:    ~16 beats
-  - Act 3.5:  ~9 beats
-  - Act 4:    ~12 beats
+  - Act 1:    ~7 beats
+  - Act 2:    ~7 beats
+  - Act 3:    ~10 beats
+  - Act 3.5:  ~5 beats
+  - Act 4:    ~8 beats
   - Act 5:    ~5-6 beats
-Each beat should cover 30-50 words of narration — not every
+Each beat should cover 25-45 words of narration — not every
 sentence, not every paragraph.
 
 HARD LENGTH TARGET — between {min_words} and {max_words} words.
