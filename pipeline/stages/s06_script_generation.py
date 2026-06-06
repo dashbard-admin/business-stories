@@ -918,16 +918,23 @@ def _staged_length_directive(
 
 
 def _scaled_act_specs(target_words: int, target_beats: int) -> list[dict]:
+    cfg = load_config()
+    staged_budget = int(round(
+        target_words * float(
+            cfg.production.get("script_staged_word_budget_multiplier", 0.82)
+        )
+    ))
+    staged_budget = max(700, min(target_words, staged_budget))
     base_words = sum(spec[2] for spec in ACT_SPECS)
     base_beats = sum(spec[3] for spec in ACT_SPECS)
-    word_scale = target_words / max(1, base_words)
+    word_scale = staged_budget / max(1, base_words)
     beat_scale = target_beats / max(1, base_beats)
     specs: list[dict] = []
     used_words = 0
     used_beats = 0
     for idx, (act_id, title, base_w, base_b) in enumerate(ACT_SPECS):
         is_last = idx == len(ACT_SPECS) - 1
-        words = target_words - used_words if is_last else max(60, round(base_w * word_scale))
+        words = staged_budget - used_words if is_last else max(45, round(base_w * word_scale))
         beats = target_beats - used_beats if is_last else max(1, round(base_b * beat_scale))
         specs.append({
             "act_id": act_id,

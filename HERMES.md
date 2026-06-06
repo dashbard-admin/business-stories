@@ -911,7 +911,7 @@ Representative stage logs:
 
 ```text
 2026-06-03 08:02:42,121 hermes.stage.s06 INFO S06 staged generation attempt 1: creating blueprint
-2026-06-03 08:03:05,992 hermes.stage.s06 INFO S06 staged generation attempt 1: ACT_0 target=70 words/2 beats
+2026-06-03 08:03:05,992 hermes.stage.s06 INFO S06 staged generation attempt 1: ACT_0 target=57 words/2 beats
 2026-06-03 08:04:10,730 hermes.stage.s06 INFO S06 staged attempt 1: 1588 words (dist=0, in_range=True, forbidden_hits=0)
 2026-06-03 08:04:11,200 hermes.stage.s06 INFO S06 forbidden-phrase substitutions applied: 0
 2026-06-03 08:04:11,550 hermes.stage.s06 INFO S06 complete: 1604 words, 44 beats

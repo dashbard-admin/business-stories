@@ -10,7 +10,7 @@ EPISODE:
 - Story kind: {story_kind}
 - Final script target: {target_words} words, {target_beats} beats
 - Current act: {act_id} — {act_title}
-- Current act budget: {act_target_words} words, {act_target_beats} beats
+- Current act hard ceiling: {act_target_words} words, {act_target_beats} beats
 - Beat numbers for this act: ## BEAT {beat_start} ## through ## BEAT {beat_end} ##
 - Archetype: {archetype_name}
   {archetype_guidance}
@@ -38,8 +38,10 @@ NARRATOR PERSONA INSTRUCTIONS — {narrator_id}:
 RULES:
 - Write only {act_id}. Do not include act headings.
 - Use the requested BEAT markers only, starting at ## BEAT {beat_start} ##.
-- Each beat should carry 25-45 words of narration.
-- The act should land near {act_target_words} words; do not over-explain.
+- Each beat should carry 18-32 words of narration. Do not exceed 38 words
+  for any beat unless the blueprint explicitly requires a quoted fact.
+- The act must stay at or below {act_target_words} words. Treat this as a
+  ceiling, not a soft target. Short and sharp beats are preferred.
 - This is a tight 9-11 minute episode, not an 18-minute documentary. Prefer
   one sharp example over three supporting examples.
 - Preserve factual discipline: no invented dates, quotes, money, dialogue,
