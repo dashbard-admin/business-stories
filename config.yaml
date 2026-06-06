@@ -343,7 +343,7 @@ upload:
 
 search:
   backend: "searxng"
-  searxng_url: "http://10.0.4.252:8080"
+  searxng_url: "http://127.0.0.1:8081"
   engines: ""                       # comma-separated; blank = SearXNG default set
   safesearch: 0
   results_per_query: 30

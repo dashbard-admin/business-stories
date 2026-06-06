@@ -961,6 +961,22 @@ WINNING_SHORT_TITLES = [
     ["The", "[LOGO]", "road to win"],
     ["How", "[LOGO]", "came out", "on top"],
     ["[LOGO]", "secret to", "success"],
+    ["How", "[LOGO]", "made history"],
+    ["The", "[LOGO]", "glorious ascent"],
+    ["The", "[LOGO]", "victory blueprint"],
+    ["The", "[LOGO]", "glide to glory"],
+    ["How", "[LOGO]", "took the crown"],
+    ["[LOGO]", "road to triumph"],
+    ["How", "[LOGO]", "secured the win"],
+    ["The", "[LOGO]", "masterstroke"],
+    ["The", "[LOGO]", "path to dominance"],
+    ["How", "[LOGO]", "emerged victorious"],
+    ["The", "[LOGO]", "formula for success"],
+    ["How", "[LOGO]", "defied the odds"],
+    ["The", "[LOGO]", "route to victory"],
+    ["The", "[LOGO]", "tactical win plan"],
+    ["How", "[LOGO]", "made the win possible"],
+    ["The", "[LOGO]", "step-by-step to success"]
 ]
 
 LOSING_SHORT_TITLES = [
@@ -971,6 +987,21 @@ LOSING_SHORT_TITLES = [
     ["[LOGO]", "downfall"],
     ["[LOGO]", "path to", "defeat"],
     ["How", "[LOGO]", "let it go"],
+    ["How", "[LOGO]", "missed the mark"],
+    ["[LOGO]", "route to defeat"],
+    ["How", "[LOGO]", "slipped up"],
+    ["[LOGO]", "path to failure"],
+    ["How", "[LOGO]", "lost control"],
+    ["How", "[LOGO]", "failed to deliver"],
+    ["[LOGO]", "fall from grace"],
+    ["How", "[LOGO]", "came undone"],
+    ["How", "[LOGO]", "lost the edge"],
+    ["[LOGO]", "unraveling"],
+    ["[LOGO]", "route to failure"],
+    ["How", "[LOGO]", "let victory slip"],
+    ["The", "[LOGO]", "losing formula"],
+    ["How", "[LOGO]", "stumbled late"],
+    ["[LOGO]", "slide into defeat"],
 ]
 
 
