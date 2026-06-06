@@ -160,6 +160,7 @@ business_success_stories/
 ├── pyproject.toml               ← dependencies
 ├── run_orchestrator.sh          ← cron entry point; detaches python
 ├── run_full_auto_approve.sh     ← foreground all-stage runner; auto-approves review gates until final.mp4
+├── run_full_auto_correct_publish.sh ← foreground runner; auto-corrects review gates, builds package, uploads
 ├── pipeline/                    ← all code
 │   ├── __init__.py              ← SSL bootstrap + .env loader
 │   ├── hermes_orchestrator.py   ← CLI + lock + stage dispatch
@@ -249,6 +250,9 @@ nohup python3 -m pipeline.hermes_orchestrator "$@" </dev/null >>"${LOGFILE}" 2>&
 
 ### `run_full_auto_approve.sh` *(added 2026-05-30; stdin hardening 2026-05-30; review-gate guard 2026-05-31)*
 Foreground operator runner for one complete video build. It calls `python3 -m pipeline.hermes_orchestrator` synchronously in a loop, runs `--approve EP_ID` only for configured review gates (`AUTO_APPROVE_STAGES`, default `S7 S8 S9`), and exits when `05_video/final.mp4` exists. It deliberately refuses to auto-approve S10+ build failures such as S12 timeline mismatch, because approving those marks the stage done without creating the artifact. With no argument it selects the first non-DONE episode and enqueues one if the queue is empty; with an `EP_ID` argument it targets that episode via `--run-episode EP_ID`. Logs to `logs/full_auto.<timestamp>.log`. The runner redirects stdin to `/dev/null` for orchestrator subprocesses so long SSH/agent launches can't leave Python inheriting a bad stdin descriptor during auto-approval.
+
+### `run_full_auto_correct_publish.sh` *(added 2026-06-06)*
+Foreground operator runner for the full autonomous publish path. It loops like `run_full_auto_approve.sh`, but handles review blockers with stage-specific commands: S07 runs `--auto-correct-s07` and falls back to `--approve` only if no rewrite applies, S08 runs `--auto-correct-s08`, and S09 runs `--auto-approve-s09`. S10+ blockers still stop the script. Once `05_video/final.mp4` exists, it runs `--build-youtube-package EP_ID`, then `--upload-youtube-package EP_ID --approve-youtube-upload`. Optional upload overrides: `YOUTUBE_PRIVACY` and `YOUTUBE_PUBLISH_AT`. Logs to `logs/full_auto_correct_publish.<timestamp>.log`.
 
 ### `README.md`
 Operator-facing quickstart. Less detail than this AGENTS.md; intended for the project owner, not for an AI agent reading the codebase cold.

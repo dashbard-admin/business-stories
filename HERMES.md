@@ -4,7 +4,7 @@ Runbook for autonomous agents operating the Hermes business-story pipeline.
 
 This document has three parts:
 
-1. CLI arguments for `pipeline.hermes_orchestrator`, `run_full_auto_approve.sh`, and `run_orchestrator.sh`.
+1. CLI arguments for `pipeline.hermes_orchestrator`, `run_full_auto_approve.sh`, `run_full_auto_correct_publish.sh`, and `run_orchestrator.sh`.
 2. Human QA gates, when they trigger, and which artifacts they produce.
 3. A complete representative log transcript for the whole pipeline, with success and blocker signatures.
 
@@ -253,6 +253,59 @@ Stopped after MAX_ITERATIONS=80 without producing final.mp4 for EP_004.
 orchestrator returned non-zero; checking queue state on next loop
 ```
 
+### `run_full_auto_correct_publish.sh`
+
+Foreground build-and-upload runner:
+
+```bash
+./run_full_auto_correct_publish.sh [EP_ID]
+```
+
+Purpose: run an episode continuously until `05_video/final.mp4` exists, auto-handle review gates with stage-specific actions, then build and upload the YouTube package.
+
+Review-gate policy:
+
+| Stage | Action |
+| --- | --- |
+| `S7` | Run `--auto-correct-s07 EP_ID`; if no rewrite applies, fall back to `--approve EP_ID` so review-stage automation keeps moving. |
+| `S8` | Run `--auto-correct-s08 EP_ID`. |
+| `S9` | Run `--auto-approve-s09 EP_ID`. |
+| `S10+` | Stop. These are build failures, not review gates. |
+
+After `final.mp4` exists, the script runs:
+
+```bash
+python3 -m pipeline.hermes_orchestrator --build-youtube-package EP_ID
+python3 -m pipeline.hermes_orchestrator --upload-youtube-package EP_ID --approve-youtube-upload
+```
+
+Environment variables:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PYTHON_BIN` | `python3` | Python executable used for orchestrator calls. |
+| `MAX_ITERATIONS` | `100` | Maximum loop count before giving up. |
+| `SLEEP_SECONDS` | `2` | Delay between loop iterations. |
+| `YOUTUBE_PRIVACY` | unset | Optional upload privacy override: `private`, `unlisted`, or `public`. |
+| `YOUTUBE_PUBLISH_AT` | unset | Optional RFC3339 scheduled publish time passed to upload. |
+
+Examples:
+
+```bash
+./run_full_auto_correct_publish.sh EP_007
+YOUTUBE_PRIVACY=private ./run_full_auto_correct_publish.sh EP_007
+YOUTUBE_PUBLISH_AT=2026-06-08T18:00:00Z ./run_full_auto_correct_publish.sh EP_007
+```
+
+Success signatures:
+
+```text
+final video ready: /.../05_video/final.mp4
+building YouTube package for EP_007
+uploading YouTube package for EP_007
+completed build/package/upload for EP_007
+```
+
 ### `run_orchestrator.sh`
 
 Cron/launchd-friendly wrapper:
@@ -296,6 +349,7 @@ Log files:
 | --- | --- |
 | `run_orchestrator.sh` | `logs/run.<timestamp>.log` plus daily orchestrator log `logs/orch.YYYY-MM-DD.log` |
 | `run_full_auto_approve.sh` | `logs/full_auto.<timestamp>.log` plus daily orchestrator log |
+| `run_full_auto_correct_publish.sh` | `logs/full_auto_correct_publish.<timestamp>.log` plus daily orchestrator log |
 | Direct `python3 -m pipeline.hermes_orchestrator` | terminal output plus daily orchestrator log |
 
 Lock behavior:
