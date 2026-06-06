@@ -66,11 +66,11 @@ production:
   like_subscribe_clip_path: "${root}/assets/video/like_and_subscribe.mp4"
 
   # Operator-tunable retry budget for S06 script generation
-  # (2026-05-28). Each attempt = one full writer-LLM call (~30-60s)
-  # producing a candidate script; if outside [min_script_words,
-  # max_script_words] the loop nudges with a length-budget prefix
-  # and lowers temperature, then retries. The closest-to-target draft
-  # is kept as a fallback when all attempts run out.
+  # (2026-05-28; staged path wired 2026-06-06). In full-script mode,
+  # each attempt is one writer-LLM call. In staged mode, each attempt
+  # is one full blueprint -> act-by-act pass with stronger length
+  # directives between attempts. The closest clean draft is kept as a
+  # fallback when all attempts run out.
   #
   # Trade-off: more attempts = more compute (~8 min upper bound at
   # 8 attempts) but better in-range hit rate. Fewer attempts =

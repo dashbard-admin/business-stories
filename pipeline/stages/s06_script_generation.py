@@ -574,34 +574,29 @@ def run(episode: dict, queue: dict) -> str | None:
     staged_enabled = bool(cfg.production.get("script_act_by_act_enabled", True))
     script = ""
     if staged_enabled and not preview_mode:
-        try:
-            script = _generate_via_blueprint_and_acts(
-                llm,
-                cfg=cfg,
-                ws=ws,
-                incident=incident,
-                archetype_name=arch["name"],
-                archetype_guidance=arch_guidance,
-                narrator_name=narr["name"],
-                narrator_tone=narr_cfg["tone"],
-                narrator_id=narrator,
-                narrator_full_instructions=narr["full_instructions"],
-                visual_style_name=style_yaml["name"],
-                character_iconography=character_iconography,
-                fact_ledger_json=fact_ledger_json,
-                retention_dip_warnings=perf["retention_dip_warnings"],
-                target_words=target_words,
-                min_words=min_w,
-                max_words=max_w,
-                target_beats=target_beats,
-                forbidden=forbidden,
-            )
-        except Exception as e:
-            logger.warning(
-                "S06 staged act-by-act generation failed; falling back "
-                "to full-script generation: %s", e,
-            )
-            script = ""
+        script = _generate_staged_within_range(
+            llm,
+            cfg=cfg,
+            ws=ws,
+            incident=incident,
+            archetype_name=arch["name"],
+            archetype_guidance=arch_guidance,
+            narrator_name=narr["name"],
+            narrator_tone=narr_cfg["tone"],
+            narrator_id=narrator,
+            narrator_full_instructions=narr["full_instructions"],
+            visual_style_name=style_yaml["name"],
+            character_iconography=character_iconography,
+            fact_ledger_json=fact_ledger_json,
+            retention_dip_warnings=perf["retention_dip_warnings"],
+            target_words=target_words,
+            min_words=min_w,
+            max_words=max_w,
+            target_beats=target_beats,
+            forbidden=forbidden,
+            max_attempts=max_attempts,
+            temp_step=temp_step,
+        )
 
     if not script:
         script = _generate_within_range(
@@ -759,6 +754,169 @@ def run(episode: dict, queue: dict) -> str | None:
 
 # -------------------- staged script generation --------------------
 
+def _generate_staged_within_range(
+    llm,
+    *,
+    cfg,
+    ws: Path,
+    incident: dict,
+    archetype_name: str,
+    archetype_guidance: str,
+    narrator_name: str,
+    narrator_tone: str,
+    narrator_id: str,
+    narrator_full_instructions: str,
+    visual_style_name: str,
+    character_iconography: str,
+    fact_ledger_json: str,
+    retention_dip_warnings: str,
+    target_words: int,
+    min_words: int,
+    max_words: int,
+    target_beats: int,
+    forbidden: list[str],
+    max_attempts: int,
+    temp_step: float,
+) -> str:
+    """Retry the staged blueprint→acts path until it satisfies gates.
+
+    Earlier staged generation tried once, then only ran local
+    expand/condense repairs. This made `max_script_generation_attempts`
+    apply to the old full-script fallback but not to the active staged
+    path. Keep the same bounded retry budget here.
+    """
+    best_clean: tuple[int, str] | None = None
+    best_any: tuple[int, str] | None = None
+    last_wc: int | None = None
+    failures: list[str] = []
+
+    for attempt in range(max(1, max_attempts)):
+        temperature = 0.62 if attempt == 0 else max(
+            0.45, 0.62 - attempt * temp_step
+        )
+        length_directive = _staged_length_directive(
+            attempt=attempt,
+            last_wc=last_wc,
+            min_words=min_words,
+            max_words=max_words,
+            target_words=target_words,
+        )
+        try:
+            script = _generate_via_blueprint_and_acts(
+                llm,
+                cfg=cfg,
+                ws=ws,
+                incident=incident,
+                archetype_name=archetype_name,
+                archetype_guidance=archetype_guidance,
+                narrator_name=narrator_name,
+                narrator_tone=narrator_tone,
+                narrator_id=narrator_id,
+                narrator_full_instructions=narrator_full_instructions,
+                visual_style_name=visual_style_name,
+                character_iconography=character_iconography,
+                fact_ledger_json=fact_ledger_json,
+                retention_dip_warnings=retention_dip_warnings,
+                target_words=target_words,
+                min_words=min_words,
+                max_words=max_words,
+                target_beats=target_beats,
+                forbidden=forbidden,
+                attempt_index=attempt,
+                act_temperature=temperature,
+                length_directive=length_directive,
+            )
+        except Exception as e:
+            failures.append(str(e)[:180])
+            logger.warning(
+                "S06 staged attempt %d failed: %s",
+                attempt + 1, e,
+            )
+            continue
+
+        wc = len(script.split())
+        hits = _find_forbidden(script, forbidden)
+        in_range = min_words <= wc <= max_words
+        distance = 0 if in_range else min(abs(wc - min_words), abs(wc - max_words))
+        logger.info(
+            "S06 staged attempt %d: %d words (dist=%d, in_range=%s, "
+            "forbidden_hits=%d)",
+            attempt + 1, wc, distance, in_range, len(hits),
+        )
+        if in_range and not hits:
+            return script
+        if not hits and (best_clean is None or distance < best_clean[0]):
+            best_clean = (distance, script)
+        if best_any is None or distance < best_any[0]:
+            best_any = (distance, script)
+        last_wc = wc
+
+    if best_clean is not None:
+        logger.warning(
+            "S06 staged retries exhausted; using closest clean draft "
+            "(dist=%d)",
+            best_clean[0],
+        )
+        return best_clean[1]
+    if best_any is not None:
+        logger.warning(
+            "S06 staged retries exhausted; using closest draft with "
+            "forbidden hits (dist=%d)",
+            best_any[0],
+        )
+        return best_any[1]
+
+    if failures:
+        logger.warning(
+            "S06 staged act-by-act generation failed on all attempts; "
+            "falling back to full-script generation. Last failures: %s",
+            " | ".join(failures[-3:]),
+        )
+    return ""
+
+
+def _staged_length_directive(
+    *,
+    attempt: int,
+    last_wc: int | None,
+    min_words: int,
+    max_words: int,
+    target_words: int,
+) -> str:
+    if attempt <= 0 or last_wc is None:
+        return (
+            f"\n\nHARD LENGTH CONTRACT: final combined script must be "
+            f"{min_words}-{max_words} words, with an ideal target near "
+            f"{target_words}. Keep every act within its assigned budget. "
+            "Do not compensate for short acts by bloating later acts."
+        )
+    if last_wc > max_words:
+        excess = last_wc - max_words
+        return (
+            f"\n\nRETRY LENGTH CORRECTION: previous staged draft was "
+            f"{last_wc} words, {excess} over the hard maximum of "
+            f"{max_words}. Generate a materially shorter draft. Cut "
+            "middle-act repetition, adjective stacks, repeated context, "
+            "and explanatory asides. Preserve the hook, factual spine, "
+            "beat markers, and final concrete image."
+        )
+    if last_wc < min_words:
+        shortage = min_words - last_wc
+        return (
+            f"\n\nRETRY LENGTH CORRECTION: previous staged draft was "
+            f"{last_wc} words, {shortage} under the hard minimum of "
+            f"{min_words}. Add concise ledger-grounded context and "
+            "forensic detail to the middle acts. Do not pad with generic "
+            "moralizing or repeated setup."
+        )
+    return (
+        f"\n\nRETRY QUALITY CORRECTION: previous staged draft was "
+        f"{last_wc} words, inside the length range, but failed another "
+        "gate. Preserve the length while removing forbidden phrases and "
+        "keeping all facts ledger-grounded."
+    )
+
+
 def _scaled_act_specs(target_words: int, target_beats: int) -> list[dict]:
     base_words = sum(spec[2] for spec in ACT_SPECS)
     base_beats = sum(spec[3] for spec in ACT_SPECS)
@@ -803,6 +961,9 @@ def _generate_via_blueprint_and_acts(
     max_words: int,
     target_beats: int,
     forbidden: list[str],
+    attempt_index: int = 0,
+    act_temperature: float = 0.62,
+    length_directive: str = "",
 ) -> str:
     """Generate script as outline first, then one act at a time.
 
@@ -836,9 +997,18 @@ def _generate_via_blueprint_and_acts(
 
     blueprint_template = (cfg.prompts_dir / "script_blueprint.txt").read_text()
     blueprint_prompt = blueprint_template.format(**common)
+    if length_directive:
+        blueprint_prompt = f"{blueprint_prompt.rstrip()}\n{length_directive}\n"
     (ws / "02_script").mkdir(exist_ok=True)
     (ws / "02_script" / "script_blueprint_prompt.txt").write_text(blueprint_prompt)
-    logger.info("S06 staged generation: creating blueprint")
+    if attempt_index > 0:
+        (ws / "02_script" / f"script_blueprint_prompt_attempt_{attempt_index + 1:02d}.txt").write_text(
+            blueprint_prompt
+        )
+    logger.info(
+        "S06 staged generation attempt %d: creating blueprint",
+        attempt_index + 1,
+    )
     blueprint = llm.complete_json(
         blueprint_prompt, temperature=0.35, max_tokens=6000,
     )
@@ -868,13 +1038,15 @@ def _generate_via_blueprint_and_acts(
             prior_summary=prior_summary or "(this is the opening act)",
             forbidden_phrases="\n".join(f"  - {p}" for p in forbidden),
         )
+        if length_directive:
+            act_prompt = f"{act_prompt.rstrip()}\n{length_directive}\n"
         prompt_log_parts.append(f"\n\n===== {act_id} PROMPT =====\n\n{act_prompt}")
         logger.info(
-            "S06 staged generation: %s target=%d words/%d beats",
-            act_id, spec["target_words"], spec["target_beats"],
+            "S06 staged generation attempt %d: %s target=%d words/%d beats",
+            attempt_index + 1, act_id, spec["target_words"], spec["target_beats"],
         )
         result = llm.complete(
-            act_prompt, temperature=0.62, max_tokens=4500,
+            act_prompt, temperature=act_temperature, max_tokens=4500,
         )
         act_text = _clean(result.text)
         act_text = _strip_non_requested_act_headers(act_text)
@@ -885,6 +1057,10 @@ def _generate_via_blueprint_and_acts(
     (ws / "02_script" / "script_act_prompts.txt").write_text(
         "".join(prompt_log_parts).strip()
     )
+    if attempt_index > 0:
+        (ws / "02_script" / f"script_act_prompts_attempt_{attempt_index + 1:02d}.txt").write_text(
+            "".join(prompt_log_parts).strip()
+        )
     script = "\n\n".join(part.strip() for part in act_texts if part.strip())
     script = _renumber_beats(script)
     script, sub_log = _apply_substitutions(script, _load_substitutions())
@@ -908,8 +1084,9 @@ def _generate_via_blueprint_and_acts(
         script = _expand_script(llm, script, min_words, target_words, max_attempts=2)
 
     logger.info(
-        "S06 staged generation complete candidate: %d words, %d beats, "
-        "%d forbidden hits",
+        "S06 staged generation attempt %d complete candidate: %d words, "
+        "%d beats, %d forbidden hits",
+        attempt_index + 1,
         len(script.split()), len(BEAT_RE.findall(script)),
         len(_find_forbidden(script, forbidden)),
     )
