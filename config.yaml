@@ -631,12 +631,12 @@ sfx_library:
   enabled: true 
   path: "${root}/assets/sfx_library"
   manifest: "${root}/assets/sfx_library/manifest.json"
-  default_gain_db: -24.0          # SFX level vs. voice (-18 dB
+  default_gain_db: -32.0          # SFX level vs. voice (-18 dB
                                   # = clearly audible but distinctly
                                   # below voice; the operator can
                                   # override per-track via the
                                   # manifest's gain_db_hint field)
-  crossfade_ms: 100               # short fade-in/out at SFX edges
+  crossfade_ms: 500               # short fade-in/out at SFX edges
                                   # so the bed doesn't click
 
 callouts:
