@@ -727,6 +727,14 @@ def run(episode: dict, queue: dict) -> str | None:
                 callout_info["added"], callout_info["total"],
             )
 
+    # Finalize numbering after every late text mutation. Substitution,
+    # short-beat merge, and callout repair can all move text around after
+    # staged generation has already normalized markers; S08/S10/S12 must
+    # see one contiguous beat-id sequence.
+    script = _renumber_beats(script)
+    beats = BEAT_RE.findall(script)
+    wc = len(script.split())
+
     (ws / "02_script").mkdir(exist_ok=True)
     (ws / "02_script" / "script.txt").write_text(script)
 

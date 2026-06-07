@@ -119,18 +119,25 @@ def run(episode: dict, queue: dict) -> str | None:
     # Capture beat positions while stripping BEAT markers.
     beat_positions: list[tuple[int, int]] = []
     speech_chars: list[str] = []
-    beat_counter = 0
     i = 0
     while i < len(raw_script):
         m = BEAT_RE.match(raw_script, i)
         if m:
-            beat_counter += 1
-            beat_positions.append((beat_counter, len(speech_chars)))
+            beat_positions.append((int(m.group(1)), len(speech_chars)))
             i = m.end()
             continue
         speech_chars.append(raw_script[i])
         i += 1
     speech_only = "".join(speech_chars)
+    beat_ids = [bnum for bnum, _ in beat_positions]
+    expected_ids = list(range(1, len(beat_ids) + 1))
+    if beat_ids and beat_ids != expected_ids:
+        logger.warning(
+            "S10 script beat markers are non-contiguous; using literal ids "
+            "for voice_timing (%s)",
+            ", ".join(f"BEAT_{b:02d}" for b in beat_ids[:8])
+            + ("..." if len(beat_ids) > 8 else ""),
+        )
 
     # Apply pronunciation overrides
     overrides_path = (
