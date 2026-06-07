@@ -414,9 +414,8 @@ asr:
   backend: whisper_cpp
   binary: whisper-cli                   # binary name on PATH
   model: base.en                        # base.en | small.en | medium.en
-  model_path: ""                        # absolute path override for
-                                        # the .bin model file; empty =
-                                        # let whisper.cpp resolve
+  model_path: "${root}/models/whisper/ggml-base.en.bin"
+                                        # absolute path to the .bin model
   long_form_enabled: true               # align long-form captions/callouts
 
 packaging:

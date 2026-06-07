@@ -1173,6 +1173,7 @@ Stage-begin signature:
 Representative stage logs:
 
 ```text
+2026-06-03 11:55:22,140 hermes.stage.s12 INFO S12 ASR alignment: transcribed 412 segments -> voice_asr_segments.json
 2026-06-03 11:55:22,220 hermes.stage.s12 INFO S12 L1: purged 2 cached _callout.mp4 clips
 2026-06-03 11:55:22,350 hermes.stage.s12 INFO S12 opening title card: 1.0s
 2026-06-03 11:56:20,100 hermes.ffmpeg INFO render_ken_burns: BEAT_01.mp4 <- BEAT_01.png
@@ -1183,6 +1184,22 @@ Representative stage logs:
 2026-06-03 12:04:44,340 hermes.ffmpeg INFO concat_clips: final_video.mp4 from 71 clips
 2026-06-03 12:05:01,800 hermes.ffmpeg INFO mux_audio_video: final.mp4
 2026-06-03 12:05:02,410 hermes.stage.s12 INFO S12 complete: final.mp4 (1355.3s)
+```
+
+ASR fallback signatures:
+
+```text
+hermes.asr WARNING ASR: whisper-cli not on PATH; falling back to estimated subtitle/callout timings.
+hermes.asr WARNING ASR: input audio not found: /.../04_audio/voice_full.wav
+hermes.asr WARNING ASR: whisper.cpp model not found: /.../models/whisper/ggml-base.en.bin
+```
+
+Direct whisper.cpp smoke test:
+
+```bash
+VOICE=$(find episodes -path '*/04_audio/voice_full.wav' | head -1)
+whisper-cli -m models/whisper/ggml-base.en.bin -f "$VOICE" \
+  --output-json-full --output-file /tmp/whisper_test --no-prints
 ```
 
 Stage-success signature:

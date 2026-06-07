@@ -54,6 +54,7 @@ def transcribe(
     """
     cfg = load_config()
     asr_cfg = cfg.asr
+    wav_path = Path(wav_path)
 
     if cfg.mock_mode:
         # Mock: one second of "Mock subtitle" per ~1s of audio.
@@ -84,12 +85,24 @@ def transcribe(
         )
         return None
 
-    model = model or asr_cfg.get("model", "base.en")
+    if not wav_path.exists():
+        logger.warning("ASR: input audio not found: %s", wav_path)
+        return None
+
+    model_path = _resolve_model_path(asr_cfg, cfg.root, model)
+    if not model_path.exists():
+        logger.warning(
+            "ASR: whisper.cpp model not found: %s. Download one, e.g. "
+            "models/whisper/ggml-base.en.bin, or set asr.model_path.",
+            model_path,
+        )
+        return None
+
     json_out = wav_path.with_suffix(".whisper.json")
 
     cmd = [
         binary,
-        "-m", str(asr_cfg.get("model_path") or model),
+        "-m", str(model_path),
         "-f", str(wav_path),
         "--output-json-full",
         "--output-file", str(json_out.with_suffix("")),
@@ -103,8 +116,11 @@ def transcribe(
             timeout=600,
         )
     except subprocess.CalledProcessError as e:
-        logger.warning("whisper.cpp failed: %s — stderr=%s",
-                       e.returncode, (e.stderr or "")[:300])
+        stderr = (e.stderr or "").strip()
+        logger.warning(
+            "whisper.cpp failed: %s — stderr=%s",
+            e.returncode, stderr[-1000:],
+        )
         return None
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         logger.warning("whisper.cpp invocation failed: %s", e)
@@ -130,3 +146,29 @@ def transcribe(
         if text:
             segs.append(Segment(start, end, text))
     return segs
+
+
+def _resolve_model_path(
+    asr_cfg: dict,
+    root: Path,
+    model: str | None,
+) -> Path:
+    configured = str(asr_cfg.get("model_path") or "").strip()
+    if configured:
+        raw = configured.replace("${root}", str(root))
+        path = Path(raw).expanduser()
+        return path if path.is_absolute() else root / path
+
+    model_name = str(model or asr_cfg.get("model") or "base.en").strip()
+    if model_name.endswith(".bin") or "/" in model_name:
+        path = Path(model_name).expanduser()
+        return path if path.is_absolute() else root / path
+
+    candidates = [
+        root / "models" / "whisper" / f"ggml-{model_name}.bin",
+        root / "models" / "whisper" / model_name,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
