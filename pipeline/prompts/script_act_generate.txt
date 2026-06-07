@@ -20,6 +20,9 @@ EPISODE:
 ACT BLUEPRINT:
 {act_blueprint_json}
 
+LOCKED NARRATIVE SPINE:
+{narrative_spine_json}
+
 PREVIOUS ACT TAIL / CONTINUITY:
 {prior_summary}
 
@@ -38,6 +41,8 @@ NARRATOR PERSONA INSTRUCTIONS — {narrator_id}:
 RULES:
 - Write only {act_id}. Do not include act headings.
 - Use the requested BEAT markers only, starting at ## BEAT {beat_start} ##.
+- Follow the act's viewer_believes → what_changes → question_opened arc.
+- Every beat must have causal motion: event → why it happened → what changed.
 - Each beat should carry 18-32 words of narration. Do not exceed 38 words
   for any beat unless the blueprint explicitly requires a quoted fact.
 - The act must stay at or below {act_target_words} words. Treat this as a
@@ -55,6 +60,10 @@ RULES:
 - Vary sentence length. After several long sentences, use one short
   sentence for rhythm.
 - Keep the narrator persona active, but do not copy the persona examples.
+- Do not repeat an event, number, metaphor, or legal explanation already
+  covered in PREVIOUS ACT TAIL.
+- Prefer one concrete scene/object over abstract business commentary.
+- End the act on a turn, not a summary.
 - Avoid every forbidden phrase below.
 
 FORBIDDEN PHRASES:
@@ -67,6 +76,6 @@ SPECIAL ACT RULES:
 - ACT_3_5: cite documentary evidence by document name/date when the ledger
   provides it. If evidence is thin, keep this act concise; do not pad it.
 - ACT_5: close with one concrete image. No "subscribe", no "in conclusion",
-  no generic lesson-summary phrasing.
+  no generic lesson-summary phrasing. Pay off narrative_spine.final_image.
 
 Output only the act prose with BEAT markers. No preamble. No code fences.

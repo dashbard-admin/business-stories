@@ -63,6 +63,24 @@ fixable in place.
    leaked emails, depositions). It's allowed to be short when the fact
    ledger has fewer than 2 documentary-evidence claims, but never absent.
 
+2A. STORY SPINE / CHRONOLOGY AUDIT
+   This is a ship-blocking story audit, not a copyedit.
+   - Identify the one central question the script answers. If there is
+     no clear central question, verdict must be ship_blocker.
+   - Check chronology. One cold-open flash-forward is allowed, then the
+     viewer must be able to follow before → decision → consequence →
+     escalation → collapse/resolution. Random jumps are ship-blocking.
+   - Check causal flow. Most beats must explain what changed because of
+     the previous beat. If more than roughly 20% of beats are static
+     "fact happened" exposition, verdict must be ship_blocker.
+   - Check repetition. If one act repeats the same event, number, legal
+     mechanism, bankruptcy filing, or lesson from another act, flag it.
+   - Check protagonist agency. A major person/company actor must want
+     something, misread something, make a decision, and face the cost.
+     If the company is only an abstract balance sheet, flag it.
+   - Check the ending. A generic moral/lesson ending instead of one
+     concrete final image is ship-blocking.
+
 3. HOOK CADENCE AUDIT  (the critical retention check)
    - 15-second strong hook in the very first sentences (see
      Act 0 audit above).
@@ -111,7 +129,10 @@ fixable in place.
      voice).
    - Flag overused clichés: "game-changer", "disrupt the
      industry", "rocked the world", "perfect storm",
-     "skyrocketed", "shockwaves", "rocketed".
+     "skyrocketed", "shockwaves", "rocketed", "the numbers don't lie",
+     "not with a bang", "ghost story", "balance sheet was bleeding",
+     "road ahead", "dreams are not strategies", "the market punished",
+     "the future is uncertain", "wake up", "get to work".
    - Flag any speculation about founder inner-monologue
      not in the ledger ("she must have felt...", "he
      wondered if...").

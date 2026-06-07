@@ -527,6 +527,28 @@ def run(episode: dict, queue: dict) -> str | None:
     ]
     fact_ledger_json = json.dumps(fact_claims, indent=2)
 
+    forbidden = _load_forbidden()
+    spine = _build_narrative_spine(
+        llm,
+        cfg=cfg,
+        ws=ws,
+        incident=incident,
+        fact_ledger_json=fact_ledger_json,
+        narrator_name=narr["name"],
+        narrator_tone=narr_cfg["tone"],
+        target_words=target_words,
+        target_beats=target_beats,
+    )
+    narrative_spine_json = json.dumps(spine, indent=2)
+    story_fact_claims = _filter_fact_claims_for_spine(fact_claims, spine)
+    if story_fact_claims:
+        fact_ledger_json = json.dumps(story_fact_claims, indent=2)
+        logger.info(
+            "S06 narrative spine: selected %d/%d facts, mode=%s",
+            len(story_fact_claims), len(fact_claims),
+            spine.get("timeline_mode") or "unknown",
+        )
+
     prompt = template.format(
         preview_mode_directive=preview_directive,
         incident_name=incident["company_name"],
@@ -546,8 +568,10 @@ def run(episode: dict, queue: dict) -> str | None:
         visual_style_name=style_yaml["name"],
         character_iconography=character_iconography,
         fact_ledger_json=fact_ledger_json,
+        narrative_spine_json=narrative_spine_json,
         target_beats=target_beats,
         retention_dip_warnings=perf["retention_dip_warnings"],
+        forbidden_phrases="\n".join(f"  - {p}" for p in forbidden),
     )
 
     # Retry budget + temperature decay are operator-tunable per
@@ -563,7 +587,6 @@ def run(episode: dict, queue: dict) -> str | None:
     # immediately, otherwise the loop keeps trying. Selection
     # priority after exhausting attempts: in_range+forbidden >
     # clean+out-of-range > out_of_range+forbidden.
-    forbidden = _load_forbidden()
     max_attempts = int(cfg.production.get("max_script_generation_attempts", 8))
     temp_step = float(cfg.production.get("script_generation_temp_step", 0.05))
     # Prompt-log path (added 2026-05-28). _generate_within_range
@@ -588,6 +611,7 @@ def run(episode: dict, queue: dict) -> str | None:
             visual_style_name=style_yaml["name"],
             character_iconography=character_iconography,
             fact_ledger_json=fact_ledger_json,
+            narrative_spine_json=narrative_spine_json,
             retention_dip_warnings=perf["retention_dip_warnings"],
             target_words=target_words,
             min_words=min_w,
@@ -762,6 +786,141 @@ def run(episode: dict, queue: dict) -> str | None:
 
 # -------------------- staged script generation --------------------
 
+def _build_narrative_spine(
+    llm,
+    *,
+    cfg,
+    ws: Path,
+    incident: dict,
+    fact_ledger_json: str,
+    narrator_name: str,
+    narrator_tone: str,
+    target_words: int,
+    target_beats: int,
+) -> dict:
+    """Create the story contract before blueprint/prose generation."""
+    template = (cfg.prompts_dir / "script_narrative_spine.txt").read_text()
+    prompt = template.format(
+        incident_name=incident["company_name"],
+        year=incident.get("year_anchor"),
+        hero=incident.get("hero", ""),
+        conflict=incident.get("conflict", ""),
+        story_kind=incident.get("story_kind", ""),
+        narrator_name=narrator_name,
+        narrator_tone=narrator_tone,
+        target_words=target_words,
+        target_beats=target_beats,
+        fact_ledger_json=fact_ledger_json,
+    )
+    out_dir = ws / "02_script"
+    out_dir.mkdir(exist_ok=True)
+    (out_dir / "script_narrative_spine_prompt.txt").write_text(prompt)
+
+    fallback = _fallback_narrative_spine(incident)
+    required = {
+        "central_question", "timeline_mode", "protagonist",
+        "what_they_wanted", "fatal_misread", "first_big_bet",
+        "hidden_weakness", "darkest_moment", "midroll_tension",
+        "final_image", "one_sentence_thesis",
+    }
+    for attempt in range(3):
+        try:
+            raw = llm.complete_json(
+                prompt,
+                temperature=0.28 + attempt * 0.04,
+                max_tokens=3500,
+            )
+            spine = _normalize_narrative_spine(raw, incident)
+            missing = [k for k in required if not str(spine.get(k) or "").strip()]
+            if not missing:
+                (out_dir / "script_narrative_spine.json").write_text(
+                    json.dumps(spine, indent=2)
+                )
+                return spine
+            logger.warning(
+                "S06 narrative spine attempt %d missing: %s",
+                attempt + 1, ", ".join(missing),
+            )
+        except Exception as e:
+            logger.warning("S06 narrative spine attempt %d failed: %s", attempt + 1, e)
+
+    logger.warning("S06 narrative spine fell back to deterministic spine")
+    (out_dir / "script_narrative_spine.json").write_text(
+        json.dumps(fallback, indent=2)
+    )
+    return fallback
+
+
+def _fallback_narrative_spine(incident: dict) -> dict:
+    company = incident.get("company_name") or "the company"
+    conflict = incident.get("conflict") or "the central decision"
+    hero = incident.get("hero") or company
+    return {
+        "central_question": f"How did {company} turn {conflict} into the story's defining trap?",
+        "timeline_mode": "cold_open_then_chronological",
+        "protagonist": hero,
+        "what_they_wanted": "growth, control, or survival",
+        "fatal_misread": conflict,
+        "first_big_bet": conflict,
+        "hidden_weakness": "the weakness exposed by the public record",
+        "darkest_moment": "the moment the strategy could no longer be defended",
+        "midroll_tension": "the unresolved decision that decides whether the company survives",
+        "final_image": f"a concrete final image showing what remained of {company}",
+        "one_sentence_thesis": f"{company}'s story turns on how {conflict} changed the business.",
+        "core_fact_ids": [],
+        "support_fact_ids": [],
+        "callout_fact_ids": [],
+        "discarded_fact_ids": [],
+    }
+
+
+def _normalize_narrative_spine(raw, incident: dict) -> dict:
+    spine = raw if isinstance(raw, dict) else {}
+    out = _fallback_narrative_spine(incident)
+    allowed_modes = {
+        "chronological",
+        "cold_open_then_chronological",
+        "investigation_reveal",
+    }
+    for key in out:
+        if key.endswith("_ids"):
+            value = spine.get(key)
+            if isinstance(value, list):
+                out[key] = [str(v).strip() for v in value if str(v).strip()]
+        else:
+            value = spine.get(key)
+            if isinstance(value, str) and value.strip():
+                out[key] = value.strip()
+    if out["timeline_mode"] not in allowed_modes:
+        out["timeline_mode"] = "cold_open_then_chronological"
+    return out
+
+
+def _filter_fact_claims_for_spine(
+    fact_claims: list[dict], spine: dict, *, max_claims: int = 32,
+) -> list[dict]:
+    selected_ids: list[str] = []
+    for key in ("core_fact_ids", "support_fact_ids", "callout_fact_ids"):
+        for cid in spine.get(key) or []:
+            cid = str(cid).strip()
+            if cid and cid not in selected_ids:
+                selected_ids.append(cid)
+    if not selected_ids:
+        return fact_claims[:max_claims]
+
+    by_id = {str(c.get("id") or ""): c for c in fact_claims}
+    selected = [by_id[cid] for cid in selected_ids if cid in by_id]
+    if len(selected) < min(18, len(fact_claims)):
+        seen = {str(c.get("id") or "") for c in selected}
+        for claim in fact_claims:
+            cid = str(claim.get("id") or "")
+            if cid not in seen:
+                selected.append(claim)
+                seen.add(cid)
+            if len(selected) >= min(max_claims, len(fact_claims)):
+                break
+    return selected[:max_claims]
+
 def _generate_staged_within_range(
     llm,
     *,
@@ -777,6 +936,7 @@ def _generate_staged_within_range(
     visual_style_name: str,
     character_iconography: str,
     fact_ledger_json: str,
+    narrative_spine_json: str,
     retention_dip_warnings: str,
     target_words: int,
     min_words: int,
@@ -824,6 +984,7 @@ def _generate_staged_within_range(
                 visual_style_name=visual_style_name,
                 character_iconography=character_iconography,
                 fact_ledger_json=fact_ledger_json,
+                narrative_spine_json=narrative_spine_json,
                 retention_dip_warnings=retention_dip_warnings,
                 target_words=target_words,
                 min_words=min_words,
@@ -970,6 +1131,7 @@ def _generate_via_blueprint_and_acts(
     visual_style_name: str,
     character_iconography: str,
     fact_ledger_json: str,
+    narrative_spine_json: str,
     retention_dip_warnings: str,
     target_words: int,
     min_words: int,
@@ -1007,6 +1169,7 @@ def _generate_via_blueprint_and_acts(
         "visual_style_name": visual_style_name,
         "character_iconography": character_iconography,
         "fact_ledger_json": fact_ledger_json,
+        "narrative_spine_json": narrative_spine_json,
         "retention_dip_warnings": retention_dip_warnings,
     }
 

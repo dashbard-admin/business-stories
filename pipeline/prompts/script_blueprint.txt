@@ -18,6 +18,9 @@ EPISODE:
 ACT BUDGETS:
 {act_specs_json}
 
+LOCKED NARRATIVE SPINE:
+{narrative_spine_json}
+
 FACT LEDGER — only these facts may be stated as true:
 {fact_ledger_json}
 
@@ -28,14 +31,16 @@ PERFORMANCE FEEDBACK:
 {retention_dip_warnings}
 
 Your job:
-- Assign the strongest available fact IDs to each act.
-- Design Act 0 around a first-15-second contradiction, mystery, or consequence.
-- Give every act a hook_or_turn that creates forward motion.
+- Use the narrative spine as the episode's story contract.
+- Assign only the spine's core/support/callout facts unless a missing bridge is essential.
+- Design Act 0 around the central question and a first-15-second contradiction.
+- Give every act a causal turn: what the viewer believed, what changes, and what question opens next.
 - Build for a tight 9-11 minute episode: every act must earn its place.
 - Include documentary-evidence facts in ACT_3_5 when available, but keep it lean.
 - Identify 3-6 numeric callout opportunities across the whole episode.
 - Keep recurring props concrete and story-specific, not generic logos.
 - Plan one major mid-roll tension landing inside ACT_4 around the 8-minute mark.
+- Avoid repeated events, repeated explanations, and generic "lesson" endings.
 
 Return JSON only:
 {{
@@ -46,10 +51,17 @@ Return JSON only:
       "target_words": 80,
       "target_beats": 2,
       "hook_or_turn": "specific retention purpose for this act",
+      "viewer_believes": "what the viewer believes at act start",
+      "what_changes": "new causal information this act proves",
+      "question_opened": "question that pulls into the next act",
       "facts_to_use": ["claim ids"],
       "beats": [
         {{
           "beat_goal": "what this beat must accomplish",
+          "event": "specific event or evidence",
+          "why_it_happened": "cause from prior beat/act",
+          "what_changed": "consequence created by this beat",
+          "new_question_created": "specific question or null",
           "fact_ids": ["claim ids"],
           "visual_anchor": "specific object/person/place for continuity",
           "callout_text": "$X.XB or null"
