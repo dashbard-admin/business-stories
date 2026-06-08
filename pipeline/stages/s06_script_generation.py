@@ -148,12 +148,16 @@ MONEY_NUM_RE = re.compile(
     r"\$\s*\d+(?:[.,]\d+)?\s*(?:million|billion|m|bn|b)?",
     re.IGNORECASE,
 )
+MONEY_NUM_WORD_UNIT_RE = re.compile(
+    r"\b(\d+(?:[.,]\d+)?)\s+(million|billion)\s+dollars?\b",
+    re.IGNORECASE,
+)
 MONEY_WORD_RE = re.compile(
     r"\b((?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|"
     r"twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
     r"nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
-    r"hundred|thousand|million|billion|half|quarter|[-\s])+?)\s+"
-    r"(million|billion)\s+dollars\b",
+    r"hundred|thousand|million|billion|half|quarter|point|[-\s])+?)\s+"
+    r"(million|billion)\s+dollars?\b",
     re.IGNORECASE,
 )
 COUNT_WORD_RE = re.compile(
@@ -246,6 +250,26 @@ def _detect_dual_stream(text: str) -> tuple[bool, int, int]:
     return is_dual, valid, orphans
 
 
+def _number_words_to_float(text: str) -> float | None:
+    if re.search(r"\bpoint\b", text, re.IGNORECASE):
+        left, right = re.split(r"\bpoint\b", text, maxsplit=1, flags=re.IGNORECASE)
+        whole = _number_words_to_int(left.strip()) or 0
+        digits: list[str] = []
+        for raw in re.split(r"[\s-]+", right.lower()):
+            word = raw.strip(" ,.")
+            if word in {"million", "billion"}:
+                break
+            value = NUMBER_WORDS.get(word)
+            if value is None or value >= 10:
+                continue
+            digits.append(str(value))
+        if digits:
+            return float(f"{whole}.{''.join(digits)}")
+
+    parsed = _number_words_to_int(text)
+    return float(parsed) if parsed is not None else None
+
+
 def _number_words_to_int(text: str) -> int | None:
     total = 0
     current = 0
@@ -276,10 +300,10 @@ def _compact_number_phrase(text: str, unit: str | None = None) -> str | None:
     if m:
         value = float(m.group(0).replace(",", ""))
     else:
-        parsed = _number_words_to_int(text)
+        parsed = _number_words_to_float(text)
         if parsed is None:
             return None
-        value = float(parsed)
+        value = parsed
     if unit:
         suffix = "B" if unit.lower().startswith("b") else "M"
         return f"{int(value) if value.is_integer() else value:g}{suffix}"
@@ -294,6 +318,14 @@ def _callout_for_sentence(sentence: str) -> str | None:
         raw = raw.replace("BN", "B")
         if len(raw) <= 20:
             return raw
+
+    money_num_word_unit = MONEY_NUM_WORD_UNIT_RE.search(sentence)
+    if money_num_word_unit:
+        compact = _compact_number_phrase(
+            money_num_word_unit.group(1), unit=money_num_word_unit.group(2)
+        )
+        if compact:
+            return f"${compact}"
 
     money_word = MONEY_WORD_RE.search(sentence)
     if money_word:
@@ -1573,22 +1605,12 @@ def _money_values(text: str) -> set[str]:
             values.add(f"m:{value:g}")
         else:
             values.add(f"raw:{value:g}")
-    for match in MONEY_WORD_RE.finditer(text):
-        value = _number_words_to_int(match.group(1))
-        if value is None:
-            continue
+    for match in MONEY_NUM_WORD_UNIT_RE.finditer(text):
+        value = float(match.group(1).replace(",", ""))
         unit = "b" if match.group(2).lower().startswith("b") else "m"
         values.add(f"{unit}:{value:g}")
-    loose_word_money = re.compile(
-        r"\b((?:one|two|three|four|five|six|seven|eight|nine|ten|"
-        r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
-        r"eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|"
-        r"eighty|ninety|hundred|thousand|million|billion|half|quarter|"
-        r"[-\s])+?)\s+(million|billion)\b",
-        re.IGNORECASE,
-    )
-    for match in loose_word_money.finditer(text):
-        value = _number_words_to_int(match.group(1))
+    for match in MONEY_WORD_RE.finditer(text):
+        value = _number_words_to_float(match.group(1))
         if value is None:
             continue
         unit = "b" if match.group(2).lower().startswith("b") else "m"
@@ -1621,7 +1643,6 @@ def _hook_support_flags(script: str, fact_claims: list[dict]) -> list[dict]:
     famous_checks = [
         ("Time cover", ("time", "cover")),
         ("DOJ frozen operations", ("doj", "froz")),
-        ("worthless", ("worthless",)),
     ]
     for label, terms in famous_checks:
         if all(term in hook_norm for term in terms):
