@@ -43,6 +43,8 @@ STORY RULES:
   weakness → public pressure/evidence → consequence → final puzzle.
 - Every beat must move causally: event → why it happened → what changed.
 - Use fewer facts well. Do not list every ledger item.
+- Do not repeat a sentence, tagline, thesis phrase, final image, or
+  explanation. If you already made the point, move to the next cause.
 - Re-hook every {hook_words_first_min}-{hook_words_first_max} words in the first half and every {hook_words_late_min}-{hook_words_late_max} words
   after that. Each re-hook must be a short ledger-specific sentence.
 - Around minute 8, land the spine's midroll_tension before resolving.
@@ -55,6 +57,9 @@ STYLE RULES:
 - Concrete scenes and objects beat abstract commentary.
 - Avoid repeated events, numbers, metaphors, and legal explanations.
 - No invented dates, quotes, motives, dialogue, or legal findings.
+- No invented document/source references. Do not mention an S-1, SEC
+  filing, deposition, court filing, or verbatim document language unless
+  that exact source type appears in the fact ledger.
 - No generic closers like "the lesson is clear" or "the future is uncertain".
 - Avoid every forbidden phrase below.
 

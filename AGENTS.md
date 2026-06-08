@@ -463,6 +463,7 @@ Writer LLM with `script_narrative_spine.txt` → `script_generate.txt` by defaul
 
 **Story-quality guards *(2026-06-08)*:** S06 now removes near-duplicate adjacent/recent beat bodies before writing `script.txt`, recording removed beats in `script_story_quality_flags.json`. It also checks high-impact opening money/valuation/cover/frozen-operations claims against the full fact ledger; unsupported opening claims return `needs_human` instead of letting a contaminated hook ship. ACT_5 is required to end on the spine's concrete final image plus a puzzle, unresolved tradeoff, or viewer-facing question that naturally invites comments; the final two beats should not introduce fresh evidence unless it directly pays off the hook.
 The hook money validator is intentionally narrow: it checks only explicit money/valuation phrases (`$4.5M`, `four point five million dollars`, etc.) against the ledger, and does not treat count metrics like `forty million visitors` as money.
+Single-pass S06 attempts also score repeated sentences/motifs and unsupported document/source references (S-1, SEC filing, deposition, `appears verbatim`, etc.) during the retry loop. These story-quality flags are written to `script_story_quality_flags.json` and block S06 if no clean retry is produced.
 
 `[CALLOUT: "$9 BILLION"]` markers are **mandatory** (3-6 per script, hardened Batch H 2026-05-28, tightened Batch J 2026-05-29). Batch J rules:
 - HARD CAP: max 6 across the entire script (Quibi v3 shipped 36).

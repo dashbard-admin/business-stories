@@ -686,6 +686,7 @@ def run(episode: dict, queue: dict) -> str | None:
             max_attempts=max_attempts, temp_step=temp_step,
             forbidden=forbidden,
             prompt_log_path=prompt_log_path,
+            ledger_text=fact_ledger_json,
         )
 
     # Length gate — last-mile expand/condense
@@ -826,6 +827,7 @@ def run(episode: dict, queue: dict) -> str | None:
     quality_flags = {
         "duplicate_beats_removed": duplicate_flags,
         "hook_support_flags": _hook_support_flags(script, fact_claims),
+        "story_quality_flags": _story_quality_flags(script, fact_ledger_json),
     }
 
     (ws / "02_script").mkdir(exist_ok=True)
@@ -849,6 +851,14 @@ def run(episode: dict, queue: dict) -> str | None:
             "fact ledger: "
             + ", ".join(
                 f.get("claim", "") for f in quality_flags["hook_support_flags"][:3]
+            )
+        )
+    if quality_flags["story_quality_flags"]:
+        return (
+            "script failed story-quality gate: "
+            + "; ".join(
+                str(f.get("reason") or f.get("type") or f)
+                for f in quality_flags["story_quality_flags"][:3]
             )
         )
 
@@ -1665,6 +1675,89 @@ def _hook_support_flags(script: str, fact_claims: list[dict]) -> list[dict]:
     return flags
 
 
+def _story_quality_flags(script: str, ledger_text: str = "") -> list[dict]:
+    flags: list[dict] = []
+    ledger_norm = ledger_text.lower()
+
+    sentence_counts: dict[str, tuple[int, str]] = {}
+    cleaned = CALLOUT_RE.sub("", script)
+    cleaned = BEAT_RE.sub("", cleaned)
+    for match in SENTENCE_RE.finditer(cleaned):
+        sentence = re.sub(r"\s+", " ", match.group(0)).strip()
+        norm = _dedupe_norm(sentence)
+        if len(norm.split()) < 5:
+            continue
+        count, original = sentence_counts.get(norm, (0, sentence))
+        sentence_counts[norm] = (count + 1, original)
+
+    repeated = [
+        (count, original)
+        for count, original in sentence_counts.values()
+        if count >= 2
+    ]
+    repeated.sort(reverse=True, key=lambda item: item[0])
+    for count, sentence in repeated[:5]:
+        flags.append({
+            "type": "repeated_sentence",
+            "reason": f"repeated sentence x{count}: {sentence[:120]}",
+        })
+
+    beat_bodies = [_dedupe_norm(body) for _num, body in _beat_segments(script)]
+    motif_counts: dict[str, int] = {}
+    for body in beat_bodies:
+        words = body.split()
+        for size in (5, 6, 7):
+            for idx in range(0, max(0, len(words) - size + 1)):
+                phrase = " ".join(words[idx:idx + size])
+                if _is_low_signal_phrase(phrase):
+                    continue
+                motif_counts[phrase] = motif_counts.get(phrase, 0) + 1
+    motifs = [
+        (count, phrase)
+        for phrase, count in motif_counts.items()
+        if count >= 3
+    ]
+    motifs.sort(reverse=True)
+    for count, phrase in motifs[:5]:
+        flags.append({
+            "type": "repeated_motif",
+            "reason": f"repeated phrase x{count}: {phrase}",
+        })
+
+    unsupported_refs = [
+        ("S-1 filing", r"\bS-?1\b"),
+        ("SEC filing", r"\bSEC filing\b"),
+        ("10-K filing", r"\b10-K\b"),
+        ("10-Q filing", r"\b10-Q\b"),
+        ("deposition", r"\bdeposition\b"),
+        ("verbatim document claim", r"\bappears verbatim\b|\bverbatim in\b"),
+    ]
+    script_norm = script.lower()
+    for label, pattern in unsupported_refs:
+        if re.search(pattern, script, re.IGNORECASE) and not re.search(
+            pattern, ledger_norm, re.IGNORECASE
+        ):
+            flags.append({
+                "type": "unsupported_document_reference",
+                "reason": f"unsupported document/source reference: {label}",
+            })
+
+    return flags[:10]
+
+
+def _is_low_signal_phrase(phrase: str) -> bool:
+    words = phrase.split()
+    if not words:
+        return True
+    stop = {
+        "the", "a", "an", "and", "or", "but", "of", "to", "in", "for",
+        "with", "that", "this", "was", "were", "is", "are", "it", "its",
+        "as", "by", "on", "from", "at", "had", "has", "have",
+    }
+    meaningful = [w for w in words if w not in stop and len(w) > 2]
+    return len(meaningful) < 3
+
+
 def _rewrite_forbidden_sentences(
     llm,
     script: str,
@@ -1927,6 +2020,7 @@ def _generate_within_range(
     temp_step: float = 0.05,
     forbidden: list[str] | None = None,
     prompt_log_path: "Path | None" = None,
+    ledger_text: str = "",
 ) -> str:
     """Generate a script that lands inside [min_w, max_w] words AND
     contains NONE of the `forbidden` phrases, retrying up to
@@ -1962,6 +2056,7 @@ def _generate_within_range(
 
     last_wc: int | None = None
     last_hits: list[str] = []
+    last_story_flags: list[dict] = []
 
     def _write_prompt(p: str) -> None:
         """Overwrite the prompt log on disk so the operator can inspect
@@ -2011,6 +2106,21 @@ def _generate_within_range(
                     "reference.\n"
                     "*** END FORBIDDEN PHRASE NUDGE ***\n"
                 )
+            if last_story_flags:
+                pressure_parts.append(
+                    "*** STORY QUALITY NUDGE ***\n"
+                    "Your previous draft failed story quality checks:\n"
+                    + "\n".join(
+                        f"  - {f.get('reason') or f.get('type') or f}"
+                        for f in last_story_flags[:8]
+                    )
+                    + "\n\nRewrite as one chronological story. Do not "
+                    "repeat the same event, sentence, turn of phrase, "
+                    "or final image. Do not claim a document, filing, "
+                    "or quotation exists unless it appears in the fact "
+                    "ledger. Keep the narrator moving forward.\n"
+                    "*** END STORY QUALITY NUDGE ***\n"
+                )
 
         prompt = (
             "\n".join(pressure_parts) + "\n" + base_prompt
@@ -2040,17 +2150,22 @@ def _generate_within_range(
                 )
         wc = len(script.split())
         hits = _find_forbidden(script, forbidden) if forbidden else []
+        story_flags = _story_quality_flags(script, ledger_text)
         last_wc = wc
         last_hits = hits
+        last_story_flags = story_flags
         distance = max(0, min_w - wc, wc - max_w)
         in_range = min_w <= wc <= max_w
-        is_clean = not hits
+        is_clean = not hits and not story_flags
 
         logger.info(
             "S06 attempt %d: %d words (dist=%d, in_range=%s, "
-            "forbidden_hits=%d%s)",
+            "forbidden_hits=%d, story_flags=%d%s%s)",
             attempt + 1, wc, distance, in_range, len(hits),
-            f" {hits[:5]}" if hits else "",
+            len(story_flags),
+            f" forbidden={hits[:5]}" if hits else "",
+            f" story={[f.get('type') for f in story_flags[:5]]}"
+            if story_flags else "",
         )
 
         # Best-case: in_range AND clean → return now. The prompt file
