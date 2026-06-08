@@ -1235,9 +1235,20 @@ def _generate_via_blueprint_and_acts(
         "S06 staged generation attempt %d: creating blueprint",
         attempt_index + 1,
     )
-    blueprint = llm.complete_json(
-        blueprint_prompt, temperature=0.35, max_tokens=6000,
-    )
+    try:
+        blueprint = llm.complete_json(
+            blueprint_prompt, temperature=0.30, max_tokens=3500,
+        )
+    except Exception as e:
+        logger.warning(
+            "S06 blueprint JSON failed; using deterministic compact blueprint: %s",
+            e,
+        )
+        blueprint = _fallback_blueprint(
+            act_specs,
+            narrative_spine_json=narrative_spine_json,
+            fact_ledger_json=fact_ledger_json,
+        )
     blueprint = _normalize_blueprint(blueprint, act_specs)
     (ws / "02_script" / "script_blueprint.json").write_text(
         json.dumps(blueprint, indent=2)
@@ -1342,6 +1353,99 @@ def _normalize_blueprint(raw, act_specs: list[dict]) -> dict:
         act.setdefault("hook_or_turn", "")
         normalized["acts"].append(act)
     return normalized
+
+
+def _fallback_blueprint(
+    act_specs: list[dict],
+    *,
+    narrative_spine_json: str,
+    fact_ledger_json: str,
+) -> dict:
+    """Small local blueprint used when the LLM over-produces JSON.
+
+    The act writer still receives the full narrative spine and fact ledger;
+    this only preserves act-level causal scaffolding so generation can
+    proceed instead of burning the entire retry budget on blueprint parsing.
+    """
+    spine = _json_obj(narrative_spine_json)
+    claim_ids = _fact_ids_from_json(fact_ledger_json)
+    chunks = _chunk_evenly(claim_ids, len(act_specs))
+    acts = []
+    for idx, spec in enumerate(act_specs):
+        act_id = spec["act_id"]
+        title = spec["title"]
+        if act_id == "ACT_0":
+            turn = spine.get("central_question") or "open with the contradiction"
+            believes = "the audience sees the visible outcome"
+            changes = spine.get("fatal_misread") or "the hidden mistake appears"
+        elif act_id == "ACT_5":
+            turn = spine.get("ending_mode") or "pay off the central question"
+            believes = "the story is resolved"
+            changes = spine.get("final_image") or "one concrete image remains"
+        else:
+            turn = spine.get("one_sentence_thesis") or "advance the causal chain"
+            believes = "the prior act's explanation seems sufficient"
+            changes = "the next pressure point changes the story"
+        acts.append({
+            "act_id": act_id,
+            "title": title,
+            "target_words": spec["target_words"],
+            "target_beats": spec["target_beats"],
+            "hook_or_turn": str(turn)[:220],
+            "viewer_believes": str(believes)[:160],
+            "what_changes": str(changes)[:180],
+            "question_opened": str(spine.get("central_question") or "")[:180],
+            "facts_to_use": chunks[idx][:6] if idx < len(chunks) else [],
+            "must_include": [],
+            "visual_anchor": str(spine.get("final_image") or "")[:160],
+            "callout_candidates": [],
+            "beats": [],
+        })
+    return {
+        "acts": acts,
+        "recurring_props": [],
+        "open_questions_to_pay_off": [
+            q for q in [spine.get("central_question"), spine.get("midroll_tension")]
+            if q
+        ],
+    }
+
+
+def _json_obj(text: str) -> dict:
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _fact_ids_from_json(text: str) -> list[str]:
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return []
+    if isinstance(parsed, dict):
+        claims = parsed.get("claims") or parsed.get("fact_claims") or parsed.get("facts") or []
+    elif isinstance(parsed, list):
+        claims = parsed
+    else:
+        claims = []
+    ids = []
+    for claim in claims:
+        if isinstance(claim, dict):
+            cid = str(claim.get("id") or claim.get("claim_id") or "").strip()
+            if cid:
+                ids.append(cid)
+    return ids
+
+
+def _chunk_evenly(items: list[str], count: int) -> list[list[str]]:
+    if count <= 0:
+        return []
+    chunks = [[] for _ in range(count)]
+    for idx, item in enumerate(items):
+        chunks[idx % count].append(item)
+    return chunks
 
 
 def _blueprint_for_act(blueprint: dict, act_id: str) -> dict:

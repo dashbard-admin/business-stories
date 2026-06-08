@@ -51,10 +51,10 @@ RULES:
   one sharp example over three supporting examples.
 - Preserve factual discipline: no invented dates, quotes, money, dialogue,
   motives, employee counts, or legal findings.
-- If any beat in ACT BLUEPRINT has a non-null callout_text, you MUST
-  place that exact [CALLOUT: "..."] marker after the sentence carrying
-  that number/date. Include additional callouts only when the fact
-  ledger supports a concrete number/date.
+- If ACT BLUEPRINT has callout_candidates, place the exact
+  [CALLOUT: "..."] marker after the sentence carrying that number/date.
+  Include additional callouts only when the fact ledger supports a
+  concrete number/date.
 - A CALLOUT must contain a digit, dollar sign, or date abbreviation and
   must be 20 characters or fewer.
 - Vary sentence length. After several long sentences, use one short
