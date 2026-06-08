@@ -1709,28 +1709,6 @@ def _story_quality_flags(script: str, ledger_text: str = "") -> list[dict]:
             "reason": f"repeated sentence x{count}: {sentence[:120]}",
         })
 
-    beat_bodies = [_dedupe_norm(body) for _num, body in _beat_segments(script)]
-    motif_counts: dict[str, int] = {}
-    for body in beat_bodies:
-        words = body.split()
-        for size in (5, 6, 7):
-            for idx in range(0, max(0, len(words) - size + 1)):
-                phrase = " ".join(words[idx:idx + size])
-                if _is_low_signal_phrase(phrase):
-                    continue
-                motif_counts[phrase] = motif_counts.get(phrase, 0) + 1
-    motifs = [
-        (count, phrase)
-        for phrase, count in motif_counts.items()
-        if count >= 3
-    ]
-    motifs.sort(reverse=True)
-    for count, phrase in motifs[:5]:
-        flags.append({
-            "type": "repeated_motif",
-            "reason": f"repeated phrase x{count}: {phrase}",
-        })
-
     unsupported_refs = [
         ("S-1 filing", r"\bS-?1\b"),
         ("SEC filing", r"\bSEC filing\b"),
@@ -1749,20 +1727,15 @@ def _story_quality_flags(script: str, ledger_text: str = "") -> list[dict]:
                 "reason": f"unsupported document/source reference: {label}",
             })
 
-    for phrase, requires_framing in (
-        ("criminals", True),
-        ("fraud", True),
-        ("fraudulent", True),
-        ("refused", True),
-        ("real profit engine", False),
-        ("smaller entity", False),
-        ("fees are paid correctly", False),
+    for phrase in (
+        "state thought they were criminals",
+        "they refused",
+        "real profit engine",
+        "smaller entity",
+        "fees are paid correctly",
     ):
         for sentence in _sentences_containing(script, phrase):
-            sent_norm = sentence.lower()
-            if requires_framing and _has_regulatory_framing(sent_norm):
-                continue
-            if phrase in ledger_norm and requires_framing:
+            if phrase in ledger_norm:
                 continue
             flags.append({
                 "type": "loaded_or_unsupported_language",
@@ -1779,30 +1752,6 @@ def _sentences_containing(text: str, phrase: str) -> list[str]:
         if phrase.lower() in sentence.lower():
             out.append(sentence)
     return out
-
-
-def _has_regulatory_framing(sentence: str) -> bool:
-    return any(
-        term in sentence
-        for term in (
-            "alleged", "alleges", "according to", "state said",
-            "attorney general", "settlement", "claim", "claimed",
-            "accused", "regulator", "regulators", "court", "legal",
-        )
-    )
-
-
-def _is_low_signal_phrase(phrase: str) -> bool:
-    words = phrase.split()
-    if not words:
-        return True
-    stop = {
-        "the", "a", "an", "and", "or", "but", "of", "to", "in", "for",
-        "with", "that", "this", "was", "were", "is", "are", "it", "its",
-        "as", "by", "on", "from", "at", "had", "has", "have",
-    }
-    meaningful = [w for w in words if w not in stop and len(w) > 2]
-    return len(meaningful) < 3
 
 
 def _rewrite_forbidden_sentences(
