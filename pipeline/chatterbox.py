@@ -222,7 +222,9 @@ def _load_ref_audio(path: Path) -> str:
 
 def _estimate_duration(text: str, speed: float) -> float:
     words = max(1, len(text.split()))
-    base_seconds = (words / 160.0) * 60.0
+    cfg = load_config()
+    wpm = max(1.0, float(cfg.production.get("wpm_effective", 150)))
+    base_seconds = (words / wpm) * 60.0
     return max(0.5, base_seconds / max(0.5, speed))
 
 

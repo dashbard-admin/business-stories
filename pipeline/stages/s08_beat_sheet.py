@@ -31,8 +31,6 @@ from ..state import find_episode_workspace
 
 logger = logging.getLogger("hermes.stage.s08")
 
-WPM = 120  # anchored to script_generate.txt's hook-cadence math
-
 BEAT_RE = re.compile(r"##\s*BEAT\s+(\d+)\s*##", re.IGNORECASE)
 
 
@@ -76,8 +74,8 @@ def _dedupe_beat_rows(beats: list) -> list[dict]:
     return out
 
 
-def _estimate_seconds(text: str) -> float:
-    return (len(text.split()) / WPM) * 60.0
+def _estimate_seconds(text: str, wpm_effective: float) -> float:
+    return (len(text.split()) / max(1.0, wpm_effective)) * 60.0
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -673,7 +671,10 @@ def run(episode: dict, queue: dict) -> str | None:
         )
 
     for b in beats:
-        b.setdefault("estimated_seconds", _estimate_seconds(b.get("script_text", "")))
+        b.setdefault(
+            "estimated_seconds",
+            _estimate_seconds(b.get("script_text", ""), wpm_effective),
+        )
 
     # ----- Ken Burns motion variety (Batch F 2026-05-27) -----
     # The writer LLM tends to default every beat to slow_zoom_in, which

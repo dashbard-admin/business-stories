@@ -352,6 +352,18 @@ def _callout_for_sentence(sentence: str) -> str | None:
     return None
 
 
+def _hook_cadence_words(wpm: float) -> dict[str, int]:
+    wpm = max(1.0, float(wpm))
+    return {
+        "hook_words_first_min": int(round(wpm * 60 / 60)),
+        "hook_words_first_max": int(round(wpm * 90 / 60)),
+        "hook_words_late_min": int(round(wpm * 90 / 60)),
+        "hook_words_late_max": int(round(wpm * 120 / 60)),
+        "midroll_word_min": int(round(wpm * 7.8)),
+        "midroll_word_max": int(round(wpm * 8.4)),
+    }
+
+
 def _ensure_callout_markers(
     script: str,
     *,
@@ -527,6 +539,8 @@ def run(episode: dict, queue: dict) -> str | None:
         for c in ledger.get("claims", [])
     ]
     fact_ledger_json = json.dumps(fact_claims, indent=2)
+    wpm_effective = max(1.0, float(cfg.production.get("wpm_effective", 150)))
+    hook_cadence = _hook_cadence_words(wpm_effective)
 
     forbidden = _load_forbidden()
     spine = _build_narrative_spine(
@@ -573,6 +587,7 @@ def run(episode: dict, queue: dict) -> str | None:
         target_beats=target_beats,
         retention_dip_warnings=perf["retention_dip_warnings"],
         forbidden_phrases="\n".join(f"  - {p}" for p in forbidden),
+        **hook_cadence,
     )
 
     # Retry budget + temperature decay are operator-tunable per
@@ -1704,8 +1719,8 @@ def _redistribute_beats(script: str, target_count: int) -> str:
     splitting mid-sentence or mid-word.
 
     Hard floor: every beat must contain at least MIN_WORDS_PER_BEAT
-    (20) words. At 160 wpm that's ~7.5 seconds of narration per
-    beat — the minimum needed for a viewer to register the image
+    (20) words. At the current 150 wpm documentary pace, that's ~8
+    seconds of narration per beat — the minimum needed for a viewer to register the image
     on screen. If the script is too short to hit `target_count`
     while respecting the floor, we return FEWER beats and let the
     downstream min_total_beats gate surface "script too short" as

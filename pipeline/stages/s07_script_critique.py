@@ -58,6 +58,20 @@ def _normalize(text: str) -> str:
     return _WS_RE.sub(" ", text).strip()
 
 
+def _hook_cadence_words(wpm: float) -> dict[str, int | float]:
+    wpm = max(1.0, float(wpm))
+    return {
+        "wpm_effective": wpm,
+        "first_six_minutes_words": int(round(wpm * 6)),
+        "hook_words_first_min": int(round(wpm * 60 / 60)),
+        "hook_words_first_max": int(round(wpm * 90 / 60)),
+        "hook_words_late_min": int(round(wpm * 90 / 60)),
+        "hook_words_late_max": int(round(wpm * 120 / 60)),
+        "midroll_word_min": int(round(wpm * 7.8)),
+        "midroll_word_max": int(round(wpm * 8.4)),
+    }
+
+
 def _apply_rewrite(script: str, original: str, replacement: str) -> tuple[str, str]:
     if original in script:
         return script.replace(original, replacement, 1), "exact"
@@ -123,6 +137,9 @@ def run(episode: dict, queue: dict) -> str | None:
     incident = episode["incident"]
     narrator_id = episode["narrator"]
     narr = cfg.narrator_by_id(narrator_id)
+    hook_cadence = _hook_cadence_words(
+        float(cfg.production.get("wpm_effective", 150))
+    )
 
     for loop in range(MAX_LOOPS):
         prompt = template.format(
@@ -132,6 +149,7 @@ def run(episode: dict, queue: dict) -> str | None:
             narrator_name=narr["name"],
             narrator_tone=narr.get("tone", ""),
             script=script,
+            **hook_cadence,
         )
         try:
             review = critic.complete_json(

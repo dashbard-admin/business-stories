@@ -119,10 +119,10 @@ def _chunk_text(text: str, max_words: int) -> list[str]:
 
 
 def _estimate_duration(text: str, speed: float) -> float:
-    # 120 wpm matches the cadence the writer prompt is calibrated
-    # against (Act 0-5 timing schedule in script_generate.txt).
+    cfg = load_config()
+    wpm = max(1.0, float(cfg.production.get("wpm_effective", 150)))
     words = max(1, len(text.split()))
-    base_seconds = (words / 120.0) * 60.0
+    base_seconds = (words / wpm) * 60.0
     return max(0.5, base_seconds / max(0.5, speed))
 
 

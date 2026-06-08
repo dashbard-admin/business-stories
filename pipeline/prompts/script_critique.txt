@@ -10,7 +10,7 @@ EPISODE CONTEXT:
 - Hero (locked at S1): {hero}
 - Conflict (locked at S1): {conflict}
 - Narrator: {narrator_name} ({narrator_tone})
-- Reading cadence: 160 words per minute throughout.
+- Reading cadence: {wpm_effective:.0f} words per minute throughout.
 - Target length: roughly 9-11 minutes spoken. The episode should be
   tight enough to avoid padding while still clearing the 8-minute
   mid-roll threshold.
@@ -88,12 +88,12 @@ fixable in place.
 3. HOOK CADENCE AUDIT  (the critical retention check)
    - 15-second strong hook in the very first sentences (see
      Act 0 audit above).
-   - For the first ~6 minutes (i.e. the first ~960 words),
+   - For the first ~6 minutes (i.e. the first ~{first_six_minutes_words} words),
      a re-hook fires every 60-90 seconds — that is, every
-     160-240 words. Expect ~4-5 re-hooks in this window.
+     {hook_words_first_min}-{hook_words_first_max} words. Expect ~4-5 re-hooks in this window.
    - From ~6 minutes to the end of the script (i.e. word
-     ~960 to the end), a re-hook fires every 90-120 seconds —
-     every 240-320 words. Expect another ~2-3 re-hooks.
+     ~{first_six_minutes_words} to the end), a re-hook fires every 90-120 seconds —
+     every {hook_words_late_min}-{hook_words_late_max} words. Expect another ~2-3 re-hooks.
    - Each re-hook is ONE sentence — short, declarative,
      forward-looking. It plants something the next 90-180
      seconds will pay off.
@@ -112,8 +112,8 @@ fixable in place.
    OR >420 words in the second half that has no re-hook.
 
 4. MID-ROLL TENSION LANDING AUDIT
-   One specific cliff-point must land around word ~1250-1350
-   (roughly minute 8 at 160 wpm): the viewer has crossed the
+   One specific cliff-point must land around word ~{midroll_word_min}-{midroll_word_max}
+   (roughly minute 8 at {wpm_effective:.0f} wpm): the viewer has crossed the
    mid-roll threshold, and the script needs a concrete unresolved
    question, dated decision, or number-driven cliff before resolving
    the story. Also check that Act 2 closes on an early tension turn,
@@ -233,7 +233,7 @@ For each fixable issue, provide an exact-match replacement
   otherwise the copy editor will skip it. Include enough
   surrounding context to make it unique.
 - Replacements must respect the narrator persona and the
-  160 wpm cadence (don't bloat a re-hook past one sentence).
+  {wpm_effective:.0f} wpm cadence (don't bloat a re-hook past one sentence).
 - Structural problems (missing act, missing re-hook in a
   long stretch) usually CANNOT be fixed by a single
   substring rewrite — flag them in `issues_summary` and
