@@ -77,5 +77,10 @@ SPECIAL ACT RULES:
   provides it. If evidence is thin, keep this act concise; do not pad it.
 - ACT_5: close with one concrete image. No "subscribe", no "in conclusion",
   no generic lesson-summary phrasing. Pay off narrative_spine.final_image.
+  In the final two beats, introduce no new evidence, roles, dates, fines,
+  or names unless they directly pay off the cold open. End with the
+  spine's ending_mode: one concrete image, then a puzzle/tradeoff/viewer
+  question that naturally invites comments. Do not write "comment below"
+  unless the wording feels native to the narrator voice.
 
 Output only the act prose with BEAT markers. No preamble. No code fences.

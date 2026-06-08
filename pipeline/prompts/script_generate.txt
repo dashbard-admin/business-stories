@@ -42,7 +42,8 @@ STORY RULES:
 - Re-hook every 160-240 words in the first half and every 240-320 words
   after that. Each re-hook must be a short ledger-specific sentence.
 - Around minute 8, land the spine's midroll_tension before resolving.
-- End on the spine's final_image, not a generic lesson.
+- End on the spine's final_image plus its ending_mode/viewer_question.
+- In the final two beats, add no new evidence unless it pays off the hook.
 
 STYLE RULES:
 - Concrete scenes and objects beat abstract commentary.

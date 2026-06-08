@@ -30,6 +30,8 @@ Return JSON only:
   "darkest_moment": "specific moment where the strategy breaks",
   "midroll_tension": "unresolved question/decision around minute 8",
   "final_image": "one concrete closing image",
+  "ending_mode": "viewer_question | moral_puzzle | unresolved_tradeoff | comment_invitation",
+  "viewer_question": "one sharp viewer-facing question for the final beat",
   "one_sentence_thesis": "causal thesis, not a moral",
   "core_fact_ids": ["claim ids in story order"],
   "support_fact_ids": ["claim ids"],
@@ -43,3 +45,4 @@ Rules:
 - No invented facts.
 - The central_question must name the company and the specific trap/bet.
 - The final_image must be visual and concrete.
+- The viewer_question must invite an opinion, not ask viewers to subscribe.

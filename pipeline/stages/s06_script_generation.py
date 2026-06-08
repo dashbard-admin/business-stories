@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import yaml
@@ -756,11 +757,25 @@ def run(episode: dict, queue: dict) -> str | None:
     # staged generation has already normalized markers; S08/S10/S12 must
     # see one contiguous beat-id sequence.
     script = _renumber_beats(script)
+    script, duplicate_flags = _remove_duplicate_beats(script)
+    if duplicate_flags:
+        logger.info(
+            "S06 duplicate-beat cleanup: removed %d duplicate beat(s)",
+            len(duplicate_flags),
+        )
+        script = _renumber_beats(script)
     beats = BEAT_RE.findall(script)
     wc = len(script.split())
+    quality_flags = {
+        "duplicate_beats_removed": duplicate_flags,
+        "hook_support_flags": _hook_support_flags(script, fact_claims),
+    }
 
     (ws / "02_script").mkdir(exist_ok=True)
     (ws / "02_script" / "script.txt").write_text(script)
+    (ws / "02_script" / "script_story_quality_flags.json").write_text(
+        json.dumps(quality_flags, indent=2)
+    )
 
     if _find_forbidden(script, forbidden):
         return f"forbidden phrase reintroduced by length retry: {_find_forbidden(script, forbidden)[:3]}"
@@ -771,6 +786,14 @@ def run(episode: dict, queue: dict) -> str | None:
         return f"only {len(beats)} BEAT markers (need {min_beats}) after redistribution"
     if len(beats) > max_beats:
         return f"too many BEAT markers ({len(beats)}) after consolidation; cap {max_beats}"
+    if quality_flags["hook_support_flags"]:
+        return (
+            "opening hook contains high-impact claim(s) not found in "
+            "fact ledger: "
+            + ", ".join(
+                f.get("claim", "") for f in quality_flags["hook_support_flags"][:3]
+            )
+        )
 
     (ws / "02_script" / "script_meta.json").write_text(json.dumps({
         "word_count": wc,
@@ -866,6 +889,8 @@ def _fallback_narrative_spine(incident: dict) -> dict:
         "darkest_moment": "the moment the strategy could no longer be defended",
         "midroll_tension": "the unresolved decision that decides whether the company survives",
         "final_image": f"a concrete final image showing what remained of {company}",
+        "ending_mode": "viewer_question",
+        "viewer_question": f"Would you still trust {company} after seeing the record?",
         "one_sentence_thesis": f"{company}'s story turns on how {conflict} changed the business.",
         "core_fact_ids": [],
         "support_fact_ids": [],
@@ -882,6 +907,12 @@ def _normalize_narrative_spine(raw, incident: dict) -> dict:
         "cold_open_then_chronological",
         "investigation_reveal",
     }
+    allowed_endings = {
+        "viewer_question",
+        "moral_puzzle",
+        "unresolved_tradeoff",
+        "comment_invitation",
+    }
     for key in out:
         if key.endswith("_ids"):
             value = spine.get(key)
@@ -893,6 +924,8 @@ def _normalize_narrative_spine(raw, incident: dict) -> dict:
                 out[key] = value.strip()
     if out["timeline_mode"] not in allowed_modes:
         out["timeline_mode"] = "cold_open_then_chronological"
+    if out["ending_mode"] not in allowed_endings:
+        out["ending_mode"] = "viewer_question"
     return out
 
 
@@ -1336,6 +1369,150 @@ def _renumber_beats(script: str) -> str:
     if idx == 0 and out.strip():
         out = f"## BEAT 1 ##\n\n{out.strip()}"
     return out.strip()
+
+
+def _beat_segments(script: str) -> list[tuple[int, str]]:
+    matches = list(BEAT_RE.finditer(script))
+    out: list[tuple[int, str]] = []
+    for idx, marker in enumerate(matches):
+        start = marker.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(script)
+        out.append((int(marker.group(1)), script[start:end].strip()))
+    return out
+
+
+def _dedupe_norm(text: str) -> str:
+    text = CALLOUT_RE.sub("", text)
+    text = re.sub(r"\[[^\]]+\]", " ", text)
+    text = re.sub(r"[^a-z0-9\s$.,-]", " ", text.lower())
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _remove_duplicate_beats(script: str) -> tuple[str, list[dict]]:
+    """Drop repeated beat bodies before S08 turns them into panels.
+
+    LLMs sometimes duplicate adjacent beats verbatim or near-verbatim
+    after a retry/condense pass. Keeping both creates repeated visuals
+    and stale-feeling narration, so we remove the later duplicate and
+    renumber downstream.
+    """
+    segments = _beat_segments(script)
+    if len(segments) <= 1:
+        return script, []
+
+    kept: list[tuple[int, str]] = []
+    flags: list[dict] = []
+    recent_norms: list[tuple[int, str]] = []
+    for beat_num, body in segments:
+        norm = _dedupe_norm(body)
+        duplicate_of: int | None = None
+        ratio = 0.0
+        for prev_num, prev_norm in recent_norms[-4:]:
+            if not norm or not prev_norm:
+                continue
+            shorter, longer = sorted((norm, prev_norm), key=len)
+            if len(shorter) >= 60 and shorter in longer:
+                duplicate_of = prev_num
+                ratio = 1.0
+                break
+            sim = SequenceMatcher(None, norm, prev_norm).ratio()
+            if sim >= 0.82:
+                duplicate_of = prev_num
+                ratio = sim
+                break
+        if duplicate_of is not None:
+            flags.append({
+                "beat_id": f"BEAT_{beat_num:02d}",
+                "duplicate_of": f"BEAT_{duplicate_of:02d}",
+                "similarity": round(ratio, 3),
+                "action": "removed",
+            })
+            continue
+        kept.append((beat_num, body))
+        recent_norms.append((beat_num, norm))
+
+    if not flags:
+        return script, []
+    rebuilt: list[str] = []
+    for idx, (_old_num, body) in enumerate(kept, start=1):
+        rebuilt.append(f"## BEAT {idx} ##\n{body.strip()}\n")
+    return "\n".join(rebuilt).strip(), flags
+
+
+def _money_values(text: str) -> set[str]:
+    values: set[str] = set()
+    for match in MONEY_NUM_RE.finditer(text):
+        raw = match.group(0).lower().replace(",", "")
+        num_m = re.search(r"\d+(?:\.\d+)?", raw)
+        if not num_m:
+            continue
+        value = float(num_m.group(0))
+        if any(unit in raw for unit in ("billion", "bn")) or raw.endswith("b"):
+            values.add(f"b:{value:g}")
+        elif any(unit in raw for unit in ("million",)) or raw.endswith("m"):
+            values.add(f"m:{value:g}")
+        else:
+            values.add(f"raw:{value:g}")
+    for match in MONEY_WORD_RE.finditer(text):
+        value = _number_words_to_int(match.group(1))
+        if value is None:
+            continue
+        unit = "b" if match.group(2).lower().startswith("b") else "m"
+        values.add(f"{unit}:{value:g}")
+    loose_word_money = re.compile(
+        r"\b((?:one|two|three|four|five|six|seven|eight|nine|ten|"
+        r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
+        r"eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|"
+        r"eighty|ninety|hundred|thousand|million|billion|half|quarter|"
+        r"[-\s])+?)\s+(million|billion)\b",
+        re.IGNORECASE,
+    )
+    for match in loose_word_money.finditer(text):
+        value = _number_words_to_int(match.group(1))
+        if value is None:
+            continue
+        unit = "b" if match.group(2).lower().startswith("b") else "m"
+        values.add(f"{unit}:{value:g}")
+    return values
+
+
+def _hook_support_flags(script: str, fact_claims: list[dict]) -> list[dict]:
+    segments = _beat_segments(script)
+    hook_text = " ".join(body for _num, body in segments[:2])
+    if not hook_text:
+        return []
+    hook_words = hook_text.split()
+    hook_excerpt = " ".join(hook_words[:90])
+    ledger_text = "\n".join(str(c.get("statement") or "") for c in fact_claims)
+    ledger_norm = ledger_text.lower()
+    flags: list[dict] = []
+
+    hook_money = _money_values(hook_excerpt)
+    ledger_money = _money_values(ledger_text)
+    unsupported_money = sorted(v for v in hook_money if v not in ledger_money)
+    for value in unsupported_money:
+        flags.append({
+            "claim": value,
+            "reason": "opening money/valuation claim not found in fact ledger",
+            "hook_excerpt": hook_excerpt[:300],
+        })
+
+    hook_norm = hook_excerpt.lower()
+    famous_checks = [
+        ("Time cover", ("time", "cover")),
+        ("DOJ frozen operations", ("doj", "froz")),
+        ("worthless", ("worthless",)),
+    ]
+    for label, terms in famous_checks:
+        if all(term in hook_norm for term in terms):
+            if not all(term in ledger_norm for term in terms):
+                flags.append({
+                    "claim": label,
+                    "reason": "opening high-impact claim not found in fact ledger",
+                    "hook_excerpt": hook_excerpt[:300],
+                })
+    return flags
 
 
 def _rewrite_forbidden_sentences(

@@ -81,3 +81,7 @@ substitutions:
     replace: "the downside is visible in the filings"
   - match: "the paper trail is the verdict"
     replace: "the paper trail carries the case"
+  - match: "the paper trail is the only truth left"
+    replace: "the documents narrow the question"
+  - match: "the silence is loud"
+    replace: "the record does not need to raise its voice"

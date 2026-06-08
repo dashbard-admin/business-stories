@@ -41,6 +41,10 @@ fixable in place.
    - No banned openings: "Welcome back", "Today we'll talk
      about", "In a world where", "Once upon a time", any
      channel intro, any "subscribe" line.
+   - Any high-impact opening number, valuation, famous cover, indictment,
+     bankruptcy, fine, or frozen-operations claim must be clearly supported
+     by the script's fact base. If it feels imported from another company
+     or unsupported, this is SHIP-BLOCKING.
    If any of the above is missing or weak, this is a
    SHIP-BLOCKING issue.
 
@@ -209,9 +213,14 @@ fixable in place.
      image? (If Act 0 opened with "$X billion today", Act 5
      should reference a different specific from that
      same number.)
-   - Does it land on a single concrete image or sentence —
-     NOT a subscribe / share / "tune in next time" line?
-   - One clear takeaway, not a list?
+   - Does it land on a single concrete image plus a puzzle, unresolved
+     tradeoff, or viewer-facing question?
+   - Does it avoid introducing new evidence, roles, dates, fines, or names
+     in the final two beats unless they directly pay off the hook?
+   - Does it invite viewers to take a position without generic creator
+     patter? Bad: "Let me know in the comments." Good: "Would you trust
+     the cheap fare after reading the fine print?"
+   - One clear unresolved question, not a list of morals.
 
 ================================================================
 REWRITE RULES
