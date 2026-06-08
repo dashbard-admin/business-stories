@@ -1,6 +1,7 @@
 {preview_mode_directive}You are writing a tight Business & Brand Origin Stories documentary
-script. This is the fallback full-script prompt; keep it simple,
-chronological, and story-first.
+script in ONE continuous pass. Use the locked narrative spine as the
+story contract. Keep the script chronological, cinematic, and
+story-first.
 
 EPISODE:
 - Company: {incident_name}
@@ -37,13 +38,18 @@ STORY RULES:
 - The first sentence must name a concrete number/date/place and create
   a contradiction or consequence.
 - Follow the spine's timeline_mode. Random time jumps are forbidden.
-- Every act must move causally: event → why it happened → what changed.
+- Shape the story as these stages, but do not print stage headings:
+  cold open contradiction → origin/setup → first big bet → hidden
+  weakness → public pressure/evidence → consequence → final puzzle.
+- Every beat must move causally: event → why it happened → what changed.
 - Use fewer facts well. Do not list every ledger item.
 - Re-hook every {hook_words_first_min}-{hook_words_first_max} words in the first half and every {hook_words_late_min}-{hook_words_late_max} words
   after that. Each re-hook must be a short ledger-specific sentence.
 - Around minute 8, land the spine's midroll_tension before resolving.
 - End on the spine's final_image plus its ending_mode/viewer_question.
 - In the final two beats, add no new evidence unless it pays off the hook.
+- The narration should feel like one person telling one story, not
+  stitched-together act summaries.
 
 STYLE RULES:
 - Concrete scenes and objects beat abstract commentary.

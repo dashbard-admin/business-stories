@@ -642,9 +642,19 @@ def run(episode: dict, queue: dict) -> str | None:
     # file holds the prompt that produced the chosen draft — useful
     # for diagnosing why a particular generation succeeded or failed.
     prompt_log_path = ws / "02_script" / "script_prompt.txt"
-    staged_enabled = bool(cfg.production.get("script_act_by_act_enabled", True))
+    generation_mode = str(
+        cfg.production.get("script_generation_mode") or ""
+    ).strip().lower()
+    if generation_mode not in {"single_pass", "act_by_act"}:
+        generation_mode = (
+            "act_by_act"
+            if bool(cfg.production.get("script_act_by_act_enabled", False))
+            else "single_pass"
+        )
+    logger.info("S06 generation mode: %s", generation_mode)
+
     script = ""
-    if staged_enabled and not preview_mode:
+    if generation_mode == "act_by_act" and not preview_mode:
         script = _generate_staged_within_range(
             llm,
             cfg=cfg,

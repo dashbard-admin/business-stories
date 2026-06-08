@@ -69,9 +69,15 @@ production:
   # 8 attempts) but better in-range hit rate. Fewer attempts =
   # faster but more `needs_human` from out-of-range scripts.
   max_script_generation_attempts: 100
-  # Generate S06 scripts as blueprint -> act-by-act drafts -> repair.
-  # The older full-script retry loop remains as fallback.
-  script_act_by_act_enabled: true
+  # S06 script prose mode:
+  #   single_pass = narrative spine -> one continuous script draft -> repair.
+  #   act_by_act  = narrative spine -> blueprint -> per-act drafts -> repair.
+  # Single-pass is the default because it tends to preserve story flow,
+  # narrator rhythm, and ending payoff better than isolated act calls.
+  script_generation_mode: single_pass
+  # Back-compat only. If script_generation_mode is absent, true maps to
+  # act_by_act and false maps to single_pass.
+  script_act_by_act_enabled: false
   # The act-by-act LLM tends to overshoot requested act budgets. Feed
   # it a smaller staged budget so the final combined draft lands inside
   # quality_gates.max_script_words after natural expansion.
