@@ -32,6 +32,7 @@ CALLOUT_RE = re.compile(
     re.IGNORECASE,
 )
 SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]")
+DECIMAL_DOT_RE = re.compile(r"(?<=\d)\.(?=\d)")
 
 ACT_SPECS = [
     ("ACT_0", "The Hook", 70, 2),
@@ -250,6 +251,12 @@ def _detect_dual_stream(text: str) -> tuple[bool, int, int]:
     return is_dual, valid, orphans
 
 
+def _iter_sentences(text: str):
+    """Yield sentence regex matches without splitting decimal numbers."""
+    masked = DECIMAL_DOT_RE.sub("·", text)
+    return SENTENCE_RE.finditer(masked)
+
+
 def _number_words_to_float(text: str) -> float | None:
     if re.search(r"\bpoint\b", text, re.IGNORECASE):
         left, right = re.split(r"\bpoint\b", text, maxsplit=1, flags=re.IGNORECASE)
@@ -431,8 +438,8 @@ def _ensure_callout_markers(
         start = marker.end()
         end = parts[idx + 1].start() if idx + 1 < len(parts) else len(script)
         beat_text = script[start:end]
-        for sent in SENTENCE_RE.finditer(beat_text):
-            sentence = sent.group(0).strip()
+        for sent in _iter_sentences(beat_text):
+            sentence = sent.group(0).replace("·", ".").strip()
             if "[CALLOUT:" in sentence.upper():
                 continue
             callout = _callout_for_sentence(sentence)
@@ -1682,8 +1689,8 @@ def _story_quality_flags(script: str, ledger_text: str = "") -> list[dict]:
     sentence_counts: dict[str, tuple[int, str]] = {}
     cleaned = CALLOUT_RE.sub("", script)
     cleaned = BEAT_RE.sub("", cleaned)
-    for match in SENTENCE_RE.finditer(cleaned):
-        sentence = re.sub(r"\s+", " ", match.group(0)).strip()
+    for match in _iter_sentences(cleaned):
+        sentence = re.sub(r"\s+", " ", match.group(0).replace("·", ".")).strip()
         norm = _dedupe_norm(sentence)
         if len(norm.split()) < 5:
             continue
@@ -1742,7 +1749,47 @@ def _story_quality_flags(script: str, ledger_text: str = "") -> list[dict]:
                 "reason": f"unsupported document/source reference: {label}",
             })
 
+    for phrase, requires_framing in (
+        ("criminals", True),
+        ("fraud", True),
+        ("fraudulent", True),
+        ("refused", True),
+        ("real profit engine", False),
+        ("smaller entity", False),
+        ("fees are paid correctly", False),
+    ):
+        for sentence in _sentences_containing(script, phrase):
+            sent_norm = sentence.lower()
+            if requires_framing and _has_regulatory_framing(sent_norm):
+                continue
+            if phrase in ledger_norm and requires_framing:
+                continue
+            flags.append({
+                "type": "loaded_or_unsupported_language",
+                "reason": f"loaded or unsupported phrasing: {sentence[:140]}",
+            })
+
     return flags[:10]
+
+
+def _sentences_containing(text: str, phrase: str) -> list[str]:
+    out: list[str] = []
+    for match in _iter_sentences(BEAT_RE.sub("", CALLOUT_RE.sub("", text))):
+        sentence = re.sub(r"\s+", " ", match.group(0).replace("·", ".")).strip()
+        if phrase.lower() in sentence.lower():
+            out.append(sentence)
+    return out
+
+
+def _has_regulatory_framing(sentence: str) -> bool:
+    return any(
+        term in sentence
+        for term in (
+            "alleged", "alleges", "according to", "state said",
+            "attorney general", "settlement", "claim", "claimed",
+            "accused", "regulator", "regulators", "court", "legal",
+        )
+    )
 
 
 def _is_low_signal_phrase(phrase: str) -> bool:

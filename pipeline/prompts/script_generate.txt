@@ -60,6 +60,11 @@ STYLE RULES:
 - No invented document/source references. Do not mention an S-1, SEC
   filing, deposition, court filing, or verbatim document language unless
   that exact source type appears in the fact ledger.
+- Regulatory accusations must be framed as allegations, settlements,
+  or official positions. Avoid declaring private intent or criminality
+  in the narrator's voice unless the ledger itself states that finding.
+- Avoid unsupported status claims such as "the real profit engine",
+  "smaller entity", or "fees are paid correctly" unless the ledger says so.
 - No generic closers like "the lesson is clear" or "the future is uncertain".
 - Avoid every forbidden phrase below.
 
