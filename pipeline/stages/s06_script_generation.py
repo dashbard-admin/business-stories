@@ -1682,6 +1682,27 @@ def _hook_support_flags(script: str, fact_claims: list[dict]) -> list[dict]:
     return flags
 
 
+def _fact_claims_from_ledger_text(text: str) -> list[dict]:
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return []
+    if isinstance(parsed, dict):
+        claims = parsed.get("claims") or parsed.get("fact_claims") or parsed.get("facts") or []
+    elif isinstance(parsed, list):
+        claims = parsed
+    else:
+        claims = []
+    out: list[dict] = []
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        statement = claim.get("statement") or claim.get("canonical_statement")
+        if statement:
+            out.append({"statement": statement})
+    return out
+
+
 def _story_quality_flags(script: str, ledger_text: str = "") -> list[dict]:
     flags: list[dict] = []
     ledger_norm = ledger_text.lower()
@@ -2041,7 +2062,7 @@ def _generate_within_range(
     forbidden = forbidden or []
 
     best_in_range: str | None = None
-    best_in_range_hits: list[str] = []
+    best_in_range_issues: list[str] = []
     best_in_range_prompt: str | None = None
     best_clean: str | None = None
     best_clean_distance = float("inf")
@@ -2053,6 +2074,8 @@ def _generate_within_range(
     last_wc: int | None = None
     last_hits: list[str] = []
     last_story_flags: list[dict] = []
+    last_hook_flags: list[dict] = []
+    hook_fact_claims = _fact_claims_from_ledger_text(ledger_text)
 
     def _write_prompt(p: str) -> None:
         """Overwrite the prompt log on disk so the operator can inspect
@@ -2117,6 +2140,22 @@ def _generate_within_range(
                     "ledger. Keep the narrator moving forward.\n"
                     "*** END STORY QUALITY NUDGE ***\n"
                 )
+            if last_hook_flags:
+                pressure_parts.append(
+                    "*** OPENING HOOK FACT NUDGE ***\n"
+                    "Your previous opening hook invented or overstated "
+                    "high-impact claim(s) not found in the fact ledger:\n"
+                    + "\n".join(
+                        f"  - {f.get('claim')}: {f.get('reason')}"
+                        for f in last_hook_flags[:6]
+                    )
+                    + "\n\nRewrite BEAT 1 and BEAT 2 using ONLY concrete "
+                    "numbers, dates, places, and claims that appear in "
+                    "the fact ledger. Do not invent valuations, magazine "
+                    "covers, stock collapses, worthlessness, bankruptcies, "
+                    "or impossible before/after contrasts.\n"
+                    "*** END OPENING HOOK FACT NUDGE ***\n"
+                )
 
         prompt = (
             "\n".join(pressure_parts) + "\n" + base_prompt
@@ -2147,21 +2186,30 @@ def _generate_within_range(
         wc = len(script.split())
         hits = _find_forbidden(script, forbidden) if forbidden else []
         story_flags = _story_quality_flags(script, ledger_text)
+        hook_flags = _hook_support_flags(script, hook_fact_claims)
         last_wc = wc
         last_hits = hits
         last_story_flags = story_flags
+        last_hook_flags = hook_flags
         distance = max(0, min_w - wc, wc - max_w)
         in_range = min_w <= wc <= max_w
-        is_clean = not hits and not story_flags
+        is_clean = not hits and not story_flags and not hook_flags
+        issue_labels = (
+            [f"forbidden:{h}" for h in hits]
+            + [f"story:{f.get('type')}" for f in story_flags]
+            + [f"hook:{f.get('claim')}" for f in hook_flags]
+        )
 
         logger.info(
             "S06 attempt %d: %d words (dist=%d, in_range=%s, "
-            "forbidden_hits=%d, story_flags=%d%s%s)",
+            "forbidden_hits=%d, story_flags=%d, hook_flags=%d%s%s%s)",
             attempt + 1, wc, distance, in_range, len(hits),
-            len(story_flags),
+            len(story_flags), len(hook_flags),
             f" forbidden={hits[:5]}" if hits else "",
             f" story={[f.get('type') for f in story_flags[:5]]}"
             if story_flags else "",
+            f" hook={[f.get('claim') for f in hook_flags[:5]]}"
+            if hook_flags else "",
         )
 
         # Best-case: in_range AND clean → return now. The prompt file
@@ -2172,13 +2220,13 @@ def _generate_within_range(
 
         # Otherwise update each best-tracker as appropriate. For
         # best_in_range: seed on first in_range draft regardless of
-        # hit count, then keep the one with FEWEST forbidden hits.
+        # issue count, then keep the one with FEWEST total gate issues.
         # Each tracker remembers the prompt that produced it so the
         # fallback path can rewrite the prompt log to match.
         if in_range:
-            if best_in_range is None or len(hits) < len(best_in_range_hits):
+            if best_in_range is None or len(issue_labels) < len(best_in_range_issues):
                 best_in_range = script
-                best_in_range_hits = hits
+                best_in_range_issues = issue_labels
                 best_in_range_prompt = prompt
         if is_clean and distance < best_clean_distance:
             best_clean = script
@@ -2200,8 +2248,8 @@ def _generate_within_range(
     if best_in_range is not None:
         logger.warning(
             "S06 no attempt was in-range AND clean; using best in-range "
-            "with %d forbidden hits: %s",
-            len(best_in_range_hits), best_in_range_hits[:5],
+            "with %d issue(s): %s",
+            len(best_in_range_issues), best_in_range_issues[:5],
         )
         if best_in_range_prompt is not None:
             _write_prompt(best_in_range_prompt)

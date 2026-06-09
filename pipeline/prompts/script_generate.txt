@@ -35,8 +35,10 @@ FORMAT:
   number/date. Max one per beat, max six total, 20 chars or fewer.
 
 STORY RULES:
-- The first sentence must name a concrete number/date/place and create
-  a contradiction or consequence.
+- The first sentence must name a concrete number/date/place copied from
+  the fact ledger and create a contradiction or consequence. Do not use
+  inferred valuations, invented rankings, magazine covers, stock prices,
+  bankruptcies, or "worthless" claims unless the ledger states them.
 - Follow the spine's timeline_mode. Random time jumps are forbidden.
 - Shape the story as these stages, but do not print stage headings:
   cold open contradiction → origin/setup → first big bet → hidden
