@@ -67,6 +67,11 @@ STYLE RULES:
   in the narrator's voice unless the ledger itself states that finding.
 - Avoid unsupported status claims such as "the real profit engine",
   "smaller entity", or "fees are paid correctly" unless the ledger says so.
+- Avoid prosecutor-style labels such as "sophisticated fraud",
+  "fraudulent model", "cleanup operation", "maximum extraction",
+  "valuation plummeted", or "investor confidence evaporated" unless the
+  ledger says that exact thing. Prefer "the state alleged",
+  "the settlement described", or "the attorney general said".
 - No generic closers like "the lesson is clear" or "the future is uncertain".
 - Avoid every forbidden phrase below.
 

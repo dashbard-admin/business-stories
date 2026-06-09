@@ -26,6 +26,10 @@ from ..state import find_episode_workspace
 logger = logging.getLogger("hermes.stage.s06")
 
 BEAT_RE = re.compile(r"##\s*BEAT\s+(\d+)\s*##", re.IGNORECASE)
+MALFORMED_BEAT_RE = re.compile(
+    r"##\s*BE\s+BEAT\s+(\d+)\s*##",
+    re.IGNORECASE,
+)
 THINK_RE = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.DOTALL | re.IGNORECASE)
 CALLOUT_RE = re.compile(
     r"\[\s*CALLOUT\s*:\s*[\"“‘]?([^\"”’\]]+)[\"”’]?\s*\]",
@@ -202,6 +206,7 @@ def _clean(text: str) -> str:
         if text.endswith("```"):
             text = text[:-3]
     text = text.strip()
+    text = MALFORMED_BEAT_RE.sub(r"## BEAT \1 ##", text)
 
     # Strip stray placeholder tokens (SPONSOR_SLOT etc.) that leaked
     # from the prompt's commented placeholders. Added Batch I
@@ -799,6 +804,13 @@ def run(episode: dict, queue: dict) -> str | None:
         if sub_log:
             logger.info("S06 forbidden-phrase substitutions applied: %s",
                         ", ".join(f'{m}→{r}' for m, r in sub_log))
+
+    script, neutralize_log = _neutralize_legal_language(script)
+    if neutralize_log:
+        logger.info(
+            "S06 legal-neutralization substitutions applied: %s",
+            ", ".join(f"{m}→{r}" for m, r in neutralize_log),
+        )
 
     # Callout repair. The prompt asks for 3-6 numeric callouts, but
     # act-by-act generation can under-deliver because each act sees
@@ -1707,6 +1719,12 @@ def _story_quality_flags(script: str, ledger_text: str = "") -> list[dict]:
     flags: list[dict] = []
     ledger_norm = ledger_text.lower()
 
+    if MALFORMED_BEAT_RE.search(script):
+        flags.append({
+            "type": "malformed_beat_marker",
+            "reason": "malformed beat marker remained after cleanup",
+        })
+
     sentence_counts: dict[str, tuple[int, str]] = {}
     cleaned = CALLOUT_RE.sub("", script)
     cleaned = BEAT_RE.sub("", cleaned)
@@ -1751,9 +1769,17 @@ def _story_quality_flags(script: str, ledger_text: str = "") -> list[dict]:
     for phrase in (
         "state thought they were criminals",
         "they refused",
+        "maximum extraction",
         "real profit engine",
         "smaller entity",
         "fees are paid correctly",
+        "fraudulent model",
+        "sophisticated fraud",
+        "cleanup operation",
+        "investor confidence evaporated",
+        "valuation plummeted",
+        "leadership structure has been stripped away",
+        "without a master",
     ):
         for sentence in _sentences_containing(script, phrase):
             if phrase in ledger_norm:
@@ -1880,6 +1906,48 @@ def _apply_substitutions(
         if n > 0:
             out = new_out
             log.append((match_lower, repl))
+    return out, log
+
+
+LEGAL_NEUTRALIZATIONS = [
+    ("maximum extraction", "maximum yield"),
+    ("shell entities", "related entities"),
+    ("fraudulent model", "regulator-challenged model"),
+    ("sophisticated fraud", "regulator-challenged structure"),
+    ("cleanup operation", "cost-cutting move"),
+    ("investor confidence evaporated", "the public narrative weakened"),
+    ("valuation plummeted", "growth story looked weaker"),
+    ("collective fraud", "alleged scheme"),
+    ("deliberate violator", "company accused of violations"),
+    ("state thought they were criminals", "state treated the conduct as a legal violation"),
+    ("not by market forces", "not only by market forces"),
+    ("dismantled", "exposed"),
+    ("the rot", "the weakness"),
+    ("rot in the financial core", "weakness in the financial structure"),
+    ("paper trail proved", "paper trail suggested"),
+    ("is not a business, but", "stops looking like a simple business and starts looking like"),
+    ("not a business, but", "not just a business, but"),
+]
+
+
+def _neutralize_legal_language(text: str) -> tuple[str, list[tuple[str, str]]]:
+    log: list[tuple[str, str]] = []
+    out = text
+    for match, repl in LEGAL_NEUTRALIZATIONS:
+        pattern = re.compile(re.escape(match), re.IGNORECASE)
+        if not pattern.search(out):
+            continue
+
+        def _sub(m: re.Match[str]) -> str:
+            original = m.group(0)
+            if original[:1].isupper() and repl:
+                return repl[:1].upper() + repl[1:]
+            return repl
+
+        new_out, n = pattern.subn(_sub, out)
+        if n > 0:
+            out = new_out
+            log.append((match, repl))
     return out, log
 
 
