@@ -421,7 +421,7 @@ packaging:
   shorts_enabled: true
   shorts_count: 2                       # vertical clips per episode
   shorts_target_seconds: 30.0
-  shorts_tts_wpm: 200.0                 # teaser script budget + enforced WPM
+  shorts_tts_wpm: 180.0                 # teaser script budget + enforced WPM
   shorts_tts_speed: 1.0                 # backend speed hint; WPM enforcement wins
   shorts_enforce_tts_wpm: true          # time-stretch Shorts voice to shorts_tts_wpm
   shorts_seconds_per_image: 3.75        # fast visual cuts, ~3-5 sec
