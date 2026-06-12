@@ -30,6 +30,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,6 +54,14 @@ ACCEPTABLE_LICENSES = {
     "no known copyright restrictions",
 }
 REJECTED_LICENSES = {"cc-by-nc", "cc-by-sa", "cc-by-nd", "all rights reserved"}
+MONTH_NAMES = {
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+}
+LOW_VALUE_ASSET_TERMS = {
+    "inc", "incorporated", "corp", "corporation", "company", "ltd", "limited",
+    "llc", "plc", "group", "holdings", "usa", "america", "american",
+}
 
 
 @dataclass
@@ -101,8 +110,8 @@ def _ensure_company_logo(*, ws: Path, company: str, browser: Browser) -> None:
             haystack = f"{result.title} {url}".lower()
             if "logo" not in haystack:
                 continue
-            suffix = _ext_from_url(url) or ".png"
-            candidate = tmp_dir / f"company_logo_candidate_{i}{suffix}"
+            suffix = _ext_from_url(url) or "png"
+            candidate = tmp_dir / f"company_logo_candidate_{i}.{suffix}"
             try:
                 if not browser.download(url, candidate):
                     continue
@@ -120,7 +129,65 @@ def _ensure_company_logo(*, ws: Path, company: str, browser: Browser) -> None:
             except Exception as e:
                 logger.debug("S05 logo candidate rejected (%s): %s", url, e)
                 continue
+
+    if _ensure_company_logo_from_wikimedia(
+        ws=ws, company=company, browser=browser, logo_path=logo_path,
+    ):
+        return
     logger.warning("S05 company logo: no usable logo found for %s", company)
+
+
+def _ensure_company_logo_from_wikimedia(
+    *,
+    ws: Path,
+    company: str,
+    browser: Browser,
+    logo_path: Path,
+) -> bool:
+    """Fallback for logos that image search exposes only as Commons SVGs."""
+    queries = [
+        f"{company} logo",
+        f"{company} wordmark",
+        f"{_short_company_name(company)} logo",
+    ]
+    seen: set[str] = set()
+    tmp_dir = ws / "03_assets" / "quarantine"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    for query in queries:
+        if not query or query.lower() in seen:
+            continue
+        seen.add(query.lower())
+        try:
+            hits = wikimedia.search(query, limit=12)
+        except Exception as e:
+            logger.warning("S05 logo Wikimedia search failed for %r: %s", query, e)
+            continue
+        for i, hit in enumerate(hits):
+            haystack = f"{hit.title} {hit.description_url}".lower()
+            if "logo" not in haystack and "wordmark" not in haystack:
+                continue
+            if not hit.url:
+                continue
+            suffix = _ext_from_url(hit.url) or _ext_from_mime(hit.mime) or "png"
+            candidate = tmp_dir / f"company_logo_wikimedia_{i}.{suffix}"
+            try:
+                if not browser.download(hit.url, candidate, timeout=60):
+                    continue
+                meta = _probe_image(candidate)
+                if meta is None or meta[0] < 180 or meta[1] < 45:
+                    continue
+                _normalise_logo(candidate, logo_path)
+                _write_logo_meta(
+                    ws, logo_path,
+                    source_url=hit.description_url or hit.url,
+                    source_title=hit.title,
+                )
+                logger.info("S05 company logo: %s -> %s", hit.description_url, logo_path)
+                return True
+            except Exception as e:
+                logger.debug("S05 logo Wikimedia candidate rejected (%s): %s", hit.title, e)
+                continue
+    return False
 
 
 def _write_logo_meta(
@@ -283,7 +350,7 @@ def run(episode: dict, queue: dict) -> str | None:
     # URLs that we could not download as images. The Commons MediaWiki
     # API gives us direct file URLs + structured license metadata in
     # one call. This is the highest-yield source for known companies.
-    phase1_terms = [t for t in [company, founder, *extra_terms] if t]
+    phase1_terms = _asset_search_terms(company, founder, extra_terms)
     for term in phase1_terms:
         if idx >= phase1_cap:
             break
@@ -307,6 +374,8 @@ def run(episode: dict, queue: dict) -> str | None:
             )
             if ok:
                 idx += 1
+        if idx < phase1_cap:
+            time.sleep(0.4)
     logger.info("S05 after Phase 1: %d assets (cap %d)",
                 len(manifest), phase1_cap)
 
@@ -314,7 +383,7 @@ def run(episode: dict, queue: dict) -> str | None:
     # Image-category SearXNG results carry the direct image URL in
     # `img_src`, which browser.search() promotes to `url` for us. No
     # `.png/.jpg` extension filter required.
-    image_search_terms = [t for t in [company, founder, *extra_terms[:3]] if t]
+    image_search_terms = _asset_search_terms(company, founder, extra_terms[:3])
     for term in image_search_terms:
         if idx >= phase2_cap:
             break
@@ -396,12 +465,57 @@ def _extra_search_terms(ws: Path) -> list[str]:
         for m in re.finditer(r"\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,2})\b", st):
             term = m.group(1)
             low = term.lower()
-            if low not in seen and len(term) >= 4:
+            if low not in seen and _is_useful_asset_query(term):
                 seen.add(low)
                 out.append(term)
         if len(out) >= 8:
             break
     return out[:8]
+
+
+def _asset_search_terms(company: str, founder: str, extra_terms: list[str]) -> list[str]:
+    """Return deduped, high-signal search terms for PD asset hunting."""
+    raw = [company, founder, _short_company_name(company), *extra_terms]
+    out: list[str] = []
+    seen: set[str] = set()
+    for term in raw:
+        term = (term or "").strip()
+        low = term.lower()
+        if low in seen or not _is_useful_asset_query(term):
+            continue
+        seen.add(low)
+        out.append(term)
+    return out
+
+
+def _short_company_name(company: str) -> str:
+    """Drop corporate suffixes for logo/media searches."""
+    words = []
+    for word in re.split(r"\s+", company or ""):
+        cleaned = re.sub(r"[^A-Za-z0-9&.-]", "", word).strip(".").lower()
+        if cleaned in LOW_VALUE_ASSET_TERMS:
+            continue
+        words.append(word)
+    return " ".join(words).strip()
+
+
+def _is_useful_asset_query(term: str) -> bool:
+    """Reject noisy capitalized fragments extracted from fact sentences."""
+    cleaned = re.sub(r"[^A-Za-z0-9&.\- ]+", " ", term or "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    low = cleaned.lower()
+    if not cleaned or low in MONTH_NAMES or low in LOW_VALUE_ASSET_TERMS:
+        return False
+    if len(cleaned) < 4:
+        return False
+    tokens = [t.strip(".").lower() for t in cleaned.split() if t.strip(".")]
+    if not tokens:
+        return False
+    if all(t in MONTH_NAMES or t in LOW_VALUE_ASSET_TERMS for t in tokens):
+        return False
+    if len(tokens) == 1 and tokens[0].isdigit():
+        return False
+    return True
 
 
 def _try_ingest(*, r, browser, pd_dir: Path, ws: Path,

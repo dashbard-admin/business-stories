@@ -329,7 +329,7 @@ SearXNG search + plain `requests` fetch.
 - Mock mode returns canned business-story content keyed on a SHA of the query.
 
 ### 5.12 `wikimedia.py`
-Commons MediaWiki API client. S5 uses this for license-clean image hits instead of relying on SearXNG's flaky `site:commons.wikimedia.org` routing. Returns image URLs with structured `extmetadata` (license, author, source) so the caller doesn't have to scrape.
+Commons MediaWiki API client. S5 uses this for license-clean image hits instead of relying on SearXNG's flaky `site:commons.wikimedia.org` routing. Returns image URLs with structured `extmetadata` (license, author, source) so the caller doesn't have to scrape. The adapter handles Commons 429 responses with bounded `Retry-After`/backoff retries and asks Commons for raster thumbnails of SVG files so logo searches can ingest wordmarks without needing a local SVG renderer.
 
 ### 5.4b `titles.py` *(added Batch D 2026-05-27)*
 Generates N (default 10) candidate YouTube titles per episode via the writer LLM using `prompts/title_variants.txt`. Each variant is tagged with a style hypothesis (`curiosity_gap, shock_value, outcome_first, named_person, question, contrarian, number_anchored, before_after, time_anchored, character_voice`) and a `predicted_ctr_band ∈ {high, medium, low}`. Output: `06_metadata/titles.json`. S13 calls this in Phase 1.
@@ -445,6 +445,7 @@ Each ingested asset gets VLM-captioned at this stage (`pipeline.vlm.VLM.caption_
 **Configurable caps** *(added 2026-05-28)*:
 - `asset_hunt.max_pd_assets` (default 40) caps total assets across Phase 1 + Phase 2. Phase 1 budget is `round(max_pd_assets × 0.625)` (preserves the original 50/80 ratio); Phase 2 fills the remainder. Lower for faster S05 + fewer downloads; raise to give S08's cooldown engine more PD candidates.
 - `asset_hunt.enabled_visual_intents` (default `[founder_portrait, document_or_headline]`) restricts which beat intents are eligible for PD routing at S08 — even when the manifest is full, off-list intents go to FLUX.
+S05 filters weak extracted terms before Commons/SearXNG searches: month names, generic corporate suffixes, and one-token boilerplate are discarded so public API quota is spent on company/founder/product/acquisition terms. Commons calls are lightly throttled between terms to reduce 429s.
 
 ### S06 — Script Generation (`s06_script_generation.py`)
 Writer LLM with `script_narrative_spine.txt` → `script_generate.txt` by default. Legacy `script_blueprint.txt` → `script_act_generate.txt` remains available via `production.script_generation_mode: act_by_act`. **Compact story-arc retention template at configured long-form WPM, currently 150** *(retuned 2026-06-05 for a 9-11 minute target with one mid-roll tension landing; story-spine pass added 2026-06-08; 150wpm documentary pace wired 2026-06-08; single-pass default 2026-06-08):*

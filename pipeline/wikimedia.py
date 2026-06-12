@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass
 
 import requests
@@ -111,9 +112,7 @@ def _search_titles(
         "srlimit": limit,
         "srprop": "snippet",
     }
-    r = session.get(API_URL, params=params, timeout=timeout)
-    r.raise_for_status()
-    hits = r.json().get("query", {}).get("search", []) or []
+    hits = _get_json(session, params=params, timeout=timeout).get("query", {}).get("search", []) or []
     return [h["title"] for h in hits if h.get("title", "").startswith("File:")]
 
 
@@ -127,10 +126,9 @@ def _imageinfo(
         "titles": "|".join(titles[:50]),
         "prop": "imageinfo",
         "iiprop": "url|size|mime|extmetadata",
+        "iiurlwidth": 1600,
     }
-    r = session.get(API_URL, params=params, timeout=timeout)
-    r.raise_for_status()
-    pages = r.json().get("query", {}).get("pages", {}) or {}
+    pages = _get_json(session, params=params, timeout=timeout).get("query", {}).get("pages", {}) or {}
 
     out: list[CommonsImage] = []
     for page in pages.values():
@@ -153,13 +151,18 @@ def _imageinfo(
             or "cc-by" in license_short.lower()
         )
 
+        mime = info.get("mime", "")
+        url = info.get("url", "")
+        if mime and "svg" in mime.lower():
+            url = info.get("thumburl") or url
+
         out.append(CommonsImage(
             title=page.get("title", ""),
-            url=info.get("url", ""),
+            url=url,
             description_url=info.get("descriptionurl", ""),
             width=int(info.get("width") or 0),
             height=int(info.get("height") or 0),
-            mime=info.get("mime", ""),
+            mime=mime,
             license_short=license_short,
             license_url=license_url,
             artist=artist,
@@ -167,3 +170,40 @@ def _imageinfo(
             attribution_required=bool(attribution_required),
         ))
     return out
+
+
+def _get_json(
+    session: requests.Session,
+    *,
+    params: dict,
+    timeout: int,
+    max_attempts: int = 4,
+) -> dict:
+    """GET Commons JSON with polite handling for transient 429s."""
+    last_response: requests.Response | None = None
+    for attempt in range(max_attempts):
+        r = session.get(API_URL, params=params, timeout=timeout)
+        last_response = r
+        if r.status_code != 429:
+            r.raise_for_status()
+            return r.json()
+
+        if attempt >= max_attempts - 1:
+            break
+
+        retry_after = r.headers.get("Retry-After")
+        try:
+            delay = float(retry_after) if retry_after else 1.5 * (attempt + 1)
+        except ValueError:
+            delay = 1.5 * (attempt + 1)
+        delay = max(1.0, min(delay, 8.0))
+        logger.warning(
+            "wikimedia rate limited for %r; retrying in %.1fs",
+            params.get("srsearch") or params.get("titles") or "imageinfo",
+            delay,
+        )
+        time.sleep(delay)
+
+    assert last_response is not None
+    last_response.raise_for_status()
+    return {}
