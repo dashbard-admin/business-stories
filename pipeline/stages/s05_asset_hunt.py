@@ -218,9 +218,10 @@ def _normalise_logo(src: Path, dest: Path) -> None:
     if bbox:
         img = img.crop(bbox)
 
-    # If the logo came on a white canvas, make that canvas transparent.
-    px = img.load()
-    if px is not None:
+    # If the logo came on an opaque white canvas, make only that canvas
+    # transparent. Do not erase white wordmarks that already have alpha.
+    if not _has_transparent_pixels(img):
+        px = img.load()
         for y in range(img.height):
             for x in range(img.width):
                 r, g, b, a = px[x, y]
@@ -228,6 +229,14 @@ def _normalise_logo(src: Path, dest: Path) -> None:
                     px[x, y] = (r, g, b, 0)
     dest.parent.mkdir(parents=True, exist_ok=True)
     img.save(dest, "PNG")
+
+
+def _has_transparent_pixels(img: Image.Image) -> bool:
+    if "A" not in img.getbands():
+        return False
+    alpha = img.getchannel("A")
+    extrema = alpha.getextrema()
+    return bool(extrema and extrema[0] < 250)
 
 
 def run(episode: dict, queue: dict) -> str | None:

@@ -945,8 +945,11 @@ def _trim_title_logo(logo: Image.Image) -> Image.Image:
     if bbox:
         logo = logo.crop(bbox)
 
-    px = logo.load()
-    if px is not None:
+    # Only treat near-white as removable canvas when the source is an
+    # opaque image. White-on-transparent wordmarks, like Sony's Commons
+    # logo, are real foreground and must remain visible.
+    if not _has_transparent_pixels(logo):
+        px = logo.load()
         for y in range(logo.height):
             for x in range(logo.width):
                 r, g, b, a = px[x, y]
@@ -954,6 +957,14 @@ def _trim_title_logo(logo: Image.Image) -> Image.Image:
                     px[x, y] = (r, g, b, 0)
     bbox = logo.getbbox()
     return logo.crop(bbox) if bbox else logo
+
+
+def _has_transparent_pixels(img: Image.Image) -> bool:
+    if "A" not in img.getbands():
+        return False
+    alpha = img.getchannel("A")
+    extrema = alpha.getextrema()
+    return bool(extrema and extrema[0] < 250)
 
 
 def _opposite_corner(corner_id: str) -> str:
