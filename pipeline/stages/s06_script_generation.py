@@ -471,6 +471,96 @@ def _ensure_callout_markers(
     return script, {"added": len(inserts), "total": total}
 
 
+def _limit_callout_markers(
+    script: str,
+    *,
+    max_total: int,
+    max_per_beat: int,
+) -> tuple[str, dict]:
+    """Enforce configured callout caps after LLM generation.
+
+    The writer prompt asks for sparse callouts, but local LLMs sometimes
+    annotate every sentence. Keep the strongest callout(s) per beat,
+    preferring concrete numbers/dates/money, then distribute the retained
+    beats across the full episode so overlays do not cluster at the top.
+    """
+    all_matches = list(CALLOUT_RE.finditer(script))
+    if not all_matches:
+        return script, {"removed": 0, "total": 0}
+
+    if max_total <= 0 or max_per_beat <= 0:
+        kept_spans: set[tuple[int, int]] = set()
+    else:
+        beat_markers = list(BEAT_RE.finditer(script))
+        beat_candidates: list[list[re.Match]] = []
+        for idx, marker in enumerate(beat_markers):
+            start = marker.end()
+            end = beat_markers[idx + 1].start() if idx + 1 < len(beat_markers) else len(script)
+            matches = [
+                m for m in all_matches
+                if start <= m.start() < end
+            ]
+            if not matches:
+                continue
+            matches.sort(
+                key=lambda m: (
+                    0 if re.search(r"[\d$£€%]", m.group(1) or "") else 1,
+                    m.start(),
+                )
+            )
+            chosen = sorted(matches[:max_per_beat], key=lambda m: m.start())
+            beat_candidates.append(chosen)
+
+        candidates = [m for group in beat_candidates for m in group]
+        candidates.sort(key=lambda m: m.start())
+        if len(candidates) > max_total:
+            if max_total == 1:
+                keep_indices = {0}
+            else:
+                last = len(candidates) - 1
+                keep_indices = {
+                    round(i * last / (max_total - 1))
+                    for i in range(max_total)
+                }
+            candidates = [
+                m for idx, m in enumerate(candidates)
+                if idx in keep_indices
+            ]
+        kept_spans = {(m.start(), m.end()) for m in candidates}
+
+    removed = 0
+    for m in reversed(all_matches):
+        if (m.start(), m.end()) in kept_spans:
+            continue
+        start = m.start()
+        end = m.end()
+        while end < len(script) and script[end] in " \t":
+            end += 1
+        consumed_newline = False
+        if end < len(script) and script[end] == "\n":
+            end += 1
+            consumed_newline = True
+        replacement = "\n" if consumed_newline else " "
+        script = script[:start].rstrip() + replacement + script[end:].lstrip()
+        removed += 1
+
+    script = re.sub(r"[ \t]+\n", "\n", script)
+    script = re.sub(r"(?<!\n)\n?##\s*BEAT", "\n\n## BEAT", script)
+    script = re.sub(r"\n{3,}", "\n\n", script)
+    total = len(CALLOUT_RE.findall(script))
+    return script.strip() + "\n", {"removed": removed, "total": total}
+
+
+def _max_callouts_per_beat(script: str) -> int:
+    max_seen = 0
+    parts = list(BEAT_RE.finditer(script))
+    for idx, marker in enumerate(parts):
+        start = marker.end()
+        end = parts[idx + 1].start() if idx + 1 < len(parts) else len(script)
+        max_seen = max(max_seen, len(CALLOUT_RE.findall(script[start:end])))
+    return max_seen
+
+
 def run(episode: dict, queue: dict) -> str | None:
     cfg = load_config()
     llm = LLM(role="writer")
@@ -585,6 +675,10 @@ def run(episode: dict, queue: dict) -> str | None:
     fact_ledger_json = json.dumps(fact_claims, indent=2)
     wpm_effective = max(1.0, float(cfg.production.get("wpm_effective", 150)))
     hook_cadence = _hook_cadence_words(wpm_effective)
+    callout_min_total = int(cfg.callouts.get("min_total", 3))
+    callout_target_total = int(cfg.callouts.get("target_total", 5))
+    callout_max_total = int(cfg.callouts.get("max_total", 6))
+    callout_max_per_beat = int(cfg.callouts.get("max_per_beat", 1))
 
     forbidden = _load_forbidden()
     spine = _build_narrative_spine(
@@ -631,6 +725,10 @@ def run(episode: dict, queue: dict) -> str | None:
         target_beats=target_beats,
         retention_dip_warnings=perf["retention_dip_warnings"],
         forbidden_phrases="\n".join(f"  - {p}" for p in forbidden),
+        callout_min_total=callout_min_total,
+        callout_target_total=callout_target_total,
+        callout_max_total=callout_max_total,
+        callout_max_per_beat=callout_max_per_beat,
         **hook_cadence,
     )
 
@@ -819,14 +917,24 @@ def run(episode: dict, queue: dict) -> str | None:
     if cfg.callouts.get("enabled", True):
         script, callout_info = _ensure_callout_markers(
             script,
-            min_total=int(cfg.callouts.get("min_total", 3)),
-            target_total=int(cfg.callouts.get("target_total", 5)),
-            max_total=int(cfg.callouts.get("max_total", 6)),
+            min_total=callout_min_total,
+            target_total=callout_target_total,
+            max_total=callout_max_total,
         )
         if callout_info["added"]:
             logger.info(
                 "S06 callout repair: added %d marker(s), total=%d",
                 callout_info["added"], callout_info["total"],
+            )
+        script, callout_limit_info = _limit_callout_markers(
+            script,
+            max_total=callout_max_total,
+            max_per_beat=callout_max_per_beat,
+        )
+        if callout_limit_info["removed"]:
+            logger.info(
+                "S06 callout limiter: removed %d marker(s), total=%d",
+                callout_limit_info["removed"], callout_limit_info["total"],
             )
 
     # Finalize numbering after every late text mutation. Substitution,
@@ -864,6 +972,19 @@ def run(episode: dict, queue: dict) -> str | None:
         return f"only {len(beats)} BEAT markers (need {min_beats}) after redistribution"
     if len(beats) > max_beats:
         return f"too many BEAT markers ({len(beats)}) after consolidation; cap {max_beats}"
+    if cfg.callouts.get("enabled", True):
+        callout_count = len(CALLOUT_RE.findall(script))
+        max_seen = _max_callouts_per_beat(script)
+        if callout_count > callout_max_total:
+            return (
+                f"too many CALLOUT markers ({callout_count}); "
+                f"cap {callout_max_total}"
+            )
+        if max_seen > callout_max_per_beat:
+            return (
+                f"too many CALLOUT markers in one beat ({max_seen}); "
+                f"cap {callout_max_per_beat}"
+            )
     if quality_flags["hook_support_flags"]:
         return (
             "opening hook contains high-impact claim(s) not found in "

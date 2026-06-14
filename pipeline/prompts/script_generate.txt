@@ -31,8 +31,10 @@ PERFORMANCE FEEDBACK:
 FORMAT:
 - Use `## BEAT N ##` markers, starting at 1.
 - Write 35-55 beats unless preview mode says otherwise.
-- Add 3-6 `[CALLOUT: "$X"]` markers after the sentence containing the
-  number/date. Max one per beat, max six total, 20 chars or fewer.
+- Add {callout_min_total}-{callout_max_total} `[CALLOUT: "$X"]` markers after
+  the sentence containing the concrete number/date/money figure. Max
+  {callout_max_per_beat} per beat, max {callout_max_total} total, 20 chars or
+  fewer. Do not add a callout to every beat.
 
 STORY RULES:
 - The first sentence must name a concrete number/date/place copied from
