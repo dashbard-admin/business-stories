@@ -1,0 +1,34 @@
+You refine visual continuity props for a business documentary episode.
+
+Return ONLY a JSON object with this exact shape:
+{{
+  "hero_props": ["...", "..."],
+  "pressure_props": ["...", "..."],
+  "business_props": ["...", "..."],
+  "setting_props": ["...", "..."],
+  "closing_props": ["...", "..."]
+}}
+
+Rules:
+- Use only concrete, visible objects or places grounded in the supplied material.
+- Keep each prop 3-9 words.
+- No readable labels, no exact trademark/logo text unless the material says a logo/title card is required.
+- Avoid generic phones, cracked phones, red folders, green folders, evidence folders, and decorative symbols unless they are literally central to this episode.
+- Prefer era-specific objects, prototypes, documents, machines, rooms, retail displays, factories, desks, and artifacts.
+- Do not invent products, people, court cases, or locations.
+- Keep 3-6 props per category.
+
+EPISODE:
+Company: {company}
+Founder/protagonist: {founder}
+Story kind: {story_kind}
+One-line pitch: {pitch}
+
+NARRATIVE SPINE:
+{spine_json}
+
+DETERMINISTIC PROP CANDIDATES:
+{candidate_json}
+
+SCRIPT EXCERPT:
+{script_excerpt}

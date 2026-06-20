@@ -22,6 +22,7 @@ import json
 import logging
 import re
 from collections import deque
+from pathlib import Path
 
 import yaml
 
@@ -303,6 +304,20 @@ _BRIDGE_TERMS = {
     "name was stolen", "corporate records", "registry", "record remains",
 }
 
+_GENERIC_PROP_BAN = {
+    "cracked smartphone", "smartphone", "phone", "app interface",
+    "red folder", "green folder", "fraud folder", "product folder",
+    "evidence folder", "folder", "leaf logo", "generic logo",
+}
+
+_PROP_STOPWORDS = {
+    "the", "and", "for", "with", "from", "that", "this", "into", "onto",
+    "about", "after", "before", "because", "while", "where", "their",
+    "there", "company", "corporation", "inc", "llc", "ltd", "plc",
+    "beat", "on", "in", "at", "by", "beside", "near", "over", "under",
+    "a", "an", "of", "to",
+}
+
 
 def _story_world_for_beat(beat: dict) -> str:
     text = " ".join([
@@ -334,28 +349,28 @@ def _scene_label(world: str) -> str:
     }.get(world, "The business story")
 
 
-def _recurring_props(world: str) -> list[str]:
+def _fallback_recurring_props(world: str) -> list[str]:
     return {
         "legal_fraud": [
-            "red fraud case folder with no readable label",
+            "court document stack with no readable labels",
             "Delaware bankruptcy court file",
             "investor packet",
             "amber desk lamp",
         ],
         "product_platform": [
-            "cracked smartphone with six blank video tiles",
-            "green product folder with no readable label",
+            "era-specific product prototype",
+            "unlabeled engineering sketch",
             "dim startup office monitors",
-            "empty creator workspace",
+            "empty product testing desk",
         ],
         "name_confusion_bridge": [
-            "red fraud folder with no readable label",
-            "green product folder with no readable label",
-            "evidence board with red string",
+            "two unlabeled archive boxes",
+            "blurred registry printouts",
+            "plain evidence board with no readable text",
             "blurred corporate registry printouts",
         ],
         "closing_resolution": [
-            "two separated folders, one red and one green",
+            "closed archive box",
             "closed court archive box",
             "empty office chair",
             "fading nameplate with no legible letters",
@@ -366,7 +381,275 @@ def _recurring_props(world: str) -> list[str]:
             "empty desks",
             "single desk lamp",
         ],
-    }.get(world, ["evidence folder", "desk lamp", "empty office"])
+    }.get(world, ["unlabeled desk memo", "desk lamp", "empty office"])
+
+
+def _recurring_props(world: str, palette: dict | None = None) -> list[str]:
+    if not palette:
+        return _fallback_recurring_props(world)
+    role_map = {
+        "legal_fraud": ["pressure_props", "business_props", "setting_props"],
+        "product_platform": ["hero_props", "pressure_props", "setting_props"],
+        "name_confusion_bridge": ["business_props", "pressure_props", "setting_props"],
+        "closing_resolution": ["closing_props", "hero_props", "setting_props"],
+        "business_context": ["business_props", "setting_props", "hero_props"],
+    }
+    props: list[str] = []
+    for role in role_map.get(world, ["business_props", "setting_props"]):
+        props.extend(palette.get(role) or [])
+    cleaned = _clean_prop_list(props, max_items=8)
+    return cleaned or _fallback_recurring_props(world)
+
+
+def _clean_prop_text(text: str) -> str:
+    text = re.sub(r"\s+", " ", str(text or "")).strip(" .,:;\"'")
+    text = re.sub(r"\b(readable|legible)\s+(text|label|logo)s?\b", "", text, flags=re.I)
+    text = re.sub(r"\s+", " ", text).strip(" .,:;\"'")
+    return text[:90]
+
+
+def _prop_is_allowed(text: str) -> bool:
+    prop = _clean_prop_text(text)
+    low = prop.lower()
+    if len(prop) < 4:
+        return False
+    if any(bad in low for bad in _GENERIC_PROP_BAN):
+        return False
+    tokens = re.findall(r"[a-z0-9]+", low)
+    if not tokens or all(t in _PROP_STOPWORDS for t in tokens):
+        return False
+    if tokens[0] in _PROP_STOPWORDS or tokens[-1] in _PROP_STOPWORDS:
+        return False
+    if len(tokens) > 10:
+        return False
+    return True
+
+
+def _clean_prop_list(items: list[str], *, max_items: int = 8) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        prop = _clean_prop_text(item)
+        key = prop.lower()
+        if key in seen or not _prop_is_allowed(prop):
+            continue
+        seen.add(key)
+        out.append(prop)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _nounish_phrases(text: str) -> list[str]:
+    """Cheap deterministic phrase extraction for visual object candidates."""
+    text = re.sub(r"\[[^\]]+\]", " ", text or "")
+    patterns = [
+        (
+            r"\b(?:[A-Z][A-Za-z0-9&-]+(?:\s+[A-Z][A-Za-z0-9&-]+){0,3})\b",
+            0,
+        ),
+        (
+            r"\b(?:prototype|cassette|recorder|headphones?|radio|television|factory|"
+        r"lab|laboratory|boardroom|memo|schematic|notebook|desk|workbench|"
+        r"retail|display|shelf|airplane|seat|train|camera|console|toy|bike|"
+        r"treadmill|warehouse|store|court|filing|contract|newspaper|archive)"
+            r"(?:\s+[A-Za-z0-9&-]+){0,3}\b",
+            re.I,
+        ),
+    ]
+    out: list[str] = []
+    for pat, flags in patterns:
+        for m in re.finditer(pat, text, flags=flags):
+            phrase = _clean_prop_text(m.group(0))
+            if _prop_is_allowed(phrase):
+                out.append(phrase)
+    return out
+
+
+def _deterministic_prop_candidates(
+    *,
+    ws: Path,
+    episode: dict,
+    script: str,
+    pd_assets: list[dict],
+    character_profile: dict,
+) -> dict[str, list[str]]:
+    incident = episode.get("incident") or {}
+    banned_exact = {
+        (incident.get("company_name") or "").strip().lower(),
+        (incident.get("founder_or_protagonist") or "").strip().lower(),
+    }
+    spine_path = ws / "02_script" / "script_narrative_spine.json"
+    ledger_path = ws / "01_factcheck" / "fact_ledger.json"
+    spine: dict = {}
+    ledger: dict = {}
+    if spine_path.exists():
+        try:
+            spine = json.loads(spine_path.read_text())
+        except Exception:
+            spine = {}
+    if ledger_path.exists():
+        try:
+            ledger = json.loads(ledger_path.read_text())
+        except Exception:
+            ledger = {}
+
+    hero_terms: list[str] = []
+    pressure_terms: list[str] = []
+    business_terms: list[str] = []
+    setting_terms: list[str] = []
+    closing_terms: list[str] = []
+
+    source_bits = [
+        incident.get("one_line_pitch", ""),
+        incident.get("hero", ""),
+        incident.get("conflict", ""),
+        spine.get("what_they_wanted", ""),
+        spine.get("first_big_bet", ""),
+    ]
+    hero_terms.extend(_nounish_phrases(" ".join(source_bits)))
+    pressure_terms.extend(_nounish_phrases(" ".join([
+        spine.get("fatal_misread", ""),
+        spine.get("hidden_weakness", ""),
+        spine.get("darkest_moment", ""),
+        incident.get("conflict", ""),
+    ])))
+    closing_terms.extend(_nounish_phrases(" ".join([
+        spine.get("final_image", ""),
+        spine.get("viewer_question", ""),
+    ])))
+
+    for claim in (ledger.get("claims") or [])[:120]:
+        st = claim.get("canonical_statement") or ""
+        ft = (claim.get("fact_type") or "").lower()
+        phrases = _nounish_phrases(st)
+        if ft in {"product_launch", "technology", "product", "competitor"}:
+            hero_terms.extend(phrases)
+        elif ft in {"lawsuit", "bankruptcy", "regulatory", "ipo_event", "acquisition"}:
+            business_terms.extend(phrases)
+        else:
+            setting_terms.extend(phrases[:2])
+
+    for asset in pd_assets[:30]:
+        asset_text = " ".join([
+            str(asset.get("title") or ""),
+            str(asset.get("description") or ""),
+            str(asset.get("caption") or ""),
+        ])
+        business_terms.extend(_nounish_phrases(asset_text)[:2])
+
+    iconography = character_profile.get("iconography") or ""
+    setting_terms.extend(_nounish_phrases(iconography))
+    setting_terms.extend(_nounish_phrases(script[:2500]))
+
+    fallback = _episode_fallback_props(incident, spine)
+    palette = {
+        "hero_props": _clean_prop_list(hero_terms + fallback["hero_props"], max_items=10),
+        "pressure_props": _clean_prop_list(pressure_terms + fallback["pressure_props"], max_items=10),
+        "business_props": _clean_prop_list(business_terms + fallback["business_props"], max_items=10),
+        "setting_props": _clean_prop_list(setting_terms + fallback["setting_props"], max_items=10),
+        "closing_props": _clean_prop_list(closing_terms + fallback["closing_props"], max_items=10),
+    }
+    for key, values in list(palette.items()):
+        palette[key] = [
+            v for v in values
+            if v.strip().lower() not in banned_exact
+        ]
+    return palette
+
+
+def _episode_fallback_props(incident: dict, spine: dict) -> dict[str, list[str]]:
+    text = " ".join([
+        str(incident.get("company_name") or ""),
+        str(incident.get("one_line_pitch") or ""),
+        str(spine.get("central_question") or ""),
+        str(spine.get("final_image") or ""),
+    ]).lower()
+    if any(t in text for t in ("walkman", "sony", "cassette", "music")):
+        return {
+            "hero_props": [
+                "silver portable cassette player",
+                "orange foam headphones",
+                "blank cassette tape",
+                "compact audio prototype",
+            ],
+            "pressure_props": [
+                "bulky cassette recorder",
+                "battery test tray",
+                "rejected circuit schematic",
+                "miniaturized audio components",
+            ],
+            "business_props": [
+                "Tokyo boardroom notebook",
+                "market research memo",
+                "retail launch display shelf",
+                "factory assembly tray",
+            ],
+            "setting_props": [
+                "Tokyo electronics lab bench",
+                "airplane seat with headphones",
+                "factory workbench",
+                "1970s retail counter",
+            ],
+            "closing_props": [
+                "Walkman on park bench",
+                "coiled headphone cable",
+                "museum display pedestal",
+                "worn cassette case",
+            ],
+        }
+    return {
+        "hero_props": ["signature product prototype", "founder notebook"],
+        "pressure_props": ["rejected schematic", "cost memo", "testing bench"],
+        "business_props": ["boardroom table", "market report", "factory ledger"],
+        "setting_props": ["period office desk", "workshop table", "retail shelf"],
+        "closing_props": ["museum pedestal", "quiet archive desk", "final product artifact"],
+    }
+
+
+def _refine_prop_palette_with_llm(
+    llm: LLM,
+    *,
+    cfg,
+    ws: Path,
+    episode: dict,
+    script: str,
+    candidates: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    prompt_path = cfg.prompts_dir / "visual_prop_palette.txt"
+    if not prompt_path.exists():
+        return candidates
+    incident = episode.get("incident") or {}
+    spine_path = ws / "02_script" / "script_narrative_spine.json"
+    spine_json = "{}"
+    if spine_path.exists():
+        try:
+            spine_json = json.dumps(json.loads(spine_path.read_text()), indent=2)
+        except Exception:
+            spine_json = "{}"
+    prompt = prompt_path.read_text().format(
+        company=incident.get("company_name", ""),
+        founder=incident.get("founder_or_protagonist", ""),
+        story_kind=incident.get("story_kind", ""),
+        pitch=incident.get("one_line_pitch", ""),
+        spine_json=spine_json,
+        candidate_json=json.dumps(candidates, indent=2),
+        script_excerpt=re.sub(r"\s+", " ", script[:3500]),
+    )
+    try:
+        refined = llm.complete_json(prompt, temperature=0.25, max_tokens=3000)
+    except Exception as e:
+        logger.warning("S08 visual prop palette LLM refine failed: %s", e)
+        return candidates
+    if not isinstance(refined, dict):
+        return candidates
+    out: dict[str, list[str]] = {}
+    for key in ("hero_props", "pressure_props", "business_props", "setting_props", "closing_props"):
+        merged = list(refined.get(key) or []) + list(candidates.get(key) or [])
+        out[key] = _clean_prop_list(merged, max_items=8)
+        if len(out[key]) < 3:
+            out[key] = _clean_prop_list(out[key] + list(candidates.get(key) or []), max_items=8)
+    return out
 
 
 def _visual_must_not(world: str) -> list[str]:
@@ -494,6 +777,7 @@ def _movie_shot_prompt(beat: dict, scene: dict) -> str:
 def _apply_visual_continuity_plan(
     beats: list[dict],
     *,
+    episode_prop_palette: dict | None = None,
     props_per_beat: int = 2,
     prop_cooldown_beats: int = 1,
     avoid_recently_used_props: bool = True,
@@ -520,7 +804,7 @@ def _apply_visual_continuity_plan(
                 "scene_id": f"SCENE_{scene_idx:02d}",
                 "scene_title": _scene_label(world),
                 "story_world": world,
-                "recurring_props": _recurring_props(world),
+                "recurring_props": _recurring_props(world, episode_prop_palette),
                 "must_not_show": _visual_must_not(world),
                 "beat_ids": [],
             }
@@ -541,6 +825,7 @@ def _apply_visual_continuity_plan(
         beat["scene_id"] = current["scene_id"]
         beat["scene_title"] = current["scene_title"]
         beat["story_world"] = world
+        beat["episode_prop_palette"] = episode_prop_palette or {}
         beat["recurring_props"] = current["recurring_props"]
         beat["active_recurring_props"] = active_props
         beat["avoid_recent_props"] = avoid_props
@@ -705,9 +990,40 @@ def run(episode: dict, queue: dict) -> str | None:
     # Rewrite FLUX-bound beat descriptions into scene-aware movie shots.
     # This keeps the image sequence aligned to the narration instead of
     # letting each beat become an isolated symbolic illustration.
+    deterministic_palette = _deterministic_prop_candidates(
+        ws=ws,
+        episode=episode,
+        script=script,
+        pd_assets=pd_assets,
+        character_profile=character_profile,
+    )
+    episode_prop_palette = _refine_prop_palette_with_llm(
+        llm,
+        cfg=cfg,
+        ws=ws,
+        episode=episode,
+        script=script,
+        candidates=deterministic_palette,
+    )
+    (ws / "02_script" / "visual_prop_palette.json").write_text(
+        json.dumps({
+            "deterministic_candidates": deterministic_palette,
+            "episode_prop_palette": episode_prop_palette,
+        }, indent=2)
+    )
+    logger.info(
+        "S08 visual prop palette: %d hero, %d pressure, %d business, "
+        "%d setting, %d closing props",
+        len(episode_prop_palette.get("hero_props") or []),
+        len(episode_prop_palette.get("pressure_props") or []),
+        len(episode_prop_palette.get("business_props") or []),
+        len(episode_prop_palette.get("setting_props") or []),
+        len(episode_prop_palette.get("closing_props") or []),
+    )
     vc_cfg = cfg.raw.get("visual_continuity") or {}
     scene_plan = _apply_visual_continuity_plan(
         beats,
+        episode_prop_palette=episode_prop_palette,
         props_per_beat=int(vc_cfg.get("props_per_beat", 2)),
         prop_cooldown_beats=int(vc_cfg.get("prop_cooldown_beats", 1)),
         avoid_recently_used_props=bool(
@@ -995,6 +1311,7 @@ def run(episode: dict, queue: dict) -> str | None:
         json.dumps({
             "beats": beats,
             "visual_continuity_plan": scene_plan,
+            "visual_prop_palette": episode_prop_palette,
             "total_estimated_seconds": sum(b["estimated_seconds"] for b in beats),
             "matched_pd_count": pd_matched,
             "flux_needed_count": flux_needed,

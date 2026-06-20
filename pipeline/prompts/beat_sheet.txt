@@ -52,16 +52,20 @@ generic symbolic illustrations. A good beat image should answer:
 "what must the viewer understand from this exact narration line?"
 
 Use recurring story props instead of repeating generic brand logos:
-- legal / fraud beats: court folders, bankruptcy files, investor
-  packets, case boxes, lawyer desks, evidence boards
-- product / platform beats: old smartphone, six blank video tiles,
-  empty creator workspace, dim startup office, silent monitors
-- name-confusion beats: two differently colored folders, red string,
-  blurred registry printouts, split legal/product evidence boards
+- legal / fraud beats: use the actual documents, offices, court
+  settings, contracts, invoices, ledgers, or business artifacts from
+  THIS episode.
+- product / platform beats: use the actual product, prototype,
+  machine, store shelf, factory bench, retail display, test setup,
+  or customer-use environment from THIS episode.
+- name-confusion beats: use neutral archive boxes, registry printouts,
+  boardroom tables, or other story-specific artifacts from THIS
+  episode; avoid colored-folder symbolism unless the script literally
+  needs it.
 
-Do not overuse phones, leaf logos, pitch rooms, or founder portraits.
-Use them only when the narration is actually about the product,
-Twitter strategy, creators, or the protagonist's decision.
+Do not overuse phones, colored folders, generic evidence boards,
+leaf logos, pitch rooms, or founder portraits. Use a phone only when
+the narration is actually about a phone/app product or phone behavior.
 
 CRITICAL — FLUX CANNOT RENDER LEGIBLE TEXT.
 The image generator (FLUX via CLI) reliably produces glyph-scribble
