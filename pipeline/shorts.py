@@ -1055,13 +1055,16 @@ def _load_short_logo(path: Path | None) -> Image.Image | None:
     bbox = ImageChops.difference(logo, bg).getbbox()
     if bbox:
         logo = logo.crop(bbox)
+    has_alpha = _has_transparent_pixels(logo)
     px = logo.load()
-    if px is not None:
+    if px is not None and not has_alpha:
         for y in range(logo.height):
             for x in range(logo.width):
                 r, g, b, a = px[x, y]
                 if a and r > 245 and g > 245 and b > 245:
                     px[x, y] = (r, g, b, 0)
+    if logo.getchannel("A").getbbox() is None:
+        return None
     edge_pad = int(1080 * 0.06)
     max_w = 1080 - (edge_pad * 2)
     max_h = int(1920 * 0.32)
@@ -1070,6 +1073,13 @@ def _load_short_logo(path: Path | None) -> Image.Image | None:
         (max(1, int(logo.width * scale)), max(1, int(logo.height * scale))),
         Image.LANCZOS,
     )
+
+
+def _has_transparent_pixels(img: Image.Image) -> bool:
+    if img.mode != "RGBA":
+        return False
+    alpha = img.getchannel("A")
+    return alpha.getextrema()[0] < 255
 
 
 def _draw_short_title_lines(
