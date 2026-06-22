@@ -278,7 +278,7 @@ Queue + lock + rolling window + per-episode workspace primitives.
 - `clear_blockers(queue, episode_id, stage_filter=None)` — used by `--approve`. *(Bugfix 2026-05-28)* Marks any `needs_human` stage as `done` and advances `current_stage` to the NEXT stage in `STAGE_ORDER` (instead of resetting to `pending` and re-pointing at the same stage, which caused an infinite re-run loop). Semantics: `--approve` means "this stage's artifact is OK, ship it" — not "re-run from scratch".
 - `push_rolling_window(queue, archetype, narrator, visual_style, country=...)` — append to rolling-window history (kept to last 6 per dimension). Called by S1 on every successful commit.
 - `episode_workspace(episode_id, slug)` — create + return the `episodes/EP_NNN_<slug>/` directory tree.
-- `add_used_topic / load_used_topics / topic_already_used` — permanent dedup set at `state/used_topics.json` (lowercased company names).
+- `add_used_topic / load_used_topics / topic_already_used` — permanent dedup set at `state/used_topics.json`. Names are stored as canonical topic keys: lowercase, punctuation-normalized, and stripped of trailing legal suffixes (`Inc`, `Corp`, `PLC`, `LLC`, etc.) so variants like `Vine, Inc.` and `Vine Inc.` collide correctly.
 
 ### 5.4 `constraints.py`
 The cooldown picker. `pick_assignment(rolling_window, seed, story_kind=None)` returns an `Assignment(archetype, narrator, visual_style)` such that none of the three collides with the most recent N entries (per-dimension N comes from `config.constraints.rolling_window_*`). When all options are forbidden, falls back to the *least recently used*.

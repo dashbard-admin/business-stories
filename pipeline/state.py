@@ -11,6 +11,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -183,25 +184,72 @@ def load_used_topics() -> set[str]:
     if not path.exists():
         return set()
     with path.open() as f:
-        return set(json.load(f))
+        return {_topic_key(item) for item in json.load(f) if _topic_key(item)}
 
 
 def save_used_topics(items: set[str]) -> None:
     path = _used_topics_path()
     tmp = path.with_suffix(".json.tmp")
+    canonical = {_topic_key(item) for item in items if _topic_key(item)}
     with tmp.open("w") as f:
-        json.dump(sorted(items), f, indent=2)
+        json.dump(sorted(canonical), f, indent=2)
     os.replace(tmp, path)
 
 
 def add_used_topic(name: str) -> None:
     s = load_used_topics()
-    s.add(name.strip().lower())
+    key = _topic_key(name)
+    if key:
+        s.add(key)
     save_used_topics(s)
 
 
 def topic_already_used(name: str) -> bool:
-    return name.strip().lower() in load_used_topics()
+    key = _topic_key(name)
+    return bool(key) and key in load_used_topics()
+
+
+def _topic_key(name: str) -> str:
+    """Canonical company key for historical topic dedup.
+
+    The LLM often varies punctuation and legal suffixes (`Vine, Inc.`
+    vs `Vine Inc.`). Store and compare against a normalized key so
+    those variants cannot be accepted as new topics.
+    """
+    text = str(name or "").casefold()
+    text = text.replace("&", " and ")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    parts = text.split()
+    suffixes = {
+        "ab",
+        "ag",
+        "asa",
+        "bv",
+        "co",
+        "company",
+        "corp",
+        "corporation",
+        "gmbh",
+        "inc",
+        "incorporated",
+        "kk",
+        "limited",
+        "llc",
+        "llp",
+        "ltd",
+        "nv",
+        "oyj",
+        "plc",
+        "sa",
+        "se",
+        "spa",
+        "srl",
+    }
+    while parts and parts[-1] in suffixes:
+        parts.pop()
+    if parts[:1] == ["the"]:
+        parts = parts[1:]
+    return " ".join(parts)
 
 
 # -------------------------- episode helpers --------------------------
