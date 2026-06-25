@@ -471,9 +471,96 @@ def _render_prompt_with_grok(
         return None
     grok_prompt = prompt_template.format(flux_prompt=flux_prompt)
     result = grok.regenerate_from_prompt(prompt=grok_prompt, out_path=out_path)
-    if result is None or not out_path.exists():
-        return None
-    return out_path
+    if result and out_path.exists():
+        return out_path
+    if _grok_failure_wants_sanitized_retry(grok):
+        safe_flux_prompt = _sanitize_prompt_for_grok_moderation(flux_prompt)
+        if safe_flux_prompt != flux_prompt:
+            logger.warning(
+                "S09 %s: Grok moderation rejected prompt; retrying sanitized prompt",
+                label,
+            )
+            safe_prompt = prompt_template.format(flux_prompt=safe_flux_prompt)
+            result = grok.regenerate_from_prompt(
+                prompt=safe_prompt, out_path=out_path,
+            )
+            if result and out_path.exists():
+                return out_path
+    return None
+
+
+def _grok_failure_wants_sanitized_retry(grok: Grok) -> bool:
+    body = (getattr(grok, "last_error_text", "") or "").lower()
+    status = getattr(grok, "last_status_code", None)
+    return status == 400 and (
+        "content moderation" in body
+        or "rejected" in body
+        or "invalid argument" in body
+    )
+
+
+def _sanitize_prompt_for_grok_moderation(prompt: str) -> str:
+    """Remove brand/IP and sensitive wording that xAI image moderation
+    often rejects while preserving the broad movie-shot composition."""
+    text = str(prompt or "")
+    text = re.sub(
+        r"Use only these selected continuity props in frame:.*?\.",
+        "Use only generic story-specific props in frame.",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(
+        r"Avoid recently used continuity props from the previous slide:.*?\.",
+        "Avoid unrelated props from the previous slide.",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(
+        r"Beat narration context:.*?Specific composition:",
+        "Beat narration context: a non-branded business history moment. Specific composition:",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    replacements = {
+        r"\bNintendo\b": "the company",
+        r"\bNintendo['’]s\b": "the company's",
+        r"\bDonkey Kong\b": "a hit arcade game",
+        r"\bGame Boy\b": "a handheld game device",
+        r"\bTetris\b": "a falling-block puzzle game",
+        r"\bMario\b": "a mascot character",
+        r"\bPok[eé]mon\b": "a collectible creature game",
+        r"\bFamicom\b": "a home game console",
+        r"\bNES\b": "a home game console",
+        r"\bSwitch\b": "a modern game console",
+        r"\bWii\b": "a motion-control game console",
+        r"\bHanafuda\b": "traditional illustrated playing cards",
+        r"\bTake-Two Interactive\b": "a partner company",
+        r"\bSeattle Mariners\b": "a professional sports team",
+        r"\bSilicon Graphics\b": "a technology partner",
+        r"\bYamauchi\b": "the executive",
+        r"\bHiroshi\b": "the executive",
+        r"\bgambling\b": "regulated play",
+        r"\bgamble\b": "play",
+        r"\bbetting\b": "wager-free play",
+        r"\bbet\b": "choice",
+        r"\bwater guns?\b": "water toys",
+        r"\bguns?\b": "toy devices",
+        r"\bfire\b": "sudden pressure",
+        r"\bexplodes?\b": "grows quickly",
+        r"\bban(?:s|ned|ning)?\b": "restriction",
+    }
+    for pattern, repl in replacements.items():
+        text = re.sub(pattern, repl, text, flags=re.IGNORECASE)
+
+    text = re.sub(r"\s+", " ", text).strip()
+    suffix = (
+        " Keep it generic: no real logos, no copyrighted characters, "
+        "no trademarked product likenesses, no readable text."
+    )
+    if "Keep it generic:" not in text:
+        text = f"{text}.{suffix}"
+    return text
 
 # Keyword set used to decide whether a VLM verdict implicates
 # malformed/illegible/garbled text in the rendered image. Checked

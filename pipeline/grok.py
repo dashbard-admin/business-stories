@@ -77,6 +77,8 @@ class Grok:
         self.upscale_width: int = int(gc.get("upscale_width", 1920))
         self.upscale_height: int = int(gc.get("upscale_height", 1080))
         self._mock = cfg.mock_mode
+        self.last_status_code: int | None = None
+        self.last_error_text: str = ""
 
     # ------------------------------------------------------------------
 
@@ -145,11 +147,15 @@ class Grok:
         (in case xAI ever adds it as an option).
         """
         if self._mock:
+            self.last_status_code = 200
+            self.last_error_text = ""
             result = self._mock_correct(out_path)
             if result:
                 self._upscale_if_needed(result)
             return result
         if not self.available:
+            self.last_status_code = None
+            self.last_error_text = self.unavailability_reason()
             logger.warning("grok unavailable (%s); skipping regeneration",
                            self.unavailability_reason())
             return None
@@ -172,11 +178,16 @@ class Grok:
             r = requests.post(url, headers=headers, json=payload,
                               timeout=self.timeout)
         except requests.RequestException as e:
+            self.last_status_code = None
+            self.last_error_text = str(e)
             logger.warning("grok HTTP error -> %s: %s", out_path.name, e)
             return None
 
+        self.last_status_code = r.status_code
+        self.last_error_text = r.text or ""
         if r.status_code == 200:
             if self._write_response_image(r, out_path):
+                self.last_error_text = ""
                 self._upscale_if_needed(out_path)
                 logger.info("grok regenerated -> %s "
                             "(model=%s, resolution=%s, aspect=%s)",

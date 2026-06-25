@@ -535,6 +535,8 @@ S09 stores `image_qa.prompt_hash` and `image_qa.visual_prompt_version` *(Batch M
 
 Grok backup cost control *(Batch M.3 2026-05-30)*: `config.yaml > grok.resolution` is now `1k`; `grok._upscale_if_needed()` upscales returned images below 1920×1080 locally. Images already at or above target resolution are left untouched.
 
+Grok moderation retry *(2026-06-25)*: if Grok returns HTTP 400 with content-moderation / rejected-prompt wording, S09 retries once with a sanitized generic editorial prompt that removes brand/IP names, sensitive trigger words, beat narration context, and recently-used prop lists while preserving the broad shot composition. This is especially important in `image_generation.backend: grok`, where no FLUX fallback exists.
+
 Also renders `title.png` for S12 to pick up; `credits.png` is rendered only when `production.closing_card_enabled` is true and `closing_card_seconds > 0`.
 
 ### S12 — Video Assembly (`s12_video_assembly.py`)
