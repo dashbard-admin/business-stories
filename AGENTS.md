@@ -8,9 +8,9 @@
 
 ## 1. What this project does
 
-The pipeline produces 10–15 minute comic-book-styled YouTube documentaries about real business / brand origin, rise-and-fall, scandal, and disruption stories (Theranos, WeWork, Blockbuster, Wirecard, Toys R Us, Polaroid, Kodak, etc.). It runs unattended on a Mac with local MLX inference (Qwen/Gemma/Chatterbox/Kokoro/Qwen3-VL via a gateway at `10.0.4.250:9000`) plus a SearXNG instance at `10.0.4.252:8080` for web research and a local `flux` CLI binary for image generation. xAI Grok is used as a fallback image generator when FLUX renders are flagged by the VLM.
+The pipeline produces 9–11 minute comic-book-styled YouTube documentaries about real business / brand origin, rise-and-fall, scandal, and disruption stories (Theranos, WeWork, Blockbuster, Wirecard, Toys R Us, Polaroid, Kodak, etc.). It runs unattended on a Mac with local MLX inference (Qwen/Gemma/Chatterbox/Kokoro/Qwen3-VL via a gateway at `10.0.4.250:9000`) plus a SearXNG instance at `10.0.4.252:8080` for web research, a local `flux` CLI binary for image generation, and optional xAI Grok image generation. S09 can run FLUX-only, Grok-only, or FLUX-first with VLM-triggered Grok fallback.
 
-A single cron-driven entry point — `run_orchestrator.sh` — runs one stage of one episode per invocation. Stages are numbered S1–S12 and a per-episode workspace under `episodes/EP_NNN_<slug>/` carries artifacts forward. The pipeline is serial-by-stage, restartable, lock-protected, and idempotent at the stage boundary.
+A single cron-driven entry point — `run_orchestrator.sh` — runs one stage of one episode per invocation. Stages are numbered S1–S13 and a per-episode workspace under `episodes/EP_NNN_<slug>/` carries artifacts forward. The pipeline is serial-by-stage, restartable, lock-protected, and idempotent at the stage boundary.
 
 **Critical operator constraints:**
 - API keys live in `.env` only. **Never** put a real key in `config.yaml` — GitHub secret-scanning will reject the push.
@@ -49,7 +49,7 @@ flowchart TB
         S6[S06 Script Generation]
         S7[S07 Script Critique]
         S8[S08 Beat Sheet]
-        S9[S09 FLUX Render + Grok fallback]
+        S9[S09 Image Render<br/>FLUX / Grok / fallback]
         S10[S10 TTS Render]
         S11[S11 Audio Post]
         S12[S12 Video Assembly]
@@ -172,7 +172,7 @@ business_success_stories/
 │   ├── chatterbox.py            ← Chatterbox/oMLX production TTS adapter
 │   ├── flux.py                  ← `flux` CLI subprocess adapter
 │   ├── vlm.py                   ← Qwen3-VL judge + captioner
-│   ├── grok.py                  ← xAI image regeneration (S9 fallback)
+│   ├── grok.py                  ← xAI image generation/regeneration (S9 direct or fallback)
 │   ├── browser.py               ← SearXNG search + requests fetch
 │   ├── wikimedia.py             ← Commons MediaWiki API client
 │   ├── trends.py                ← S1 demand validation (YouTube + news counts)
@@ -185,7 +185,7 @@ business_success_stories/
 │   ├── lint/
 │   │   └── forbidden_phrases.txt          ← S6/S7 phrase blocklist
 │   ├── sources/__init__.py      ← S2 SearXNG recipes (currently inline in S2)
-│   ├── stages/                  ← S01–S12 modules
+│   ├── stages/                  ← S01–S13 modules
 │   ├── style_profiles/          ← V1/V2/V3 visual styles, archetypes, narrators
 │   ├── prompts/                 ← every LLM prompt template
 │   └── tools/
@@ -341,7 +341,7 @@ Generates 6 Pillow-composited thumbnail variants (1280×720 JPG). Fixed layouts:
 Whisper.cpp wrapper for Shorts captions and long-form S12 alignment. `transcribe(wav_path)` returns timed `Segment(start_seconds, end_seconds, text)` rows. S12 uses these rows, when available, to build ASR-aligned long-form SRT/VTT captions and to place Pillow callouts near the actual spoken sentence instead of the old word-ratio estimate. The normalized long-form cache is `04_audio/voice_asr_segments.json`; it is rebuilt when `voice_full.wav` changes. If `whisper-cli`, the input audio, or the GGML model is unavailable, callers fall back gracefully to estimated timing with explicit warnings. Default model path is `models/whisper/ggml-base.en.bin`; direct tests should use the actual episode workspace found by `find episodes -path '*/04_audio/voice_full.wav'`, not a guessed slug. Configurable via `cfg.asr`, including `asr.long_form_enabled`.
 
 ### 5.4e `shorts.py` *(added Batch D 2026-05-27)*
-Builds 2 standalone Shorts via `prompts/shorts_teaser_script.txt`. S13 passes the full script + beat table to the writer LLM once per Short, so `short_01` and `short_02` get separate teaser scripts, separate Shorts-only TTS tracks, separate captions, and different image/title-card selections. `short_01` uses the default whole-story teaser angle; later ranks request alternate hooks and story tensions rather than paraphrasing rank 1. Shorts TTS defaults to Chatterbox and is normalized to `packaging.shorts_tts_wpm` (default 200 WPM) when `shorts_enforce_tts_wpm: true`; `shorts_tts_speed` is only a backend hint. Each Short reuses beat images with rapid 3-5 second cuts, fast Ken Burns zoom/pan (`shorts_motion_strength`), and slide-left xfade transitions (`shorts_transition_seconds`, with hard-cut fallback). Shorts have no music or SFX. English teaser captions are split into small readable cue chunks (`shorts_caption_max_words` / `shorts_caption_max_chars`), hard-burned as Pillow PNG overlays via ffmpeg `overlay`, and emitted as `.srt` files for YouTube subtitle upload. `packaging.shorts_title_card_enabled` prepends a 1-second title/thumbnail frame built from the first image used by that Short, the company logo, and deterministic win/lose yellow title text; subtitles/audio are shifted by the title-card duration. The Shorts title-card logo is fitted as large as possible with edge padding, trims flat logo canvas, and preserves white-on-transparent wordmarks instead of deleting the visible logo glyphs. The yellow title starts from a large phone-first font size before shrinking only enough to fit. S13 purges stale Short outputs at the start of the Shorts phase so reducing `shorts_count` does not leave old `short_03` files in the active directory. The old window-picking/cutting helpers remain in the module for fallback/comparison, but the active S13 path is teaser-first. Output: `05_video/shorts/short_NN.mp4`, `short_NN.srt`, `short_NN_title_card.png`, `teaser_script_NN.txt`, and `manifest.json`.
+Builds 2 standalone Shorts via `prompts/shorts_teaser_script.txt`. S13 passes the full script + beat table to the writer LLM once per Short, so `short_01` and `short_02` get separate teaser scripts, separate Shorts-only TTS tracks, separate captions, and different image/title-card selections. `short_01` uses the default whole-story teaser angle; later ranks request alternate hooks and story tensions rather than paraphrasing rank 1. Shorts TTS defaults to Chatterbox and is normalized to `packaging.shorts_tts_wpm` (default 180 WPM) when `shorts_enforce_tts_wpm: true`; `shorts_tts_speed` is only a backend hint. Each Short reuses beat images with rapid 3-5 second cuts, fast Ken Burns zoom/pan (`shorts_motion_strength`), and slide-left xfade transitions (`shorts_transition_seconds`, with hard-cut fallback). Shorts have no music or SFX. English teaser captions are split into small readable cue chunks (`shorts_caption_max_words` / `shorts_caption_max_chars`), hard-burned as Pillow PNG overlays via ffmpeg `overlay`, and emitted as `.srt` files for YouTube subtitle upload. `packaging.shorts_title_card_enabled` prepends a 1-second title/thumbnail frame built from the first image used by that Short, the company logo, and deterministic win/lose yellow title text; subtitles/audio are shifted by the title-card duration. The Shorts title-card logo is fitted as large as possible with edge padding, trims flat logo canvas, and preserves white-on-transparent wordmarks instead of deleting the visible logo glyphs. The yellow title starts from a large phone-first font size before shrinking only enough to fit. S13 purges stale Short outputs at the start of the Shorts phase so reducing `shorts_count` does not leave old `short_03` files in the active directory. The old window-picking/cutting helpers remain in the module for fallback/comparison, but the active S13 path is teaser-first. Output: `05_video/shorts/short_NN.mp4`, `short_NN.srt`, `short_NN_title_card.png`, `teaser_script_NN.txt`, and `manifest.json`.
 
 ### 5.4g `youtube_analytics.py` *(added Batch E 2026-05-27)*
 YouTube Data + Analytics API client. OAuth installed-app flow via `authorize_oauth()` (one-time browser dance, refresh token cached at `state/youtube_oauth_token.json`). Scopes now include Analytics readback plus YouTube upload/playlist/caption/thumbnail access because `youtube_upload.py` shares the same token; re-run `--authorize-youtube` after pulling this change if the cached token is older/read-only. Caption upload requires `youtube.force-ssl`; video upload alone is not enough. `YouTubeAnalytics().fetch_episode(video_id)` returns an `EpisodePerformance` dataclass with views, likes, CTR, AVD, retention curve, peak drop position, top traffic sources, impressions. Mock mode returns a canned response so the feedback loop is exercisable without real OAuth.
@@ -578,7 +578,7 @@ Operator workflow:
 2. Build a package: `--build-youtube-package EP_NNN`.
 3. Review `06_metadata/youtube_upload_package/PACKAGE_SUMMARY.md` and metadata JSON files.
 4. Upload only when approved: `--upload-youtube-package EP_NNN --approve-youtube-upload`. Optional schedule: `--youtube-publish-at 2026-06-02T18:00:00Z`.
-5. If captions fail after the videos upload, retry captions only with `--backfill-youtube-captions EP_NNN --approve-youtube-upload`; narrow retries with `--youtube-caption-target short_03` and repeated `--youtube-caption-language fr` flags when quota is tight.
+5. If captions fail after the videos upload, retry captions only with `--backfill-youtube-captions EP_NNN --approve-youtube-upload`; narrow retries with `--youtube-caption-target short_02` and repeated `--youtube-caption-language fr` flags when quota is tight.
 5. Weekly (or whenever): `--analyse-performance`.
 
 ### S13 — Packaging *(added Batch D 2026-05-27)*  (`s13_packaging.py`)
@@ -731,7 +731,7 @@ tail -f logs/orch.$(date -u +%Y-%m-%d).log
 ```bash
 # Flip models.mock_mode: true in config.yaml, then:
 python -m pipeline.hermes_orchestrator --enqueue 1
-for _ in {1..12}; do python -m pipeline.hermes_orchestrator -v; done
+for _ in {1..13}; do python -m pipeline.hermes_orchestrator -v; done
 # Inspect episodes/EP_001_*/ for placeholder artifacts.
 ```
 
@@ -781,7 +781,7 @@ for _ in {1..12}; do python -m pipeline.hermes_orchestrator -v; done
 ```
 
 ### `used_topics.json`
-Flat array of lowercased company names ever queued. Editing this by hand is supported (e.g. to re-cover a topic). Manual injection re-checks this set at S1 run time.
+Flat array of canonical topic keys ever queued. Keys are lowercase, punctuation-normalized, and stripped of trailing legal suffixes such as `Inc`, `Corp`, `PLC`, and `LLC`, so `Vine, Inc.` and `Vine Inc.` both become `vine`. Editing this by hand is supported (e.g. to re-cover a topic). Manual injection re-checks this set at S1 run time.
 
 ### `locks/orchestrator.lock`
 File contains a unix timestamp. `fcntl.LOCK_EX | LOCK_NB`. Stale > 6h is reclaimed automatically.
@@ -854,7 +854,7 @@ If you find this file out of sync with the code, the file is wrong — fix it. D
 ## 15. Glossary
 
 - **A/N/V** — Archetype / Narrator / Visual style triple. Picked per episode by the cooldown engine (`constraints.pick_assignment`).
-- **Beat** — One unit of the beat sheet. ~50–70 per 10–15 min episode. Each beat has a script slice, a visual intent, a visual prompt, and a rendered image.
+- **Beat** — One unit of the beat sheet. ~40–55 per 9–11 min episode. Each beat has a script slice, a visual intent, a visual prompt, and a rendered image.
 - **Cold open** — The first 30 seconds of the script (Act 0). Must hook the viewer before YouTube's drop-off curve hits.
 - **PD asset** — Public-domain or permissively-licensed image. Tier 1 visual source (currently disabled in this project).
 - **Rolling window** — The last 6 picks per dimension (A, N, V, country). Drives the cooldown engine and the non-US ratio enforcement.

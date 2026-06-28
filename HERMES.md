@@ -157,7 +157,7 @@ YouTube and performance:
 | `--backfill-youtube-captions EP_ID --approve-youtube-upload` | Upload packaged captions to existing uploaded video IDs without re-uploading videos. | `--backfill-youtube-captions EP_004 --approve-youtube-upload` |
 | `--youtube-privacy private|unlisted|public` | Optional upload privacy override. | `--youtube-privacy unlisted` |
 | `--youtube-publish-at TIMESTAMP` | Optional scheduled publish time, RFC3339. Forces private-until-publish behavior. | `--youtube-publish-at 2026-06-05T18:00:00Z` |
-| `--youtube-caption-target all|long|shorts|short_NN` | Caption backfill target. | `--youtube-caption-target short_03` |
+| `--youtube-caption-target all|long|shorts|short_NN` | Caption backfill target. | `--youtube-caption-target short_02` |
 | `--youtube-caption-language LANG` | Caption backfill language. Repeat for multiple languages. Defaults to all packaged tracks. | `--youtube-caption-language es --youtube-caption-language fr` |
 
 YouTube package outputs:
@@ -598,7 +598,7 @@ Main artifacts:
 
 ```text
 episodes/EP_NNN_slug/03_assets/flux/BEAT_NN.png
-episodes/EP_NNN_slug/03_assets/grok/BEAT_NN.png                # when Grok fallback was used
+episodes/EP_NNN_slug/03_assets/grok/*                          # Grok archives/corrections/forced renders
 episodes/EP_NNN_slug/03_assets/quarantine/                     # archived old renders
 episodes/EP_NNN_slug/03_assets/asset_manifest.json
 episodes/EP_NNN_slug/03_assets/visual_brand_safety_flags.json
@@ -613,10 +613,11 @@ What S09 does:
    - `image_generation.backend: both`: FLUX first, Grok fallback when VLM flags issues.
    - `image_generation.backend: flux`: FLUX only.
    - `image_generation.backend: grok`: Grok only.
-3. Uses VLM image QA.
-4. Promotes chosen images to `03_assets/flux/`.
-5. Runs visual brand-safety review.
-6. Writes `visual_brand_safety_flags.json`.
+3. If Grok returns a moderation-style HTTP 400, retries once with a sanitized generic editorial prompt.
+4. Uses VLM image QA.
+5. Promotes chosen images to `03_assets/flux/`.
+6. Runs visual brand-safety review.
+7. Writes `visual_brand_safety_flags.json`.
 
 `visual_brand_safety_flags.json` shape:
 
@@ -1034,6 +1035,8 @@ Representative stage logs:
 2026-06-03 08:16:44,332 hermes.stage.s09 WARNING S09 BEAT_02: all 1 attempts rejected; keeping best (seed=221992045)
 2026-06-03 08:16:44,991 hermes.stage.s09 INFO S09 BEAT_02: VLM flagged issues - routing to Grok. triggers=text,anatomy
 2026-06-03 08:16:58,345 hermes.stage.s09 INFO S09 BEAT_02: Grok corrected (triggers=text,anatomy)
+2026-06-25 06:34:23,883 hermes.grok WARNING grok 400 for BEAT_03_a0.png; body: {"error":"Generated image rejected by content moderation."}
+2026-06-25 06:34:23,884 hermes.stage.s09 WARNING S09 BEAT_03: Grok moderation rejected prompt; retrying sanitized prompt
 ...
 2026-06-03 11:52:00,140 hermes.stage.s09 INFO S09 complete: 68 rendered (8 kept-from-rejected), 0 failed
 2026-06-03 11:52:12,993 hermes.stage.s09 INFO S09 visual-safety [low]: BEAT_22 - Minor generic interface visible in background.
@@ -1294,7 +1297,7 @@ Representative output:
 ```text
 youtube package: /Users/cantemir/Projects/business_success_stories/episodes/EP_004_vine-inc/06_metadata/youtube_upload_package
 manifest: /Users/cantemir/Projects/business_success_stories/episodes/EP_004_vine-inc/06_metadata/youtube_upload_package/package_manifest.json
-contents: long_form=True, shorts=3, subtitle_tracks=44
+contents: long_form=True, shorts=2, subtitle_tracks=33
 ```
 
 Success signal: package path, manifest path, and nonzero expected content counts.
@@ -1334,10 +1337,9 @@ Representative output:
 
 ```text
 uploaded long-form: https://www.youtube.com/watch?v=-_hTSZIDUv8
-uploaded shorts: 3
+uploaded shorts: 2
 - https://www.youtube.com/watch?v=abcShort001
 - https://www.youtube.com/watch?v=abcShort002
-- https://www.youtube.com/watch?v=abcShort003
 ```
 
 Quota/scopes warning:
